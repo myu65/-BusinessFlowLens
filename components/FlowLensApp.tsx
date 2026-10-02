@@ -349,6 +349,12 @@ function Workspace() {
   async function mapInterview() {
     if (!selectedWorkflow) return;
 
+    const interview = transcripts[selectedWorkflow.id]?.trim();
+    if (!interview) {
+      setError("ヒアリング内容を入力してから構造化してください。");
+      return;
+    }
+
     setMapping(true);
     setError(null);
 
@@ -359,7 +365,7 @@ function Workspace() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          interview: transcripts[selectedWorkflow.id] ?? "",
+          interview,
           workflow: selectedWorkflow,
           graph,
         }),
@@ -404,7 +410,7 @@ function Workspace() {
           <button
             className="primary-button"
             onClick={mapInterview}
-            disabled={mapping}
+            disabled={mapping || !(transcripts[selectedWorkflowId] ?? "").trim()}
           >
             {mapping ? "Mapping..." : "Map interview"}
           </button>
@@ -519,7 +525,7 @@ function Workspace() {
           <button
             className="map-button"
             onClick={mapInterview}
-            disabled={mapping}
+            disabled={mapping || !(transcripts[selectedWorkflowId] ?? "").trim()}
           >
             <span>↗</span>
             {mapping ? "構造化中..." : "構造に変換"}
