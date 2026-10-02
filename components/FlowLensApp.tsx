@@ -201,9 +201,13 @@ function workflowFlow(
   graph: LensGraph,
   workflowId: string,
   ownership: OwnershipFilter,
+  executionMode: "all" | ProcessExecutionMode = "all",
 ): { nodes: WorkflowStepNode[]; edges: Edge[] } {
-  const processes = getWorkflowProcesses(graph, workflowId).filter((process) =>
-    processMatchesOwnership(process, ownership),
+  const processes = getWorkflowProcesses(graph, workflowId).filter(
+    (process) =>
+      processMatchesOwnership(process, ownership) &&
+      (executionMode === "all" ||
+        (process.executionMode ?? "unknown") === executionMode),
   );
   const processIds = new Set(processes.map((process) => process.id));
 
@@ -420,6 +424,16 @@ function RelationshipPanel({
 
       {node.kind === "process" ? (
         <div className="relationship-owner">
+          <span>実行方式</span>
+          <strong>
+            {node.executionMode === "automatic"
+              ? "System内で自動"
+              : node.executionMode === "mixed"
+                ? "人＋自動"
+                : node.executionMode === "manual"
+                  ? "手作業"
+                  : "未確認"}
+          </strong>
           <span>部署</span>
           <strong>{node.department ?? "未確認"}</strong>
           <span>担当者</span>
@@ -2284,15 +2298,27 @@ function WorkflowView({
     department: "",
     responsiblePerson: "",
   });
+  const [executionMode, setExecutionMode] = useState<
+    "all" | ProcessExecutionMode
+  >("all");
 
   const workflow = graph.workflows.find((item) => item.id === workflowId);
   const filter = ownershipFilter(ownership);
-  const processes = getWorkflowProcesses(graph, workflowId).filter((process) =>
-    processMatchesOwnership(process, filter),
+  const processes = getWorkflowProcesses(graph, workflowId).filter(
+    (process) =>
+      processMatchesOwnership(process, filter) &&
+      (executionMode === "all" ||
+        (process.executionMode ?? "unknown") === executionMode),
   );
   const flow = useMemo(
-    () => workflowFlow(graph, workflowId, filter),
-    [graph, workflowId, ownership.department, ownership.responsiblePerson],
+    () => workflowFlow(graph, workflowId, filter, executionMode),
+    [
+      graph,
+      workflowId,
+      ownership.department,
+      ownership.responsiblePerson,
+      executionMode,
+    ],
   );
 
   const selectedNode =
@@ -2326,14 +2352,34 @@ function WorkflowView({
               setSelectedNodeId(null);
             }}
           />
-          <OwnershipFilters
-            graph={graph}
-            value={ownership}
-            onChange={(value) => {
-              setOwnership(value);
-              setSelectedNodeId(null);
-            }}
-          />
+          <div className="workflow-filter-row">
+            <OwnershipFilters
+              graph={graph}
+              value={ownership}
+              onChange={(value) => {
+                setOwnership(value);
+                setSelectedNodeId(null);
+              }}
+            />
+            <label className="execution-filter">
+              <span>実行方式</span>
+              <select
+                value={executionMode}
+                onChange={(event) => {
+                  setExecutionMode(
+                    event.target.value as "all" | ProcessExecutionMode,
+                  );
+                  setSelectedNodeId(null);
+                }}
+              >
+                <option value="all">すべて</option>
+                <option value="manual">手作業</option>
+                <option value="automatic">System内で自動</option>
+                <option value="mixed">人＋自動</option>
+                <option value="unknown">未確認</option>
+              </select>
+            </label>
+          </div>
         </div>
       </header>
 
@@ -2353,6 +2399,18 @@ function WorkflowView({
         <div>
           <span>データ</span>
           <strong>{dataIds.size}</strong>
+        </div>
+        <div>
+          <span>自動ステップ</span>
+          <strong>
+            {
+              processes.filter(
+                (process) =>
+                  process.executionMode === "automatic" ||
+                  process.executionMode === "mixed",
+              ).length
+            }
+          </strong>
         </div>
       </div>
 
