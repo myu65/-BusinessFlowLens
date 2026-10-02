@@ -28,6 +28,7 @@ import {
   getWorkflowProcesses,
   processMatchesOwnership,
   type ExtractionReview,
+  type FollowUpAnswer,
   type LensGraph,
   type LensNode,
   type NodeKind,
@@ -50,6 +51,7 @@ type PendingExtraction = {
   review: ExtractionReview;
   provider: string;
   answers: Record<string, string>;
+  answerHistory: FollowUpAnswer[];
 };
 
 type RevisionSummary = {
@@ -72,6 +74,7 @@ type RevisionDetail = RevisionSummary & {
   effectiveFrom?: string;
   effectiveTo?: string;
   sourceNotes: string;
+  followUpAnswers: FollowUpAnswer[];
   review: ExtractionReview;
 };
 
@@ -1132,6 +1135,7 @@ function InterviewsView({
           review: buildWorkflowReviewFromGraph(graph, workflow.id),
           provider: "current-state",
           answers: {},
+          answerHistory: [],
         }
       : null;
 
@@ -1332,14 +1336,19 @@ function InterviewsView({
     const interview = transcripts[workflow.id]?.trim();
     if (!interview) return;
 
-    const followUpAnswers = pending.review.questions
+    const newAnswers = pending.review.questions
       .map((question) => ({
         question: question.question,
         answer: pending.answers[question.question] ?? "",
       }))
       .filter((item) => item.answer.trim().length > 0);
 
-    if (followUpAnswers.length === 0) return;
+    if (newAnswers.length === 0) return;
+
+    const followUpAnswers = [
+      ...pending.answerHistory,
+      ...newAnswers,
+    ];
 
     setRefining(true);
     setError(null);
@@ -1367,6 +1376,7 @@ function InterviewsView({
         review: payload.review,
         provider: payload.provider ?? pending.provider,
         answers: {},
+        answerHistory: followUpAnswers,
       });
     } catch (cause) {
       setError(
@@ -1397,6 +1407,15 @@ function InterviewsView({
           graph,
           transcripts,
           sourceNotes: transcripts[workflow.id] ?? "",
+          followUpAnswers: [
+            ...pending.answerHistory,
+            ...pending.review.questions
+              .map((question) => ({
+                question: question.question,
+                answer: pending.answers[question.question] ?? "",
+              }))
+              .filter((item) => item.answer.trim().length > 0),
+          ],
         }),
       });
 
