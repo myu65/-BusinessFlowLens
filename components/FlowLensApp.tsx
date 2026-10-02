@@ -496,56 +496,68 @@ function WorkflowPicker({
 }
 
 function ReviewPanel({
-  pending,
+  model,
+  dirty,
   onChange,
   onApply,
   onDiscard,
   onRefine,
   applying,
   refining,
+  revisions,
+  historyDetail,
+  historyLoading,
+  onOpenRevision,
+  onCloseHistory,
 }: {
-  pending: PendingExtraction | null;
+  model: PendingExtraction | null;
+  dirty: boolean;
   onChange: (pending: PendingExtraction) => void;
   onApply: () => void;
   onDiscard: () => void;
   onRefine: () => void;
   applying: boolean;
   refining: boolean;
+  revisions: RevisionSummary[];
+  historyDetail: RevisionDetail | null;
+  historyLoading: boolean;
+  onOpenRevision: (id: number) => void;
+  onCloseHistory: () => void;
 }) {
-  if (!pending) {
+  if (!model) {
     return (
       <aside className="review-panel review-panel--empty">
-        <div className="eyebrow">AI DRAFT</div>
-        <h2>まず下書きを作る</h2>
+        <div className="eyebrow">BUSINESS MODEL</div>
+        <h2>業務構造はまだありません</h2>
         <p>
-          AIは直接グラフを書き換えません。ヒアリングから業務ステップ、
-          System/Data、分岐、未確認事項を根拠付きで抽出します。
+          左の業務メモからAIで構造化すると、ここにステップ・担当・
+          System/Data・データフローが表示されます。
         </p>
         <div className="review-principles">
-          <span>01 事実を先に抽出</span>
-          <span>02 人が下書きを修正</span>
-          <span>03 修正後に共有資産を照合</span>
+          <span>01 業務メモから構造化</span>
+          <span>02 ここで直接修正</span>
+          <span>03 保存時に共有資産を照合</span>
         </div>
       </aside>
     );
   }
 
-  const { review } = pending;
+  const { review } = model;
 
   const changeReview = (nextReview: ExtractionReview) =>
-    onChange({ ...pending, review: nextReview });
+    onChange({ ...model, review: nextReview });
 
   const changeAnswer = (question: string, answer: string) =>
     onChange({
-      ...pending,
+      ...model,
       answers: {
-        ...pending.answers,
+        ...model.answers,
         [question]: answer,
       },
     });
 
   const hasFollowUpAnswers = review.questions.some(
-    (question) => (pending.answers[question.question] ?? "").trim().length > 0,
+    (question) => (model.answers[question.question] ?? "").trim().length > 0,
   );
 
   const updateStep = (
@@ -571,6 +583,12 @@ function ReviewPanel({
           transition.fromStepKey !== stepKey &&
           transition.toStepKey !== stepKey,
       ),
+      dataFlows: review.dataFlows.map((flow) => ({
+        ...flow,
+        relatedStepKeys: flow.relatedStepKeys.filter(
+          (key) => key !== stepKey,
+        ),
+      })),
     });
   };
 
@@ -615,11 +633,71 @@ function ReviewPanel({
     <aside className="review-panel">
       <div className="review-header">
         <div>
-          <div className="eyebrow">AI DRAFT / EDIT BEFORE APPLY</div>
-          <h2>抽出結果を直してから反映</h2>
+          <div className="eyebrow">
+            {dirty ? "WORKING BUSINESS MODEL" : "CURRENT BUSINESS MODEL"}
+          </div>
+          <h2>{dirty ? "変更中の業務構造" : "現在の業務構造"}</h2>
         </div>
-        <span className="provider-badge">{pending.provider}</span>
+        <span className="provider-badge">
+          {dirty ? model.provider : "保存済み"}
+        </span>
       </div>
+
+      {historyDetail ? (
+        <section className="revision-preview">
+          <div className="revision-preview__header">
+            <div>
+              <div className="eyebrow">HISTORY SNAPSHOT</div>
+              <strong>
+                v{historyDetail.revisionNumber} ·{" "}
+                {historyDetail.workflowName}
+              </strong>
+              <small>
+                {new Date(historyDetail.createdAt).toLocaleString("ja-JP")} ·{" "}
+                {historyDetail.updatedBy}
+              </small>
+            </div>
+            <button className="close-button" onClick={onCloseHistory}>
+              ×
+            </button>
+          </div>
+          <p>{historyDetail.summary}</p>
+          <div className="revision-preview__meta">
+            <span>
+              {historyDetail.scenarioLabel ??
+                historyDetail.scenario ??
+                "current"}
+            </span>
+            <span>
+              {historyDetail.effectiveFrom ?? "開始未設定"} →{" "}
+              {historyDetail.effectiveTo ?? "終了未設定"}
+            </span>
+          </div>
+          <details>
+            <summary>当時のヒアリング / 業務メモ</summary>
+            <pre>{historyDetail.sourceNotes || "—"}</pre>
+          </details>
+          <details>
+            <summary>
+              当時の構造 ({historyDetail.review.steps.length} steps)
+            </summary>
+            <div className="revision-step-list">
+              {historyDetail.review.steps.map((step) => (
+                <article key={step.stepKey}>
+                  <b>{String(step.order).padStart(2, "0")}</b>
+                  <span>
+                    <strong>{step.name}</strong>
+                    <small>
+                      {step.department ?? "部署未確認"} ·{" "}
+                      {step.responsiblePerson ?? step.actor ?? "担当未確認"}
+                    </small>
+                  </span>
+                </article>
+              ))}
+            </div>
+          </details>
+        </section>
+      ) : null}
 
       <div className="review-summary review-summary--editable">
         <label>
@@ -663,13 +741,16 @@ function ReviewPanel({
 
       <div className="review-scroll">
         <div className="review-section-title">
-          <span>抽出ステップ — 誤りはここで直す</span>
+          <span>業務ステップ</span>
           <b>{review.steps.length}</b>
         </div>
 
         <div className="review-steps">
           {review.steps.map((step) => (
-            <article key={step.stepKey} className="review-step review-step--editable">
+            <article
+              key={step.stepKey}
+              className="review-step review-step--editable"
+            >
               <div className="review-step__top">
                 <span>{String(step.order).padStart(2, "0")}</span>
                 <input
@@ -739,7 +820,7 @@ function ReviewPanel({
                     >
                       {system.name} · {system.interaction}
                       <button
-                        title="誤抽出なら除外"
+                        title="除外"
                         onClick={() => removeSystem(step.stepKey, index)}
                       >
                         ×
@@ -753,7 +834,7 @@ function ReviewPanel({
                     >
                       {data.name} · {data.operation}
                       <button
-                        title="誤抽出なら除外"
+                        title="除外"
                         onClick={() => removeData(step.stepKey, index)}
                       >
                         ×
@@ -773,7 +854,9 @@ function ReviewPanel({
               <b>{review.dataFlows.length}</b>
             </div>
             {review.dataFlows.map((flow, index) => (
-              <article key={`${flow.sourceSystem}-${flow.targetSystem}-${index}`}>
+              <article
+                key={`${flow.sourceSystem}-${flow.targetSystem}-${index}`}
+              >
                 <div className="review-dataflow-title">
                   <input
                     value={flow.sourceSystem}
@@ -818,23 +901,31 @@ function ReviewPanel({
                     value={flow.transferType}
                     onChange={(event) =>
                       updateDataFlow(index, {
-                        transferType: event.target.value as typeof flow.transferType,
+                        transferType:
+                          event.target.value as typeof flow.transferType,
                       })
                     }
                   >
-                    {["api", "file", "database", "message", "email", "manual", "unknown"].map(
-                      (item) => (
-                        <option key={item} value={item}>
-                          {item}
-                        </option>
-                      ),
-                    )}
+                    {[
+                      "api",
+                      "file",
+                      "database",
+                      "message",
+                      "email",
+                      "manual",
+                      "unknown",
+                    ].map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
                   </select>
                   <select
                     value={flow.direction}
                     onChange={(event) =>
                       updateDataFlow(index, {
-                        direction: event.target.value as typeof flow.direction,
+                        direction:
+                          event.target.value as typeof flow.direction,
                       })
                     }
                   >
@@ -850,7 +941,8 @@ function ReviewPanel({
                     value={flow.automation}
                     onChange={(event) =>
                       updateDataFlow(index, {
-                        automation: event.target.value as typeof flow.automation,
+                        automation:
+                          event.target.value as typeof flow.automation,
                       })
                     }
                   >
@@ -881,7 +973,7 @@ function ReviewPanel({
         {review.warnings.length > 0 ? (
           <div className="review-warning">
             <div className="review-section-title">
-              <span>AIが迷っているところ</span>
+              <span>要確認</span>
               <b>{review.warnings.length}</b>
             </div>
             {review.warnings.map((warning) => (
@@ -893,7 +985,7 @@ function ReviewPanel({
         {review.questions.length > 0 ? (
           <div className="review-questions">
             <div className="review-section-title">
-              <span>次に聞くと精度が上がること</span>
+              <span>追加で確認したいこと</span>
               <b>{review.questions.length}</b>
             </div>
             {review.questions.map((question, index) => (
@@ -903,7 +995,7 @@ function ReviewPanel({
                   <strong>{question.question}</strong>
                   <small>{question.reason}</small>
                   <textarea
-                    value={pending.answers[question.question] ?? ""}
+                    value={model.answers[question.question] ?? ""}
                     placeholder="ここに回答・補足を入力"
                     onChange={(event) =>
                       changeAnswer(question.question, event.target.value)
@@ -914,7 +1006,7 @@ function ReviewPanel({
             ))}
             <div className="followup-refine">
               <p>
-                回答は元のヒアリングへの追加情報としてAIに戻し、現在の手修正もできるだけ保持して下書きを更新します。
+                回答を追加情報としてAIへ戻し、現在の業務モデルを再整理します。
               </p>
               <button
                 className="button-secondary"
@@ -926,22 +1018,59 @@ function ReviewPanel({
             </div>
           </div>
         ) : null}
+
+        <div className="revision-history">
+          <div className="review-section-title">
+            <span>更新履歴</span>
+            <b>{revisions.length}</b>
+          </div>
+          {historyLoading ? (
+            <p className="revision-history__empty">履歴を読み込み中…</p>
+          ) : revisions.length > 0 ? (
+            <div className="revision-history__list">
+              {revisions.map((revision) => (
+                <button
+                  key={revision.id}
+                  onClick={() => onOpenRevision(revision.id)}
+                >
+                  <b>v{revision.revisionNumber}</b>
+                  <span>
+                    <strong>{revision.summary || revision.workflowName}</strong>
+                    <small>
+                      {new Date(revision.createdAt).toLocaleString("ja-JP")} ·{" "}
+                      {revision.updatedBy}
+                    </small>
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="revision-history__empty">
+              まだ保存済みの更新履歴はありません。
+            </p>
+          )}
+        </div>
       </div>
 
       <div className="review-actions">
         <button
           className="button-secondary"
           onClick={onDiscard}
-          disabled={applying || refining}
+          disabled={!dirty || applying || refining}
         >
-          破棄
+          変更を破棄
         </button>
         <button
           className="button-primary"
           onClick={onApply}
-          disabled={applying || refining || review.steps.length === 0}
+          disabled={
+            !dirty ||
+            applying ||
+            refining ||
+            review.steps.length === 0
+          }
         >
-          {applying ? "共有資産を照合中…" : "修正内容を反映"}
+          {applying ? "保存中…" : "業務構造を保存"}
         </button>
       </div>
     </aside>
