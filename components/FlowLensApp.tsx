@@ -542,6 +542,7 @@ function InterviewsView({
   onGraphApply: (graph: LensGraph) => void;
 }) {
   const [mapping, setMapping] = useState(false);
+  const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
@@ -599,7 +600,6 @@ function InterviewsView({
         body: JSON.stringify({
           interview,
           workflow,
-          graph,
         }),
       });
 
@@ -610,7 +610,6 @@ function InterviewsView({
 
       setProvider(payload.provider ?? "unknown");
       setPending({
-        previewGraph: payload.previewGraph,
         review: payload.review,
         provider: payload.provider ?? "unknown",
       });
@@ -620,6 +619,40 @@ function InterviewsView({
       );
     } finally {
       setMapping(false);
+    }
+  }
+
+  async function applyDraft() {
+    if (!workflow || !pending) return;
+
+    setApplying(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          review: pending.review,
+          workflow,
+          graph,
+        }),
+      });
+
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "反映に失敗しました。");
+      }
+
+      onGraphApply(payload.graph);
+      setProvider(payload.provider ?? pending.provider);
+      setPending(null);
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "反映に失敗しました。",
+      );
+    } finally {
+      setApplying(false);
     }
   }
 
@@ -745,12 +778,10 @@ function InterviewsView({
 
       <ReviewPanel
         pending={pending}
+        onChange={setPending}
         onDiscard={() => setPending(null)}
-        onApply={() => {
-          if (!pending) return;
-          onGraphApply(pending.previewGraph);
-          setPending(null);
-        }}
+        onApply={applyDraft}
+        applying={applying}
       />
     </section>
   );
