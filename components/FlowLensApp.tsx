@@ -786,6 +786,22 @@ function ReviewPanel({
                     )}
                   </select>
                   <select
+                    value={flow.direction}
+                    onChange={(event) =>
+                      updateDataFlow(index, {
+                        direction: event.target.value as typeof flow.direction,
+                      })
+                    }
+                  >
+                    {["push", "pull", "bidirectional", "unknown"].map(
+                      (item) => (
+                        <option key={item} value={item}>
+                          {item}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                  <select
                     value={flow.automation}
                     onChange={(event) =>
                       updateDataFlow(index, {
