@@ -866,14 +866,22 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
     outcome: raw.outcome ?? null,
     steps,
     transitions,
-    dataFlows: (raw.dataFlows ?? []).filter(
-      (flow) =>
-        Boolean(
-          flow.sourceSystem &&
-            flow.targetSystem &&
-            flow.evidence,
-        ),
-    ),
+    dataFlows: (raw.dataFlows ?? [])
+      .filter(
+        (flow) =>
+          Boolean(
+            flow.sourceSystem &&
+              flow.targetSystem &&
+              flow.sourceSystem !== flow.targetSystem &&
+              flow.evidence,
+          ),
+      )
+      .map((flow) => ({
+        ...flow,
+        relatedStepKeys: (flow.relatedStepKeys ?? [])
+          .map((key) => normalizeName(key))
+          .filter((key) => validKeys.has(key)),
+      })),
     questions: (raw.questions ?? []).filter(
       (item): item is ExtractionQuestion =>
         Boolean(item?.question && item?.reason && item?.target),
