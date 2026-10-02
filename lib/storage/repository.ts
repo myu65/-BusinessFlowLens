@@ -24,6 +24,12 @@ export type WorkflowRevisionSummary = {
 
 export type WorkflowRevision = WorkflowRevisionSummary & {
   workflowDescription?: string;
+  familyId?: string;
+  scenario?: string;
+  scenarioLabel?: string;
+  basedOnWorkflowId?: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
   sourceNotes: string;
   review: ExtractionReview;
 };
@@ -33,6 +39,12 @@ export type NewWorkflowRevision = {
   workflowId: string;
   workflowName: string;
   workflowDescription?: string;
+  familyId?: string;
+  scenario?: string;
+  scenarioLabel?: string;
+  basedOnWorkflowId?: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
   sourceNotes: string;
   review: ExtractionReview;
   updatedBy: string;
