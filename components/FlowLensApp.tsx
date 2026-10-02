@@ -2049,6 +2049,8 @@ function Workspace() {
         />
       ) : null}
 
+      {section === "dataflow" ? <DataFlowView graph={graph} /> : null}
+
       {section === "assets" ? <AssetsView graph={graph} /> : null}
       {section === "overview" ? <OverviewView graph={graph} /> : null}
     </main>
