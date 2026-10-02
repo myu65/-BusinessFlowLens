@@ -73,7 +73,13 @@ export class SqliteBusinessFlowRepository
       "  id TEXT NOT NULL,",
       "  name TEXT NOT NULL,",
       "  description TEXT,",
-      "  source_notes TEXT NOT NULL DEFAULT '',",
+      "  family_id TEXT,",
+      "  scenario TEXT,",
+      "  scenario_label TEXT,",
+      "  based_on_workflow_id TEXT,",
+      "  effective_from TEXT,",
+      "  effective_to TEXT,",
+      "  source_notes TEXT NOT NULL DEFAULT '',"
       "  PRIMARY KEY (project_id, id),",
       "  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE",
       ");",
@@ -131,7 +137,13 @@ export class SqliteBusinessFlowRepository
       "  revision_number INTEGER NOT NULL,",
       "  workflow_name TEXT NOT NULL,",
       "  workflow_description TEXT,",
-      "  source_notes TEXT NOT NULL,",
+      "  family_id TEXT,",
+      "  scenario TEXT,",
+      "  scenario_label TEXT,",
+      "  based_on_workflow_id TEXT,",
+      "  effective_from TEXT,",
+      "  effective_to TEXT,",
+      "  source_notes TEXT NOT NULL,"
       "  summary TEXT NOT NULL,",
       "  review_json TEXT NOT NULL,",
       "  updated_by TEXT NOT NULL,",
@@ -148,6 +160,41 @@ export class SqliteBusinessFlowRepository
       "CREATE INDEX IF NOT EXISTS idx_data_flows_project_target ON data_flows(project_id, target_system_id);",
       "CREATE INDEX IF NOT EXISTS idx_workflow_revisions_lookup ON workflow_revisions(project_id, workflow_id, revision_number DESC);",
     ].join("\n"));
+
+    this.ensureColumn("workflows", "family_id", "TEXT");
+    this.ensureColumn("workflows", "scenario", "TEXT");
+    this.ensureColumn("workflows", "scenario_label", "TEXT");
+    this.ensureColumn("workflows", "based_on_workflow_id", "TEXT");
+    this.ensureColumn("workflows", "effective_from", "TEXT");
+    this.ensureColumn("workflows", "effective_to", "TEXT");
+
+    this.ensureColumn("workflow_revisions", "family_id", "TEXT");
+    this.ensureColumn("workflow_revisions", "scenario", "TEXT");
+    this.ensureColumn("workflow_revisions", "scenario_label", "TEXT");
+    this.ensureColumn(
+      "workflow_revisions",
+      "based_on_workflow_id",
+      "TEXT",
+    );
+    this.ensureColumn("workflow_revisions", "effective_from", "TEXT");
+    this.ensureColumn("workflow_revisions", "effective_to", "TEXT");
+  }
+
+  private ensureColumn(
+    table: string,
+    column: string,
+    definition: string,
+  ) {
+    const rows = this.db
+      .prepare(`PRAGMA table_info(${table})`)
+      .all() as SqliteRow[];
+    const exists = rows.some((row) => String(row.name) === column);
+
+    if (!exists) {
+      this.db.exec(
+        `ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`,
+      );
+    }
   }
 
   async loadProject(projectId: string): Promise<ProjectSnapshot | null> {
@@ -159,7 +206,7 @@ export class SqliteBusinessFlowRepository
 
     const workflowRows = this.db
       .prepare(
-        "SELECT id, name, description, source_notes FROM workflows WHERE project_id = ? ORDER BY rowid",
+        "SELECT * FROM workflows WHERE project_id = ? ORDER BY rowid",
       )
       .all(projectId) as SqliteRow[];
 
@@ -180,6 +227,28 @@ export class SqliteBusinessFlowRepository
       name: String(row.name),
       description:
         row.description == null ? undefined : String(row.description),
+      familyId:
+        row.family_id == null ? undefined : String(row.family_id),
+      scenario:
+        row.scenario == null
+          ? undefined
+          : (String(row.scenario) as Workflow["scenario"]),
+      scenarioLabel:
+        row.scenario_label == null
+          ? undefined
+          : String(row.scenario_label),
+      basedOnWorkflowId:
+        row.based_on_workflow_id == null
+          ? undefined
+          : String(row.based_on_workflow_id),
+      effectiveFrom:
+        row.effective_from == null
+          ? undefined
+          : String(row.effective_from),
+      effectiveTo:
+        row.effective_to == null
+          ? undefined
+          : String(row.effective_to),
     }));
 
     const transcripts = Object.fromEntries(
@@ -267,8 +336,9 @@ export class SqliteBusinessFlowRepository
         [
           "INSERT INTO workflow_revisions (",
           "  project_id, workflow_id, revision_number, workflow_name, workflow_description,",
+          "  family_id, scenario, scenario_label, based_on_workflow_id, effective_from, effective_to,",
           "  source_notes, summary, review_json, updated_by, created_at",
-          ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         ].join("\n"),
       )
       .run(
@@ -277,6 +347,12 @@ export class SqliteBusinessFlowRepository
         revisionNumber,
         revision.workflowName,
         revision.workflowDescription ?? null,
+        revision.familyId ?? null,
+        revision.scenario ?? null,
+        revision.scenarioLabel ?? null,
+        revision.basedOnWorkflowId ?? null,
+        revision.effectiveFrom ?? null,
+        revision.effectiveTo ?? null,
         revision.sourceNotes,
         revision.review.summary,
         JSON.stringify(revision.review),
@@ -332,8 +408,9 @@ export class SqliteBusinessFlowRepository
       .prepare(
         [
           "SELECT id, project_id, workflow_id, revision_number, workflow_name,",
-          "       workflow_description, source_notes, summary, review_json,",
-          "       updated_by, created_at",
+          "       workflow_description, family_id, scenario, scenario_label,",
+          "       based_on_workflow_id, effective_from, effective_to,",
+          "       source_notes, summary, review_json, updated_by, created_at",
           "  FROM workflow_revisions",
           " WHERE project_id = ? AND id = ?",
         ].join("\n"),
@@ -361,6 +438,26 @@ export class SqliteBusinessFlowRepository
         row.workflow_description == null
           ? undefined
           : String(row.workflow_description),
+      familyId:
+        row.family_id == null ? undefined : String(row.family_id),
+      scenario:
+        row.scenario == null ? undefined : String(row.scenario),
+      scenarioLabel:
+        row.scenario_label == null
+          ? undefined
+          : String(row.scenario_label),
+      basedOnWorkflowId:
+        row.based_on_workflow_id == null
+          ? undefined
+          : String(row.based_on_workflow_id),
+      effectiveFrom:
+        row.effective_from == null
+          ? undefined
+          : String(row.effective_from),
+      effectiveTo:
+        row.effective_to == null
+          ? undefined
+          : String(row.effective_to),
       sourceNotes: String(row.source_notes ?? ""),
       summary: String(row.summary ?? ""),
       review,
@@ -382,8 +479,9 @@ export class SqliteBusinessFlowRepository
 
     const insertWorkflow = this.db.prepare([
       "INSERT INTO workflows (",
-      "  project_id, id, name, description, source_notes",
-      ") VALUES (?, ?, ?, ?, ?)",
+      "  project_id, id, name, description, family_id, scenario, scenario_label,",
+      "  based_on_workflow_id, effective_from, effective_to, source_notes",
+      ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     ].join("\n"));
 
     const insertNode = this.db.prepare([
@@ -430,6 +528,12 @@ export class SqliteBusinessFlowRepository
           workflow.id,
           workflow.name,
           workflow.description ?? null,
+          workflow.familyId ?? workflow.id,
+          workflow.scenario ?? "current",
+          workflow.scenarioLabel ?? null,
+          workflow.basedOnWorkflowId ?? null,
+          workflow.effectiveFrom ?? null,
+          workflow.effectiveTo ?? null,
           snapshot.transcripts[workflow.id] ?? "",
         );
       }
