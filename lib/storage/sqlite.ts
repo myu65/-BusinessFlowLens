@@ -79,7 +79,7 @@ export class SqliteBusinessFlowRepository
       "  based_on_workflow_id TEXT,",
       "  effective_from TEXT,",
       "  effective_to TEXT,",
-      "  source_notes TEXT NOT NULL DEFAULT '',"
+      "  source_notes TEXT NOT NULL DEFAULT '',",
       "  PRIMARY KEY (project_id, id),",
       "  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE",
       ");",
@@ -143,7 +143,7 @@ export class SqliteBusinessFlowRepository
       "  based_on_workflow_id TEXT,",
       "  effective_from TEXT,",
       "  effective_to TEXT,",
-      "  source_notes TEXT NOT NULL,"
+      "  source_notes TEXT NOT NULL,",
       "  summary TEXT NOT NULL,",
       "  review_json TEXT NOT NULL,",
       "  updated_by TEXT NOT NULL,",
