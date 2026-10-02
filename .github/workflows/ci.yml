@@ -47,6 +47,7 @@ jobs:
         run: npm run build
 
       - name: Workflow persistence regressions
+        timeout-minutes: 3
         run: npm run test:regression
         env:
           AI_MODEL: ""
