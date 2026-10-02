@@ -1498,14 +1498,303 @@ function AssetsView({ graph }: { graph: LensGraph }) {
   );
 }
 
+function DataFlowView({ graph }: { graph: LensGraph }) {
+  const [ownership, setOwnership] = useState<OwnershipState>({
+    department: "",
+    responsiblePerson: "",
+  });
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedFlowId, setSelectedFlowId] = useState<string | null>(null);
+
+  const ownerFilter = ownershipFilter(ownership);
+  const processById = new Map(
+    graph.nodes
+      .filter((node) => node.kind === "process")
+      .map((node) => [node.id, node]),
+  );
+
+  const flows = (graph.dataFlows ?? []).filter((flow) => {
+    if (!ownership.department && !ownership.responsiblePerson) return true;
+    return flow.processIds.some((processId) => {
+      const process = processById.get(processId);
+      return process
+        ? processMatchesOwnership(process, ownerFilter)
+        : false;
+    });
+  });
+
+  const systemIds = new Set(
+    flows.flatMap((flow) => [flow.sourceSystemId, flow.targetSystemId]),
+  );
+  const systems = graph.nodes.filter(
+    (node) => node.kind === "system" && systemIds.has(node.id),
+  );
+
+  const flowNodes: Node[] = systems.map((system, index) => ({
+    id: system.id,
+    position: {
+      x: (index % 4) * 310,
+      y: Math.floor(index / 4) * 220 + (index % 2) * 35,
+    },
+    data: {
+      label: system.label,
+    },
+    style: {
+      width: 220,
+      borderRadius: 12,
+      border: "1px solid #cfd5eb",
+      background: "#ffffff",
+      padding: 14,
+      fontSize: 12,
+      fontWeight: 800,
+      boxShadow: "0 8px 24px rgba(42, 47, 42, 0.08)",
+    },
+  }));
+
+  const flowEdges: Edge[] = flows.map((flow) => {
+    const dataLabels = flow.dataIds
+      .map((id) => graph.nodes.find((node) => node.id === id)?.label)
+      .filter(Boolean);
+    const manual = flow.automation === "manual" || flow.transferType === "manual";
+
+    return {
+      id: flow.id,
+      source: flow.sourceSystemId,
+      target: flow.targetSystemId,
+      label: [
+        dataLabels.join(" / ") || "データ未特定",
+        flow.transferType,
+        flow.frequency,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      type: "smoothstep",
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        width: 16,
+        height: 16,
+      },
+      style: {
+        strokeWidth: 2,
+        strokeDasharray: manual ? "7 5" : undefined,
+      },
+      labelStyle: { fontSize: 9, fontWeight: 750 },
+      labelBgPadding: [7, 5],
+      labelBgBorderRadius: 6,
+    };
+  });
+
+  const selectedNode =
+    graph.nodes.find((node) => node.id === selectedNodeId) ?? null;
+  const selectedFlow =
+    flows.find((flow) => flow.id === selectedFlowId) ?? null;
+
+  return (
+    <section className="page-view">
+      <header className="page-header page-header--stackable">
+        <div>
+          <div className="eyebrow">SYSTEM DATA FLOW</div>
+          <h1>System間で、何がどう動くかを見る</h1>
+          <p>
+            Systemを主役にして、転送されるData・API/ファイル/手入力・自動/手動・頻度をエッジに集約します。
+          </p>
+        </div>
+        <OwnershipFilters
+          graph={graph}
+          value={ownership}
+          onChange={(value) => {
+            setOwnership(value);
+            setSelectedNodeId(null);
+            setSelectedFlowId(null);
+          }}
+        />
+      </header>
+
+      <div className="dataflow-summary">
+        <article>
+          <span>表示System</span>
+          <strong>{systems.length}</strong>
+        </article>
+        <article>
+          <span>データフロー</span>
+          <strong>{flows.length}</strong>
+        </article>
+        <article>
+          <span>手動転記</span>
+          <strong>
+            {
+              flows.filter(
+                (flow) =>
+                  flow.automation === "manual" ||
+                  flow.transferType === "manual",
+              ).length
+            }
+          </strong>
+        </article>
+        <article>
+          <span>要確認</span>
+          <strong>
+            {flows.filter((flow) => flow.status !== "confirmed").length}
+          </strong>
+        </article>
+      </div>
+
+      {flows.length === 0 ? (
+        <div className="empty-state">
+          <strong>条件に合うSystem間データフローがありません</strong>
+          <p>
+            ヒアリングで「どのSystemからどのSystemへ、何をどう渡すか」を明示すると抽出されます。
+          </p>
+        </div>
+      ) : (
+        <div className="dataflow-canvas-wrap">
+          <ReactFlow
+            nodes={flowNodes}
+            edges={flowEdges}
+            fitView
+            fitViewOptions={{ padding: 0.2 }}
+            minZoom={0.35}
+            maxZoom={1.4}
+            onNodeClick={(_, node) => {
+              setSelectedNodeId(node.id);
+              setSelectedFlowId(null);
+            }}
+            onEdgeClick={(_, edge) => {
+              setSelectedFlowId(edge.id);
+              setSelectedNodeId(null);
+            }}
+            proOptions={{ hideAttribution: true }}
+          >
+            <Background gap={28} size={1} />
+            <Controls position="bottom-right" showInteractive={false} />
+          </ReactFlow>
+
+          {selectedNode ? (
+            <RelationshipPanel
+              graph={graph}
+              node={selectedNode}
+              onClose={() => setSelectedNodeId(null)}
+              onSelectNode={(node) => {
+                setSelectedNodeId(node.id);
+                setSelectedFlowId(null);
+              }}
+            />
+          ) : null}
+
+          {selectedFlow ? (
+            <aside className="relationship-panel dataflow-detail-panel">
+              <button
+                className="close-button"
+                onClick={() => setSelectedFlowId(null)}
+              >
+                ×
+              </button>
+              <div className="eyebrow">DATA FLOW DETAIL</div>
+              <h2>
+                {graph.nodes.find(
+                  (node) => node.id === selectedFlow.sourceSystemId,
+                )?.label ?? "?"}
+                {" → "}
+                {graph.nodes.find(
+                  (node) => node.id === selectedFlow.targetSystemId,
+                )?.label ?? "?"}
+              </h2>
+
+              <div className="dataflow-detail-grid">
+                <span>Data</span>
+                <strong>
+                  {selectedFlow.dataIds
+                    .map(
+                      (id) =>
+                        graph.nodes.find((node) => node.id === id)?.label,
+                    )
+                    .filter(Boolean)
+                    .join(" / ") || "未特定"}
+                </strong>
+                <span>方式</span>
+                <strong>{selectedFlow.transferType}</strong>
+                <span>自動化</span>
+                <strong>{selectedFlow.automation}</strong>
+                <span>方向</span>
+                <strong>{selectedFlow.direction}</strong>
+                <span>頻度</span>
+                <strong>{selectedFlow.frequency ?? "未確認"}</strong>
+              </div>
+
+              <div className="relationship-section">
+                <header>
+                  <strong>関連する担当・業務</strong>
+                  <span>{selectedFlow.processIds.length}</span>
+                </header>
+                <div className="flow-process-context">
+                  {selectedFlow.processIds.map((processId) => {
+                    const process = processById.get(processId);
+                    if (!process) return null;
+                    const workflow = graph.workflows.find(
+                      (item) => item.id === process.workflowId,
+                    );
+                    return (
+                      <article key={processId}>
+                        <strong>{process.label}</strong>
+                        <span>
+                          {process.department ?? "部署未確認"}
+                          {process.responsiblePerson
+                            ? ` · ${process.responsiblePerson}`
+                            : ""}
+                        </span>
+                        <small>{workflow?.name ?? "—"}</small>
+                      </article>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flow-evidence">
+                <span>根拠</span>
+                <p>{selectedFlow.evidence ?? "—"}</p>
+              </div>
+            </aside>
+          ) : null}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function OverviewView({ graph }: { graph: LensGraph }) {
-  const workflows = graph.workflows;
+  const [ownership, setOwnership] = useState<OwnershipState>({
+    department: "",
+    responsiblePerson: "",
+  });
+  const ownerFilter = ownershipFilter(ownership);
+  const processById = new Map(
+    graph.nodes
+      .filter((node) => node.kind === "process")
+      .map((node) => [node.id, node]),
+  );
+
+  const filteredUsages = (assetId: string) =>
+    getAssetUsages(graph, assetId).filter((usage) => {
+      const process = processById.get(usage.processId);
+      return process
+        ? processMatchesOwnership(process, ownerFilter)
+        : false;
+    });
+
+  const workflows = graph.workflows.filter((workflow) => {
+    if (!ownership.department && !ownership.responsiblePerson) return true;
+    return getWorkflowProcesses(graph, workflow.id).some((process) =>
+      processMatchesOwnership(process, ownerFilter),
+    );
+  });
+
   const assets = graph.nodes
     .filter((node) => node.kind === "system" || node.kind === "data")
     .map((node) => ({
       node,
-      usages: getAssetUsages(graph, node.id),
-    }));
+      usages: filteredUsages(node.id),
+    }))
+    .filter(({ usages }) => usages.length > 0);
 
   const sharedAssets = assets
     .filter(
@@ -1519,30 +1808,34 @@ function OverviewView({ graph }: { graph: LensGraph }) {
   ).length;
 
   function matrixCell(assetId: string, workflowId: string) {
-    const usages = getAssetUsages(graph, assetId).filter(
+    const usages = filteredUsages(assetId).filter(
       (usage) => usage.workflowId === workflowId,
     );
-    const labels = [
+    return [
       ...new Set(usages.map((usage) => relationLabel[usage.relation])),
     ];
-    return labels;
   }
 
   return (
     <section className="page-view">
-      <header className="page-header">
+      <header className="page-header page-header--stackable">
         <div>
           <div className="eyebrow">CROSS-BUSINESS OVERVIEW</div>
-          <h1>横断はグラフではなく、比較と共有を見る</h1>
+          <h1>部署・担当者を軸に、共有と依存を見る</h1>
           <p>
-            業務が増えても破綻しないよう、共通資産と依存関係をマトリクスで俯瞰します。
+            全社グラフではなく、フィルタ後の業務・共有資産・利用関係をマトリクスで比較します。
           </p>
         </div>
+        <OwnershipFilters
+          graph={graph}
+          value={ownership}
+          onChange={setOwnership}
+        />
       </header>
 
       <div className="overview-stats">
         <article>
-          <span>業務</span>
+          <span>表示業務</span>
           <strong>{workflows.length}</strong>
         </article>
         <article>
@@ -1572,7 +1865,7 @@ function OverviewView({ graph }: { graph: LensGraph }) {
           <div className="section-heading">
             <div>
               <div className="eyebrow">SHARED ASSETS</div>
-              <h2>複数業務が依存するもの</h2>
+              <h2>フィルタ対象が共通利用するもの</h2>
             </div>
           </div>
           {sharedAssets.length > 0 ? (
@@ -1596,7 +1889,7 @@ function OverviewView({ graph }: { graph: LensGraph }) {
               })}
             </div>
           ) : (
-            <div className="empty-state">共有資産はまだありません。</div>
+            <div className="empty-state">共有資産はありません。</div>
           )}
         </section>
 
@@ -1604,12 +1897,14 @@ function OverviewView({ graph }: { graph: LensGraph }) {
           <div className="section-heading">
             <div>
               <div className="eyebrow">WORKFLOWS</div>
-              <h2>業務ごとの構造化状況</h2>
+              <h2>対象者が関わる業務</h2>
             </div>
           </div>
           <div className="workflow-health">
             {workflows.map((workflow) => {
-              const steps = getWorkflowProcesses(graph, workflow.id);
+              const steps = getWorkflowProcesses(graph, workflow.id).filter(
+                (step) => processMatchesOwnership(step, ownerFilter),
+              );
               const touched = new Set<string>();
               for (const step of steps) {
                 for (const link of getProcessAssetLinks(graph, step.id)) {
@@ -1649,7 +1944,7 @@ function OverviewView({ graph }: { graph: LensGraph }) {
         <div className="section-heading">
           <div>
             <div className="eyebrow">WORKFLOW × ASSET MATRIX</div>
-            <h2>どの業務が、何をどう触るか</h2>
+            <h2>誰の仕事が、何に依存しているか</h2>
           </div>
         </div>
 
@@ -1665,7 +1960,6 @@ function OverviewView({ graph }: { graph: LensGraph }) {
             </thead>
             <tbody>
               {assets
-                .filter(({ usages }) => usages.length > 0)
                 .sort((a, b) => b.usages.length - a.usages.length)
                 .map(({ node }) => (
                   <tr key={node.id}>
