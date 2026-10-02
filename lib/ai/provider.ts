@@ -924,24 +924,13 @@ function buildGraphPatch(
     }
   }
 
-  if (draft.transitions.length > 0) {
-    for (const transition of draft.transitions) {
-      edges.push({
-        sourceKey: processKey(transition.fromStepKey),
-        targetKey: processKey(transition.toStepKey),
-        relation: "next",
-        label: transition.condition ?? undefined,
-      });
-    }
-  } else {
-    for (let index = 0; index < sortedSteps.length - 1; index += 1) {
-      edges.push({
-        sourceKey: processKey(sortedSteps[index].stepKey),
-        targetKey: processKey(sortedSteps[index + 1].stepKey),
-        relation: "next",
-        label: undefined,
-      });
-    }
+  for (const transition of draft.transitions) {
+    edges.push({
+      sourceKey: processKey(transition.fromStepKey),
+      targetKey: processKey(transition.toStepKey),
+      relation: "next",
+      label: transition.condition ?? undefined,
+    });
   }
 
   for (const flow of draft.dataFlows ?? []) {
@@ -984,7 +973,6 @@ function buildGraphPatch(
 function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
   const seen = new Set<string>();
   const steps = raw.steps
-    .filter((step) => step.stepKey && step.name && step.action)
     .map((step, index) => {
       let key = normalizeName(step.stepKey) || `step-${index + 1}`;
       let suffix = 2;
@@ -997,6 +985,8 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
       return {
         ...step,
         stepKey: key,
+        name: step.name ?? "",
+        action: step.action ?? "",
         order: Number.isFinite(step.order) ? step.order : index + 1,
         department: step.department ?? null,
         responsiblePerson: step.responsiblePerson ?? null,
