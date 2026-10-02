@@ -15,6 +15,7 @@ The current prototype is built with Next.js and React Flow.
 
 It demonstrates:
 
+- Create new interviews/workflows directly from the left panel.
 - Interview text per workflow.
 - A canonical project graph shared across workflows.
 - Business / System / Data layers.
@@ -26,7 +27,7 @@ It demonstrates:
 - OpenAI Chat Completions compatible and Anthropic Messages compatible AI adapters.
 - A local deterministic extractor when no AI endpoint is configured.
 
-Two demo workflows are preloaded (order processing and returns) so shared ERP, email, order, and inventory concepts are visible immediately.
+Two demo workflows are preloaded (order processing and returns) so shared ERP, email, order, and inventory concepts are visible immediately. Use **＋ 新規ヒアリング** to add another business workflow; after mapping, newly extracted processes are scoped to that workflow while matching systems/data merge into the existing canonical graph.
 
 ## Run locally
 
