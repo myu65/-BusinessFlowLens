@@ -238,8 +238,16 @@ export const lanePositions = {
   data: { y: 620, x: [250, 600, 950, 1300] },
 } as const;
 
+export function canonicalNodeId(canonicalKey: string) {
+  // Canonical keys are already the project-wide identity boundary.
+  // Do not ASCII-sanitize them: doing so collapses distinct Japanese
+  // canonical keys (for example system:受注管理 and system:在庫管理)
+  // into the same persisted node id.
+  return canonicalKey;
+}
+
 function nodeId(canonicalKey: string) {
-  return canonicalKey.replace(/[^a-zA-Z0-9:_-]+/g, "-");
+  return canonicalNodeId(canonicalKey);
 }
 
 function edgeId(source: string, target: string, relation: Relation) {
