@@ -52,9 +52,10 @@ Copy `.env.example` and configure:
 
 ```bash
 AI_PROTOCOL=openai
-AI_BASE_URL=...
+AI_TARGET=cortex
 AI_MODEL=...
-AI_API_KEY=...
+# AI_BASE_URL=...   # optional in App Runtime
+# AI_API_KEY=...    # local / non-Snowflake provider only
 AI_AUTH_MODE=bearer
 ```
 
@@ -82,7 +83,9 @@ The adapter appends either `/chat/completions` or `/messages`.
 
 Current Snowflake behavior matters when choosing the protocol: Cortex REST Chat Completions can front multiple model families, while Cortex AI Gateway's Chat Completions route is for non-Claude models and its Messages route is for Claude models.
 
-For App Runtime, authentication should be supplied by the Snowflake runtime integration rather than committing a static credential. `AI_API_KEY` is currently the generic standalone/prototype hook; the provider module is isolated so runtime token resolution can be swapped in without changing graph extraction or UI code.
+In Snowflake App Runtime, the adapter automatically reads the rotating OAuth service token from `/snowflake/session/token` for each request and derives the account host from `SNOWFLAKE_HOST` when `AI_BASE_URL` is omitted. That keeps Snowflake credentials out of source and environment files. `AI_API_KEY` remains only as a local/standalone fallback.
+
+Set `AI_TARGET=cortex` for Cortex REST or `AI_TARGET=gateway` for Cortex AI Gateway. If your gateway uses a custom/private host, set `AI_BASE_URL` explicitly to the endpoint returned for that account.
 
 ## Canonical graph model
 
