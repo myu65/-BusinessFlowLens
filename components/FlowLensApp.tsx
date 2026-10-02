@@ -544,6 +544,7 @@ function WorkflowPicker({
 }
 
 function ReviewPanel({
+  graph,
   model,
   dirty,
   onChange,
@@ -558,6 +559,7 @@ function ReviewPanel({
   onOpenRevision,
   onCloseHistory,
 }: {
+  graph: LensGraph;
   model: PendingExtraction | null;
   dirty: boolean;
   onChange: (pending: PendingExtraction) => void;
@@ -591,6 +593,20 @@ function ReviewPanel({
   }
 
   const { review } = model;
+  const systemOptions = [
+    ...new Set(
+      graph.nodes
+        .filter((node) => node.kind === "system")
+        .map((node) => node.label),
+    ),
+  ].sort((a, b) => a.localeCompare(b, "ja"));
+  const dataOptions = [
+    ...new Set(
+      graph.nodes
+        .filter((node) => node.kind === "data")
+        .map((node) => node.label),
+    ),
+  ].sort((a, b) => a.localeCompare(b, "ja"));
 
   const changeReview = (nextReview: ExtractionReview) =>
     onChange({ ...model, review: nextReview });
@@ -889,6 +905,16 @@ function ReviewPanel({
 
   return (
     <aside className="review-panel">
+      <datalist id="existing-system-options">
+        {systemOptions.map((name) => (
+          <option key={name} value={name} />
+        ))}
+      </datalist>
+      <datalist id="existing-data-options">
+        {dataOptions.map((name) => (
+          <option key={name} value={name} />
+        ))}
+      </datalist>
       <div className="review-header">
         <div>
           <div className="eyebrow">
@@ -1098,6 +1124,7 @@ function ReviewPanel({
                     <span>実行System</span>
                     <input
                       value={step.executingSystem ?? ""}
+                      list="existing-system-options"
                       placeholder="例: SAP / ERP"
                       onChange={(event) =>
                         updateStep(step.stepKey, {
@@ -1156,6 +1183,7 @@ function ReviewPanel({
                       >
                         <input
                           value={system.name}
+                          list="existing-system-options"
                           placeholder="System名"
                           onChange={(event) =>
                             updateSystem(step.stepKey, index, {
@@ -1218,6 +1246,7 @@ function ReviewPanel({
                       >
                         <input
                           value={data.name}
+                          list="existing-data-options"
                           placeholder="Data / 文書名"
                           onChange={(event) =>
                             updateData(step.stepKey, index, {
@@ -1362,6 +1391,7 @@ function ReviewPanel({
                 <div className="review-dataflow-title">
                   <input
                     value={flow.sourceSystem}
+                    list="existing-system-options"
                     placeholder="送信元System"
                     onChange={(event) =>
                       updateDataFlow(index, {
@@ -1372,6 +1402,7 @@ function ReviewPanel({
                   <span>→</span>
                   <input
                     value={flow.targetSystem}
+                    list="existing-system-options"
                     placeholder="送信先System"
                     onChange={(event) =>
                       updateDataFlow(index, {
