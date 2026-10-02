@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import {
   extractInterviewLocal,
   type ExtractionReview,
+  type FollowUpAnswer,
   type GraphPatch,
+  type LensGraph,
   type Workflow,
 } from "@/lib/graph";
 import {
@@ -13,6 +15,9 @@ import {
 type ExtractRequest = {
   interview?: string;
   workflow?: Workflow;
+  graph?: LensGraph;
+  previousReview?: ExtractionReview | null;
+  followUpAnswers?: FollowUpAnswer[];
 };
 
 function localReview(patch: GraphPatch): ExtractionReview {
@@ -144,9 +149,9 @@ function localReview(patch: GraphPatch): ExtractionReview {
 export async function POST(request: Request) {
   const body = (await request.json()) as ExtractRequest;
 
-  if (!body.interview?.trim() || !body.workflow) {
+  if (!body.interview?.trim() || !body.workflow || !body.graph) {
     return NextResponse.json(
-      { error: "interview and workflow are required" },
+      { error: "interview, workflow, and graph are required" },
       { status: 400 },
     );
   }
@@ -156,14 +161,36 @@ export async function POST(request: Request) {
       ? await extractWorkflowReviewWithAI({
           interview: body.interview,
           workflow: body.workflow,
+          graph: body.graph,
+          previousReview: body.previousReview ?? null,
+          followUpAnswers: body.followUpAnswers ?? [],
         })
       : (() => {
           const patch = extractInterviewLocal(
             body.interview!,
             body.workflow!.id,
           );
+          const baseReview = body.previousReview ?? localReview(patch);
+          const answered = new Set(
+            (body.followUpAnswers ?? [])
+              .filter((item) => item.answer.trim())
+              .map((item) => item.question),
+          );
+
           return {
-            review: localReview(patch),
+            review: {
+              ...baseReview,
+              questions: baseReview.questions.filter(
+                (question) => !answered.has(question.question),
+              ),
+              warnings:
+                answered.size > 0
+                  ? [
+                      ...baseReview.warnings,
+                      "ローカルデモでは追加回答の意味理解は行わず、回答済み質問のみ整理します。AI endpoint接続時は回答内容を使って下書きを再構成します。",
+                    ]
+                  : baseReview.warnings,
+            },
             provider: "local-demo-extractor",
           };
         })();
