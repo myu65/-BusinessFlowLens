@@ -49,6 +49,7 @@ type Section =
 type AssetFilter = "all" | "system" | "data";
 
 type PendingExtraction = {
+  workflowId: string;
   review: ExtractionReview;
   provider: string;
   answers: Record<string, string>;
@@ -1665,6 +1666,7 @@ function InterviewsView({
   const currentModel: PendingExtraction | null =
     workflow && isStructured
       ? {
+          workflowId: workflow.id,
           review: buildWorkflowReviewFromGraph(graph, workflow.id),
           provider: "current-state",
           answers: {},
@@ -1672,7 +1674,14 @@ function InterviewsView({
         }
       : null;
 
-  const model = pending ?? currentModel;
+  const model =
+    pending && pending.workflowId === selectedWorkflowId
+      ? pending
+      : currentModel;
+  const selectedPending =
+    pending && pending.workflowId === selectedWorkflowId
+      ? pending
+      : null;
 
   async function refreshHistory(workflowId = selectedWorkflowId) {
     if (!workflowId) {
@@ -1851,6 +1860,7 @@ function InterviewsView({
 
       setProvider(payload.provider ?? "unknown");
       setPending({
+        workflowId: workflow.id,
         review: payload.review,
         provider: payload.provider ?? "unknown",
         answers: {},
@@ -1866,7 +1876,9 @@ function InterviewsView({
   }
 
   async function refineDraft() {
-    if (!workflow || !pending) return;
+    if (!workflow || !selectedPending) return;
+
+    const pending = selectedPending;
 
     const interview = transcripts[workflow.id]?.trim();
     if (!interview) return;
@@ -1908,6 +1920,7 @@ function InterviewsView({
 
       setProvider(payload.provider ?? pending.provider);
       setPending({
+        workflowId: workflow.id,
         review: payload.review,
         provider: payload.provider ?? pending.provider,
         answers: {},
@@ -1925,7 +1938,9 @@ function InterviewsView({
   }
 
   async function applyDraft() {
-    if (!workflow || !pending) return;
+    if (!workflow || !selectedPending) return;
+
+    const pending = selectedPending;
 
     setApplying(true);
     setError(null);
@@ -1975,6 +1990,29 @@ function InterviewsView({
       setApplying(false);
     }
   }
+
+  const selectBusiness = (workflowId: string) => {
+    if (
+      selectedPending &&
+      selectedPending.workflowId !== workflowId &&
+      !window.confirm(
+        "現在の業務構造に未保存の変更があります。変更を破棄して別の業務へ移動しますか？",
+      )
+    ) {
+      return;
+    }
+
+    if (
+      selectedPending &&
+      selectedPending.workflowId !== workflowId
+    ) {
+      setPending(null);
+    }
+
+    setSelectedWorkflowId(workflowId);
+    setError(null);
+    setBranching(false);
+  };
 
   const scenarioLabel = (item: Workflow) => {
     if (item.scenarioLabel) return item.scenarioLabel;
@@ -2041,12 +2079,7 @@ function InterviewsView({
               <button
                 key={item.id}
                 className={selectedWorkflowId === item.id ? "active" : ""}
-                onClick={() => {
-                  setSelectedWorkflowId(item.id);
-                  setPending(null);
-                  setError(null);
-                  setBranching(false);
-                }}
+                onClick={() => selectBusiness(item.id)}
               >
                 <span>
                   <strong>{item.name}</strong>
@@ -2266,8 +2299,9 @@ PDFを見ながらSAPに受注内容を入力します…"
       </main>
 
       <ReviewPanel
+        graph={graph}
         model={model}
-        dirty={Boolean(pending)}
+        dirty={Boolean(selectedPending)}
         onChange={setPending}
         onDiscard={() => setPending(null)}
         onRefine={refineDraft}
