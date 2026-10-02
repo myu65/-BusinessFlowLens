@@ -1,6 +1,18 @@
 export type NodeKind = "process" | "system" | "data";
 export type Confidence = "confirmed" | "inferred" | "unknown";
-export type Relation = "next" | "uses" | "reads" | "writes" | "sends";
+export type Relation =
+  | "next"
+  | "uses"
+  | "reads"
+  | "writes"
+  | "sends"
+  | "executes";
+
+export type ProcessExecutionMode =
+  | "manual"
+  | "automatic"
+  | "mixed"
+  | "unknown";
 
 export type WorkflowScenario =
   | "current"
@@ -30,6 +42,7 @@ export type LensNode = {
   actor?: string;
   department?: string;
   responsiblePerson?: string;
+  executionMode?: ProcessExecutionMode;
   evidence?: string;
   stepOrder?: number;
   action?: string;
@@ -96,6 +109,7 @@ export type GraphPatchNode = {
   actor?: string | null;
   department?: string | null;
   responsiblePerson?: string | null;
+  executionMode?: ProcessExecutionMode | null;
   evidence?: string | null;
   stepOrder?: number | null;
   action?: string | null;
@@ -146,6 +160,8 @@ export type ExtractionReviewStep = {
   actor: string | null;
   department: string | null;
   responsiblePerson: string | null;
+  executionMode: ProcessExecutionMode;
+  executingSystem: string | null;
   action: string;
   certainty: "explicit" | "inferred";
   evidence: string;
@@ -328,6 +344,8 @@ export function replaceWorkflowGraph(
       existing.department = patchNode.department ?? existing.department;
       existing.responsiblePerson =
         patchNode.responsiblePerson ?? existing.responsiblePerson;
+      existing.executionMode =
+        patchNode.executionMode ?? existing.executionMode;
       existing.evidence = patchNode.evidence ?? existing.evidence;
       existing.stepOrder = patchNode.stepOrder ?? existing.stepOrder;
       existing.action = patchNode.action ?? existing.action;
@@ -345,6 +363,7 @@ export function replaceWorkflowGraph(
       actor: patchNode.actor ?? undefined,
       department: patchNode.department ?? undefined,
       responsiblePerson: patchNode.responsiblePerson ?? undefined,
+      executionMode: patchNode.executionMode ?? undefined,
       evidence: patchNode.evidence ?? undefined,
       stepOrder: patchNode.stepOrder ?? undefined,
       action: patchNode.action ?? undefined,
