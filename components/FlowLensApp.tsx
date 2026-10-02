@@ -958,119 +958,272 @@ function ReviewPanel({
       </div>
 
       <div className="review-scroll">
-        <div className="review-section-title">
-          <span>業務ステップ</span>
-          <b>{review.steps.length}</b>
-        </div>
+        <details className="model-section" open>
+          <summary>
+            <span>業務ステップ</span>
+            <b>{review.steps.length}</b>
+          </summary>
 
-        <div className="review-steps">
-          {review.steps.map((step) => (
-            <article
-              key={step.stepKey}
-              className="review-step review-step--editable"
-            >
-              <div className="review-step__top">
-                <span>{String(step.order).padStart(2, "0")}</span>
-                <input
-                  className="review-step-name"
-                  value={step.name}
-                  onChange={(event) =>
-                    updateStep(step.stepKey, { name: event.target.value })
-                  }
-                />
-                <button
-                  className="review-delete"
-                  title="このステップを除外"
-                  onClick={() => removeStep(step.stepKey)}
-                >
-                  ×
-                </button>
-              </div>
+          <div className="model-section-toolbar">
+            <span>順番・担当・自動処理・System/Dataを直接編集できます。</span>
+            <button className="button-secondary" onClick={addStep}>
+              ＋ ステップ
+            </button>
+          </div>
 
-              <textarea
-                className="review-step-action"
-                value={step.action}
-                onChange={(event) =>
-                  updateStep(step.stepKey, { action: event.target.value })
-                }
-              />
-
-              <div className="review-step-meta review-step-meta--ownership">
-                <input
-                  value={step.actor ?? ""}
-                  placeholder="役割 例: 営業担当"
-                  onChange={(event) =>
-                    updateStep(step.stepKey, {
-                      actor: event.target.value || null,
-                    })
-                  }
-                />
-                <input
-                  value={step.department ?? ""}
-                  placeholder="部署 例: 営業部"
-                  onChange={(event) =>
-                    updateStep(step.stepKey, {
-                      department: event.target.value || null,
-                    })
-                  }
-                />
-                <input
-                  value={step.responsiblePerson ?? ""}
-                  placeholder="担当者 例: 田中さん"
-                  onChange={(event) =>
-                    updateStep(step.stepKey, {
-                      responsiblePerson: event.target.value || null,
-                    })
-                  }
-                />
-              </div>
-              <div className="review-evidence">
-                {step.certainty === "explicit" ? "明示" : "AI推定"} · 根拠:{" "}
-                {step.evidence || "—"}
-              </div>
-
-              {(step.systems.length > 0 || step.data.length > 0) && (
-                <div className="review-assets review-assets--editable">
-                  {step.systems.map((system, index) => (
-                    <span
-                      key={`s-${system.name}-${index}`}
-                      className="asset-chip asset-chip--system"
+          <div className="review-steps">
+            {review.steps.map((step, stepIndex) => (
+              <article
+                key={step.stepKey}
+                className="review-step review-step--editable"
+              >
+                <div className="review-step__top review-step__top--actions">
+                  <span>{String(step.order).padStart(2, "0")}</span>
+                  <input
+                    className="review-step-name"
+                    value={step.name}
+                    placeholder="ステップ名"
+                    onChange={(event) =>
+                      updateStep(step.stepKey, { name: event.target.value })
+                    }
+                  />
+                  <div className="step-order-actions">
+                    <button
+                      title="1つ前へ"
+                      disabled={stepIndex === 0}
+                      onClick={() => moveStep(step.stepKey, -1)}
                     >
-                      {system.name} · {system.interaction}
-                      <button
-                        title="除外"
-                        onClick={() => removeSystem(step.stepKey, index)}
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                  {step.data.map((data, index) => (
-                    <span
-                      key={`d-${data.name}-${data.operation}-${index}`}
-                      className="asset-chip asset-chip--data"
+                      ↑
+                    </button>
+                    <button
+                      title="1つ後へ"
+                      disabled={stepIndex === review.steps.length - 1}
+                      onClick={() => moveStep(step.stepKey, 1)}
                     >
-                      {data.name} · {data.operation}
-                      <button
-                        title="除外"
-                        onClick={() => removeData(step.stepKey, index)}
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
+                      ↓
+                    </button>
+                    <button
+                      className="review-delete"
+                      title="このステップを削除"
+                      onClick={() => removeStep(step.stepKey)}
+                    >
+                      ×
+                    </button>
+                  </div>
                 </div>
-              )}
-            </article>
-          ))}
-        </div>
 
-        {review.dataFlows.length > 0 ? (
+                <textarea
+                  className="review-step-action"
+                  value={step.action}
+                  placeholder="このステップで何をするか"
+                  onChange={(event) =>
+                    updateStep(step.stepKey, { action: event.target.value })
+                  }
+                />
+
+                <div className="step-execution-editor">
+                  <label>
+                    <span>実行方式</span>
+                    <select
+                      value={step.executionMode}
+                      onChange={(event) =>
+                        updateStep(step.stepKey, {
+                          executionMode:
+                            event.target.value as ProcessExecutionMode,
+                        })
+                      }
+                    >
+                      <option value="manual">手作業</option>
+                      <option value="automatic">System内で自動</option>
+                      <option value="mixed">人＋自動</option>
+                      <option value="unknown">未確認</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>実行System</span>
+                    <input
+                      value={step.executingSystem ?? ""}
+                      placeholder="例: SAP / ERP"
+                      onChange={(event) =>
+                        updateStep(step.stepKey, {
+                          executingSystem: event.target.value || null,
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+
+                <div className="review-step-meta review-step-meta--ownership">
+                  <input
+                    value={step.actor ?? ""}
+                    placeholder="役割 例: 営業担当"
+                    onChange={(event) =>
+                      updateStep(step.stepKey, {
+                        actor: event.target.value || null,
+                      })
+                    }
+                  />
+                  <input
+                    value={step.department ?? ""}
+                    placeholder="部署 例: 営業部"
+                    onChange={(event) =>
+                      updateStep(step.stepKey, {
+                        department: event.target.value || null,
+                      })
+                    }
+                  />
+                  <input
+                    value={step.responsiblePerson ?? ""}
+                    placeholder="担当者 例: 田中さん"
+                    onChange={(event) =>
+                      updateStep(step.stepKey, {
+                        responsiblePerson: event.target.value || null,
+                      })
+                    }
+                  />
+                </div>
+
+                <div className="review-evidence">
+                  {step.certainty === "explicit" ? "明示" : "AI推定"} · 根拠:{" "}
+                  {step.evidence || "—"}
+                </div>
+
+                <details className="step-subsection" open>
+                  <summary>
+                    <span>利用System</span>
+                    <b>{step.systems.length}</b>
+                  </summary>
+                  <div className="resource-editor">
+                    {step.systems.map((system, index) => (
+                      <div
+                        className="resource-row"
+                        key={`s-${step.stepKey}-${index}`}
+                      >
+                        <input
+                          value={system.name}
+                          placeholder="System名"
+                          onChange={(event) =>
+                            updateSystem(step.stepKey, index, {
+                              name: event.target.value,
+                            })
+                          }
+                        />
+                        <select
+                          value={system.interaction}
+                          onChange={(event) =>
+                            updateSystem(step.stepKey, index, {
+                              interaction:
+                                event.target
+                                  .value as typeof system.interaction,
+                            })
+                          }
+                        >
+                          <option value="view">閲覧</option>
+                          <option value="search">検索</option>
+                          <option value="input">入力</option>
+                          <option value="approve">承認</option>
+                          <option value="send">送信</option>
+                          <option value="receive">受信</option>
+                          <option value="other">その他</option>
+                        </select>
+                        <button
+                          className="row-remove"
+                          title="System参照を削除"
+                          onClick={() =>
+                            removeStepAsset(
+                              "system",
+                              step.stepKey,
+                              index,
+                            )
+                          }
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      className="inline-add"
+                      onClick={() => addSystem(step.stepKey)}
+                    >
+                      ＋ System
+                    </button>
+                  </div>
+                </details>
+
+                <details className="step-subsection" open>
+                  <summary>
+                    <span>Data</span>
+                    <b>{step.data.length}</b>
+                  </summary>
+                  <div className="resource-editor">
+                    {step.data.map((data, index) => (
+                      <div
+                        className="resource-row"
+                        key={`d-${step.stepKey}-${index}`}
+                      >
+                        <input
+                          value={data.name}
+                          placeholder="Data / 文書名"
+                          onChange={(event) =>
+                            updateData(step.stepKey, index, {
+                              name: event.target.value,
+                            })
+                          }
+                        />
+                        <select
+                          value={data.operation}
+                          onChange={(event) =>
+                            updateData(step.stepKey, index, {
+                              operation:
+                                event.target
+                                  .value as typeof data.operation,
+                            })
+                          }
+                        >
+                          <option value="read">参照</option>
+                          <option value="create">作成</option>
+                          <option value="update">更新</option>
+                          <option value="send">送信</option>
+                          <option value="receive">受信</option>
+                        </select>
+                        <button
+                          className="row-remove"
+                          title="Data参照を削除"
+                          onClick={() =>
+                            removeStepAsset("data", step.stepKey, index)
+                          }
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      className="inline-add"
+                      onClick={() => addData(step.stepKey)}
+                    >
+                      ＋ Data
+                    </button>
+                  </div>
+                </details>
+              </article>
+            ))}
+          </div>
+        </details>
+
+        <details className="model-section" open>
+          <summary>
+            <span>System間データフロー</span>
+            <b>{review.dataFlows.length}</b>
+          </summary>
+
+          <div className="model-section-toolbar">
+            <span>連携だけでなくCSV転送や人手転記もここで追加できます。</span>
+            <button className="button-secondary" onClick={addDataFlow}>
+              ＋ Data Flow
+            </button>
+          </div>
+
           <div className="review-dataflows">
-            <div className="review-section-title">
-              <span>System間データフロー</span>
-              <b>{review.dataFlows.length}</b>
-            </div>
             {review.dataFlows.map((flow, index) => (
               <article
                 key={`${flow.sourceSystem}-${flow.targetSystem}-${index}`}
@@ -1078,6 +1231,7 @@ function ReviewPanel({
                 <div className="review-dataflow-title">
                   <input
                     value={flow.sourceSystem}
+                    placeholder="送信元System"
                     onChange={(event) =>
                       updateDataFlow(index, {
                         sourceSystem: event.target.value,
@@ -1087,6 +1241,7 @@ function ReviewPanel({
                   <span>→</span>
                   <input
                     value={flow.targetSystem}
+                    placeholder="送信先System"
                     onChange={(event) =>
                       updateDataFlow(index, {
                         targetSystem: event.target.value,
@@ -1096,97 +1251,115 @@ function ReviewPanel({
                   <button
                     className="review-delete"
                     onClick={() => removeDataFlow(index)}
-                    title="このデータフローを除外"
+                    title="このデータフローを削除"
                   >
                     ×
                   </button>
                 </div>
-                <input
-                  className="review-dataflow-data"
-                  value={flow.data.join(", ")}
-                  placeholder="流れるデータ（カンマ区切り）"
-                  onChange={(event) =>
-                    updateDataFlow(index, {
-                      data: event.target.value
-                        .split(",")
-                        .map((item) => item.trim())
-                        .filter(Boolean),
-                    })
-                  }
-                />
-                <div className="review-dataflow-options">
-                  <select
-                    value={flow.transferType}
-                    onChange={(event) =>
-                      updateDataFlow(index, {
-                        transferType:
-                          event.target.value as typeof flow.transferType,
-                      })
-                    }
-                  >
-                    {[
-                      "api",
-                      "file",
-                      "database",
-                      "message",
-                      "email",
-                      "manual",
-                      "unknown",
-                    ].map((item) => (
-                      <option key={item} value={item}>
-                        {item}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={flow.direction}
-                    onChange={(event) =>
-                      updateDataFlow(index, {
-                        direction:
-                          event.target.value as typeof flow.direction,
-                      })
-                    }
-                  >
-                    {["push", "pull", "bidirectional", "unknown"].map(
-                      (item) => (
-                        <option key={item} value={item}>
-                          {item}
-                        </option>
-                      ),
-                    )}
-                  </select>
-                  <select
-                    value={flow.automation}
-                    onChange={(event) =>
-                      updateDataFlow(index, {
-                        automation:
-                          event.target.value as typeof flow.automation,
-                      })
-                    }
-                  >
-                    {["automatic", "manual", "mixed", "unknown"].map(
-                      (item) => (
-                        <option key={item} value={item}>
-                          {item}
-                        </option>
-                      ),
-                    )}
-                  </select>
+
+                <label className="dataflow-field">
+                  <span>流れるData</span>
                   <input
-                    value={flow.frequency ?? ""}
-                    placeholder="頻度 例: 15分ごと"
+                    className="review-dataflow-data"
+                    value={flow.data.join(", ")}
+                    placeholder="受注データ, 出荷指示"
                     onChange={(event) =>
                       updateDataFlow(index, {
-                        frequency: event.target.value || null,
+                        data: event.target.value
+                          .split(",")
+                          .map((item) => item.trim())
+                          .filter(Boolean),
                       })
                     }
                   />
+                </label>
+
+                <div className="review-dataflow-options">
+                  <label>
+                    <span>方式</span>
+                    <select
+                      value={flow.transferType}
+                      onChange={(event) =>
+                        updateDataFlow(index, {
+                          transferType:
+                            event.target
+                              .value as typeof flow.transferType,
+                        })
+                      }
+                    >
+                      {[
+                        "api",
+                        "file",
+                        "database",
+                        "message",
+                        "email",
+                        "manual",
+                        "unknown",
+                      ].map((item) => (
+                        <option key={item} value={item}>
+                          {item}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>方向</span>
+                    <select
+                      value={flow.direction}
+                      onChange={(event) =>
+                        updateDataFlow(index, {
+                          direction:
+                            event.target.value as typeof flow.direction,
+                        })
+                      }
+                    >
+                      {["push", "pull", "bidirectional", "unknown"].map(
+                        (item) => (
+                          <option key={item} value={item}>
+                            {item}
+                          </option>
+                        ),
+                      )}
+                    </select>
+                  </label>
+                  <label>
+                    <span>自動化</span>
+                    <select
+                      value={flow.automation}
+                      onChange={(event) =>
+                        updateDataFlow(index, {
+                          automation:
+                            event.target.value as typeof flow.automation,
+                        })
+                      }
+                    >
+                      {["automatic", "manual", "mixed", "unknown"].map(
+                        (item) => (
+                          <option key={item} value={item}>
+                            {item}
+                          </option>
+                        ),
+                      )}
+                    </select>
+                  </label>
+                  <label>
+                    <span>頻度</span>
+                    <input
+                      value={flow.frequency ?? ""}
+                      placeholder="例: 15分ごと"
+                      onChange={(event) =>
+                        updateDataFlow(index, {
+                          frequency: event.target.value || null,
+                        })
+                      }
+                    />
+                  </label>
                 </div>
                 <small>根拠: {flow.evidence || "—"}</small>
               </article>
             ))}
           </div>
-        ) : null}
+        </details>
 
         {review.warnings.length > 0 ? (
           <div className="review-warning">
