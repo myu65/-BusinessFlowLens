@@ -516,6 +516,7 @@ export function extractInterviewLocal(
   const has = (pattern: RegExp) => pattern.test(normalized);
   const nodes: GraphPatchNode[] = [];
   const edges: GraphPatchEdge[] = [];
+  const dataFlows: GraphPatchDataFlow[] = [];
   const questions: string[] = [];
 
   const addNode = (node: GraphPatchNode) => {
@@ -894,6 +895,22 @@ export function extractInterviewLocal(
     nodes.some((node) => node.canonicalKey === "system:erp")
   ) {
     questions.unshift("ExcelとERPへの二重入力は、なぜ必要ですか？");
+    dataFlows.push({
+      sourceSystemKey: "system:excel-order-sheet",
+      targetSystemKey: "system:erp",
+      dataKeys: ["data:order"],
+      transferType: "manual",
+      direction: "push",
+      automation: "manual",
+      frequency: null,
+      evidence: "Excelの受注管理表に入力して、その後ERPにも同じ内容を登録",
+      status: "confirmed",
+      relatedStepKeys: [
+        nodes.some((node) => node.canonicalKey === p("check-order"))
+          ? "check-order"
+          : "receive-order",
+      ],
+    });
   }
 
   if (has(/メール|email/i)) {
@@ -903,7 +920,7 @@ export function extractInterviewLocal(
   return {
     nodes,
     edges,
-    dataFlows: [],
+    dataFlows,
     questions: [...new Set(questions)].slice(0, 4),
   };
 }
