@@ -239,6 +239,7 @@ export function WorkflowExplorer({
   selectedStepId,
   onSelectWorkflow,
   onEdit,
+  onGraphApply,
   children,
 }: {
   graph: LensGraph;
@@ -246,6 +247,7 @@ export function WorkflowExplorer({
   selectedStepId?: string;
   onSelectWorkflow: (id: string) => void;
   onEdit: () => void;
+  onGraphApply: (graph: LensGraph) => void;
   children: ReactNode;
 }) {
   const [level, setLevel] = useState<"overview" | "business" | "detail">(
@@ -305,7 +307,7 @@ export function WorkflowExplorer({
         </>
       ) : null}
       {level === "overview" ? (
-        <BusinessOverview graph={graph} onEdit={onEdit} onOpen={(id) => {
+        <BusinessOverview graph={graph} onEdit={onEdit} onGraphApply={onGraphApply} onOpen={(id) => {
           onSelectWorkflow(id);
           setStepId(null);
           setLevel("business");

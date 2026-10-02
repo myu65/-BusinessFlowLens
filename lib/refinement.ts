@@ -60,6 +60,16 @@ export function mergeAssets(
   }
   return {
     ...graph,
+    workflows: graph.workflows.map(workflow => workflow.landscape ? {
+      ...workflow,
+      landscape: {
+        ...workflow.landscape,
+        materialHandoffs: workflow.landscape.materialHandoffs.map(handoff => ({
+          ...handoff,
+          dataIds: [...new Set(handoff.dataIds.map(remap))],
+        })),
+      },
+    } : workflow),
     nodes: graph.nodes
       .filter((node) => node.id !== sourceId)
       .map((node): LensNode =>

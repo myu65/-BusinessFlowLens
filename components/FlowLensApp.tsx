@@ -1938,11 +1938,13 @@ function WorkflowView({
   workflowId,
   setWorkflowId,
   onEdit,
+  onGraphApply,
 }: {
   graph: LensGraph;
   workflowId: string;
   setWorkflowId: (id: string) => void;
   onEdit: () => void;
+  onGraphApply: (graph: LensGraph) => void;
 }) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [ownership, setOwnership] = useState<OwnershipState>({
@@ -1981,6 +1983,7 @@ function WorkflowView({
       }
       onSelectWorkflow={setWorkflowId}
       onEdit={onEdit}
+      onGraphApply={onGraphApply}
     >
       <section className="page-view">
         <header className="page-header page-header--stackable">
@@ -2966,6 +2969,7 @@ function Workspace() {
           graph={graph}
           workflowId={selectedWorkflowId}
           setWorkflowId={setSelectedWorkflowId}
+          onGraphApply={setGraph}
           onEdit={() => setSection("interviews")}
         />
       ) : null}

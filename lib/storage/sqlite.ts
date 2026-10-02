@@ -220,7 +220,16 @@ function normalizeSnapshotGraph(graph: LensGraph): LensGraph {
   }
 
   return {
-    workflows: [...workflowsById.values()],
+    workflows: [...workflowsById.values()].map(w => w.landscape ? {
+      ...w,
+      landscape: {
+        ...w.landscape,
+        materialHandoffs: w.landscape.materialHandoffs.map(h => ({
+          ...h,
+          dataIds: [...new Set(h.dataIds.map(id => resolveLegacyId(id, "data", [w.id, h.targetWorkflowId]) ?? id))],
+        })),
+      },
+    } : w),
     nodes,
     edges: [...edgeById.values()],
     dataFlows: [...flowById.values()],
@@ -352,6 +361,7 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
       "TEXT NOT NULL DEFAULT '{}'",
     );
     this.ensureColumn("workflows", "family_id", "TEXT");
+    this.ensureColumn("workflows", "landscape_json", "TEXT NOT NULL DEFAULT 'null'");
     this.ensureColumn("workflows", "scenario", "TEXT");
     this.ensureColumn("workflows", "scenario_label", "TEXT");
     this.ensureColumn("workflows", "based_on_workflow_id", "TEXT");
@@ -426,6 +436,7 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
       effectiveTo:
         row.effective_to == null ? undefined : String(row.effective_to),
       reviewContext: JSON.parse(String(row.review_context_json ?? "{}")),
+      landscape: JSON.parse(String(row.landscape_json ?? "null")) ?? undefined,
     }));
 
     const transcripts = Object.fromEntries(
@@ -666,8 +677,8 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
       [
         "INSERT INTO workflows (",
         "  project_id, id, name, description, family_id, scenario, scenario_label,",
-        "  based_on_workflow_id, effective_from, effective_to, source_notes, review_context_json",
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "  based_on_workflow_id, effective_from, effective_to, source_notes, review_context_json, landscape_json",
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       ].join("\n"),
     );
 
@@ -729,6 +740,7 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
           workflow.effectiveTo ?? null,
           snapshot.transcripts[workflow.id] ?? "",
           JSON.stringify(workflow.reviewContext ?? {}),
+          JSON.stringify(workflow.landscape ?? null),
         );
       }
 

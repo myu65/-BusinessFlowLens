@@ -4,6 +4,32 @@ export type Relation = "next" | "uses" | "reads" | "writes" | "sends";
 
 export type WorkflowScenario = "current" | "future" | "alternative";
 
+export type MaterialHandoff = {
+  id: string;
+  sourceLocation?: string;
+  targetLocation?: string;
+  targetWorkflowId: string;
+  material: string;
+  productId?: string;
+  traceKey?: string;
+  dataIds: string[];
+  dataContinuity: "linked" | "broken" | "unknown";
+  evidence: string;
+};
+
+export type WorkflowLandscape = {
+  domains: string[];
+  site: string;
+  productId: string;
+  productLabel: string;
+  perspective: string;
+  commonProcessId: string;
+  processRole: "common" | "site" | "independent";
+  variantNote: string;
+  evidence: string;
+  materialHandoffs: MaterialHandoff[];
+};
+
 export type Workflow = {
   id: string;
   name: string;
@@ -14,6 +40,7 @@ export type Workflow = {
   basedOnWorkflowId?: string;
   effectiveFrom?: string;
   effectiveTo?: string;
+  landscape?: WorkflowLandscape;
   reviewContext?: Pick<
     ExtractionReview,
     "summary" | "trigger" | "outcome" | "questions" | "warnings"
@@ -285,7 +312,7 @@ export function replaceWorkflowGraph(
     (item) => item.id === workflow.id,
   );
   const workflows = existingWorkflow
-    ? graph.workflows.map((item) => (item.id === workflow.id ? workflow : item))
+    ? graph.workflows.map((item) => (item.id === workflow.id ? { ...workflow, landscape: workflow.landscape ?? item.landscape } : item))
     : [...graph.workflows, workflow];
 
   // Remove this workflow's previous process nodes and edge memberships while
@@ -484,6 +511,7 @@ export function replaceWorkflowGraph(
       ...flow.dataIds,
     ]),
   );
+  const materialDataIds = new Set(workflows.flatMap(w => w.landscape?.materialHandoffs.flatMap(h => h.dataIds) ?? []));
 
   return {
     workflows,
@@ -492,6 +520,7 @@ export function replaceWorkflowGraph(
         node.kind === "process" ||
         Boolean(node.aliases?.length) ||
         usedNodeIds.has(node.id) ||
+        materialDataIds.has(node.id) ||
         dataFlowNodeIds.has(node.id),
     ),
     edges,
@@ -1373,7 +1402,7 @@ export function branchWorkflowScenario(
     processIdMap.set(node.id, id);
 
     return {
-      ...node,
+      ...structuredClone(node),
       id,
       canonicalKey,
       workflowId: nextWorkflow.id,
@@ -1414,6 +1443,12 @@ export function branchWorkflowScenario(
 
   const workflow: Workflow = {
     ...nextWorkflow,
+    // Material routes need to be re-confirmed for the branched scenario.
+    landscape: nextWorkflow.landscape ?? (sourceWorkflow.landscape ? {
+      ...sourceWorkflow.landscape,
+      domains: [...sourceWorkflow.landscape.domains],
+      materialHandoffs: [],
+    } : undefined),
     familyId: nextWorkflow.familyId ?? workflowFamilyId(sourceWorkflow),
     basedOnWorkflowId: nextWorkflow.basedOnWorkflowId ?? sourceWorkflowId,
     scenario: nextWorkflow.scenario ?? "future",
