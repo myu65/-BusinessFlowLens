@@ -48,6 +48,125 @@ function parseArray(value: unknown): string[] {
   }
 }
 
+function normalizeSnapshotGraph(graph: LensGraph): LensGraph {
+  const workflowsById = new Map<string, Workflow>();
+  for (const workflow of graph.workflows) {
+    workflowsById.set(workflow.id, workflow);
+  }
+
+  const canonicalNodeByKey = new Map<string, LensNode>();
+  const idRemap = new Map<string, string>();
+
+  for (const node of graph.nodes) {
+    const existing = canonicalNodeByKey.get(node.canonicalKey);
+    if (!existing) {
+      canonicalNodeByKey.set(node.canonicalKey, node);
+      idRemap.set(node.id, node.id);
+      continue;
+    }
+
+    // A canonical entity must have exactly one persisted node ID.
+    // Keep the first node and remap every later reference to it.
+    idRemap.set(node.id, existing.id);
+  }
+
+  const nodes = [...canonicalNodeByKey.values()];
+  const validNodeIds = new Set(nodes.map((node) => node.id));
+
+  const edgeById = new Map<string, LensEdge>();
+  for (const edge of graph.edges) {
+    const source = idRemap.get(edge.source) ?? edge.source;
+    const target = idRemap.get(edge.target) ?? edge.target;
+    if (!validNodeIds.has(source) || !validNodeIds.has(target)) continue;
+
+    const id =
+      source === edge.source && target === edge.target
+        ? edge.id
+        : `${source}--${edge.relation}--${target}`;
+
+    const existing = edgeById.get(id);
+    if (existing) {
+      existing.workflowIds = [
+        ...new Set([...existing.workflowIds, ...edge.workflowIds]),
+      ];
+      if (!existing.label && edge.label) existing.label = edge.label;
+      continue;
+    }
+
+    edgeById.set(id, {
+      ...edge,
+      id,
+      source,
+      target,
+      workflowIds: [...new Set(edge.workflowIds)],
+    });
+  }
+
+  const flowById = new Map<string, SystemDataFlow>();
+  for (const flow of graph.dataFlows ?? []) {
+    const sourceSystemId =
+      idRemap.get(flow.sourceSystemId) ?? flow.sourceSystemId;
+    const targetSystemId =
+      idRemap.get(flow.targetSystemId) ?? flow.targetSystemId;
+    if (
+      !validNodeIds.has(sourceSystemId) ||
+      !validNodeIds.has(targetSystemId)
+    ) {
+      continue;
+    }
+
+    const dataIds = [
+      ...new Set(
+        flow.dataIds
+          .map((id) => idRemap.get(id) ?? id)
+          .filter((id) => validNodeIds.has(id)),
+      ),
+    ];
+    const processIds = [
+      ...new Set(
+        flow.processIds
+          .map((id) => idRemap.get(id) ?? id)
+          .filter((id) => validNodeIds.has(id)),
+      ),
+    ];
+
+    const id = [
+      sourceSystemId,
+      targetSystemId,
+      flow.transferType,
+      [...dataIds].sort().join(","),
+    ].join("--");
+
+    const existing = flowById.get(id);
+    if (existing) {
+      existing.workflowIds = [
+        ...new Set([...existing.workflowIds, ...flow.workflowIds]),
+      ];
+      existing.processIds = [
+        ...new Set([...existing.processIds, ...processIds]),
+      ];
+      continue;
+    }
+
+    flowById.set(id, {
+      ...flow,
+      id,
+      sourceSystemId,
+      targetSystemId,
+      dataIds,
+      processIds,
+      workflowIds: [...new Set(flow.workflowIds)],
+    });
+  }
+
+  return {
+    workflows: [...workflowsById.values()],
+    nodes,
+    edges: [...edgeById.values()],
+    dataFlows: [...flowById.values()],
+  };
+}
+
 export class SqliteBusinessFlowRepository
   implements BusinessFlowRepository
 {
@@ -329,54 +448,64 @@ export class SqliteBusinessFlowRepository
   async appendWorkflowRevision(
     revision: NewWorkflowRevision,
   ): Promise<WorkflowRevisionSummary> {
-    const current = this.db
-      .prepare(
-        "SELECT COALESCE(MAX(revision_number), 0) AS max_revision FROM workflow_revisions WHERE project_id = ? AND workflow_id = ?",
-      )
-      .get(revision.projectId, revision.workflowId) as SqliteRow;
+    // Serialize revision-number allocation with the insert itself.
+    // This avoids two concurrent apply requests both choosing MAX+1.
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const current = this.db
+        .prepare(
+          "SELECT COALESCE(MAX(revision_number), 0) AS max_revision FROM workflow_revisions WHERE project_id = ? AND workflow_id = ?",
+        )
+        .get(revision.projectId, revision.workflowId) as SqliteRow;
 
-    const revisionNumber = Number(current.max_revision ?? 0) + 1;
+      const revisionNumber = Number(current.max_revision ?? 0) + 1;
 
-    const result = this.db
-      .prepare(
-        [
-          "INSERT INTO workflow_revisions (",
-          "  project_id, workflow_id, revision_number, workflow_name, workflow_description,",
-          "  family_id, scenario, scenario_label, based_on_workflow_id, effective_from, effective_to,",
-          "  source_notes, follow_up_answers_json, summary, review_json, updated_by, created_at",
-          ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        ].join("\n"),
-      )
-      .run(
-        revision.projectId,
-        revision.workflowId,
+      const result = this.db
+        .prepare(
+          [
+            "INSERT INTO workflow_revisions (",
+            "  project_id, workflow_id, revision_number, workflow_name, workflow_description,",
+            "  family_id, scenario, scenario_label, based_on_workflow_id, effective_from, effective_to,",
+            "  source_notes, follow_up_answers_json, summary, review_json, updated_by, created_at",
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          ].join("\n"),
+        )
+        .run(
+          revision.projectId,
+          revision.workflowId,
+          revisionNumber,
+          revision.workflowName,
+          revision.workflowDescription ?? null,
+          revision.familyId ?? null,
+          revision.scenario ?? null,
+          revision.scenarioLabel ?? null,
+          revision.basedOnWorkflowId ?? null,
+          revision.effectiveFrom ?? null,
+          revision.effectiveTo ?? null,
+          revision.sourceNotes,
+          JSON.stringify(revision.followUpAnswers ?? []),
+          revision.review.summary,
+          JSON.stringify(revision.review),
+          revision.updatedBy,
+          revision.createdAt,
+        );
+
+      this.db.exec("COMMIT");
+
+      return {
+        id: Number(result.lastInsertRowid),
+        projectId: revision.projectId,
+        workflowId: revision.workflowId,
         revisionNumber,
-        revision.workflowName,
-        revision.workflowDescription ?? null,
-        revision.familyId ?? null,
-        revision.scenario ?? null,
-        revision.scenarioLabel ?? null,
-        revision.basedOnWorkflowId ?? null,
-        revision.effectiveFrom ?? null,
-        revision.effectiveTo ?? null,
-        revision.sourceNotes,
-        JSON.stringify(revision.followUpAnswers ?? []),
-        revision.review.summary,
-        JSON.stringify(revision.review),
-        revision.updatedBy,
-        revision.createdAt,
-      );
-
-    return {
-      id: Number(result.lastInsertRowid),
-      projectId: revision.projectId,
-      workflowId: revision.workflowId,
-      revisionNumber,
-      workflowName: revision.workflowName,
-      summary: revision.review.summary,
-      updatedBy: revision.updatedBy,
-      createdAt: revision.createdAt,
-    };
+        workflowName: revision.workflowName,
+        summary: revision.review.summary,
+        updatedBy: revision.updatedBy,
+        createdAt: revision.createdAt,
+      };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   async listWorkflowRevisions(
@@ -485,6 +614,7 @@ export class SqliteBusinessFlowRepository
 
   async saveProject(snapshot: ProjectSnapshot): Promise<void> {
     const now = snapshot.updatedAt || new Date().toISOString();
+    const graph = normalizeSnapshotGraph(snapshot.graph);
 
     const upsertProject = this.db.prepare([
       "INSERT INTO projects (id, name, updated_at)",
@@ -539,7 +669,7 @@ export class SqliteBusinessFlowRepository
         .prepare("DELETE FROM workflows WHERE project_id = ?")
         .run(snapshot.projectId);
 
-      for (const workflow of snapshot.graph.workflows) {
+      for (const workflow of graph.workflows) {
         insertWorkflow.run(
           snapshot.projectId,
           workflow.id,
@@ -555,7 +685,7 @@ export class SqliteBusinessFlowRepository
         );
       }
 
-      for (const node of snapshot.graph.nodes) {
+      for (const node of graph.nodes) {
         insertNode.run(
           snapshot.projectId,
           node.id,
@@ -574,7 +704,7 @@ export class SqliteBusinessFlowRepository
         );
       }
 
-      for (const edge of snapshot.graph.edges) {
+      for (const edge of graph.edges) {
         insertEdge.run(
           snapshot.projectId,
           edge.id,
@@ -586,7 +716,7 @@ export class SqliteBusinessFlowRepository
         );
       }
 
-      for (const flow of snapshot.graph.dataFlows ?? []) {
+      for (const flow of graph.dataFlows ?? []) {
         insertFlow.run(
           snapshot.projectId,
           flow.id,
