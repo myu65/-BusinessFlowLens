@@ -1264,14 +1264,33 @@ function WorkflowView({
 function AssetsView({ graph }: { graph: LensGraph }) {
   const [filter, setFilter] = useState<AssetFilter>("all");
   const [search, setSearch] = useState("");
+  const [ownership, setOwnership] = useState<OwnershipState>({
+    department: "",
+    responsiblePerson: "",
+  });
+  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
+
+  const processById = new Map(
+    graph.nodes
+      .filter((node) => node.kind === "process")
+      .map((node) => [node.id, node]),
+  );
+  const ownerFilter = ownershipFilter(ownership);
+
   const assets = graph.nodes
     .filter((node) => node.kind === "system" || node.kind === "data")
     .map((node) => ({
       node,
-      usages: getAssetUsages(graph, node.id),
+      usages: getAssetUsages(graph, node.id).filter((usage) => {
+        const process = processById.get(usage.processId);
+        return process
+          ? processMatchesOwnership(process, ownerFilter)
+          : !ownership.department && !ownership.responsiblePerson;
+      }),
     }))
     .filter(
-      ({ node }) =>
+      ({ node, usages }) =>
+        usages.length > 0 &&
         (filter === "all" || node.kind === filter) &&
         (!search.trim() ||
           node.label.toLowerCase().includes(search.trim().toLowerCase()) ||
@@ -1281,13 +1300,12 @@ function AssetsView({ graph }: { graph: LensGraph }) {
     )
     .sort((a, b) => b.usages.length - a.usages.length);
 
-  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const selected =
     assets.find(({ node }) => node.id === selectedAssetId) ??
     assets[0] ??
     null;
 
-  const workflowGroups = new Map<string, typeof selected.usages>();
+  const workflowGroups = new Map<string, NonNullable<typeof selected>["usages"]>();
   if (selected) {
     for (const usage of selected.usages) {
       const list = workflowGroups.get(usage.workflowId) ?? [];
@@ -1296,16 +1314,37 @@ function AssetsView({ graph }: { graph: LensGraph }) {
     }
   }
 
+  const selectedFlows =
+    selected?.node.kind === "system"
+      ? getDataFlowsForSystem(graph, selected.node.id).filter((flow) => {
+          if (!ownership.department && !ownership.responsiblePerson) return true;
+          return flow.processIds.some((processId) => {
+            const process = processById.get(processId);
+            return process
+              ? processMatchesOwnership(process, ownerFilter)
+              : false;
+          });
+        })
+      : [];
+
   return (
     <section className="page-view">
-      <header className="page-header">
+      <header className="page-header page-header--stackable">
         <div>
           <div className="eyebrow">ASSET IMPACT</div>
-          <h1>システム・データは「影響範囲」を見る</h1>
+          <h1>システム・データから、担当と影響範囲を辿る</h1>
           <p>
-            単独ノードを眺めるのではなく、その資産をどの業務・どのステップがどう触っているかを確認します。
+            資産を押すと、どの部署・担当者のどの業務ステップが、読む・書く・使うのかを確認できます。
           </p>
         </div>
+        <OwnershipFilters
+          graph={graph}
+          value={ownership}
+          onChange={(value) => {
+            setOwnership(value);
+            setSelectedAssetId(null);
+          }}
+        />
       </header>
 
       <div className="asset-layout">
@@ -1346,9 +1385,7 @@ function AssetsView({ graph }: { graph: LensGraph }) {
                   className={selected?.node.id === node.id ? "active" : ""}
                   onClick={() => setSelectedAssetId(node.id)}
                 >
-                  <span
-                    className={`asset-kind asset-kind--${node.kind}`}
-                  >
+                  <span className={`asset-kind asset-kind--${node.kind}`}>
                     {node.kind === "system" ? "SYS" : "DATA"}
                   </span>
                   <span>
@@ -1381,12 +1418,6 @@ function AssetsView({ graph }: { graph: LensGraph }) {
                 </div>
               </div>
 
-              {selected.node.status === "unknown" ? (
-                <div className="review-warning">
-                  △ この資産は同一性が未確認です。既存資産とのマージ候補を人が確認してください。
-                </div>
-              ) : null}
-
               <div className="impact-workflows">
                 {[...workflowGroups.entries()].map(
                   ([workflowId, usages]) => (
@@ -1395,22 +1426,71 @@ function AssetsView({ graph }: { graph: LensGraph }) {
                         <strong>{usages[0].workflowName}</strong>
                         <span>{usages.length} touchpoints</span>
                       </header>
-                      {usages.map((usage) => (
-                        <article
-                          key={`${usage.processId}-${usage.relation}`}
-                        >
-                          <strong>{usage.processName}</strong>
-                          <span>{relationLabel[usage.relation]}</span>
-                          <small>{usage.label ?? "—"}</small>
-                        </article>
-                      ))}
+                      {usages.map((usage) => {
+                        const process = processById.get(usage.processId);
+                        return (
+                          <article
+                            key={`${usage.processId}-${usage.relation}`}
+                          >
+                            <span className="impact-owner">
+                              {process?.department ?? "部署未確認"}
+                              {process?.responsiblePerson
+                                ? ` · ${process.responsiblePerson}`
+                                : ""}
+                            </span>
+                            <strong>{usage.processName}</strong>
+                            <span>{relationLabel[usage.relation]}</span>
+                            <small>{usage.label ?? "—"}</small>
+                          </article>
+                        );
+                      })}
                     </section>
                   ),
                 )}
               </div>
+
+              {selectedFlows.length > 0 ? (
+                <section className="impact-dataflows">
+                  <div className="section-heading">
+                    <div>
+                      <div className="eyebrow">SYSTEM DATA FLOWS</div>
+                      <h2>このSystemにつながるデータフロー</h2>
+                    </div>
+                  </div>
+                  {selectedFlows.map((flow) => {
+                    const source = graph.nodes.find(
+                      (node) => node.id === flow.sourceSystemId,
+                    );
+                    const target = graph.nodes.find(
+                      (node) => node.id === flow.targetSystemId,
+                    );
+                    const data = flow.dataIds
+                      .map(
+                        (id) =>
+                          graph.nodes.find((node) => node.id === id)?.label,
+                      )
+                      .filter(Boolean)
+                      .join(" / ");
+                    return (
+                      <article key={flow.id}>
+                        <strong>
+                          {source?.label ?? "?"} → {target?.label ?? "?"}
+                        </strong>
+                        <span>{data || "データ未特定"}</span>
+                        <small>
+                          {flow.transferType} · {flow.automation}
+                          {flow.frequency ? ` · ${flow.frequency}` : ""}
+                        </small>
+                      </article>
+                    );
+                  })}
+                </section>
+              ) : null}
             </>
           ) : (
-            <div className="empty-state">該当する資産がありません。</div>
+            <div className="empty-state">
+              条件に合うシステム・データがありません。
+            </div>
           )}
         </main>
       </div>
