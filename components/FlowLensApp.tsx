@@ -23,6 +23,7 @@ import {
   getDepartments,
   getNodeRelationships,
   getNodeWorkflowIds,
+  getProcessExecutionMode,
   getProcessAssetLinks,
   getResponsiblePeople,
   getWorkflowProcesses,
@@ -112,7 +113,13 @@ function WorkflowStepCard({ data, selected }: NodeProps<WorkflowStepNode>) {
     data: dataAssets,
   } = data;
 
-  const executionMode = step.executionMode ?? "unknown";
+  const executionMode =
+    step.executionMode ??
+    (executingSystem
+      ? "automatic"
+      : step.actor || step.responsiblePerson
+        ? "manual"
+        : "unknown");
   const executionLabel: Record<ProcessExecutionMode, string> = {
     manual: "👤 手作業",
     automatic: "⚙ 自動",
@@ -208,7 +215,7 @@ function workflowFlow(
     (process) =>
       processMatchesOwnership(process, ownership) &&
       (executionMode === "all" ||
-        (process.executionMode ?? "unknown") === executionMode),
+        getProcessExecutionMode(graph, process) === executionMode),
   );
   const processIds = new Set(processes.map((process) => process.id));
 
@@ -2420,7 +2427,7 @@ function WorkflowView({
     (process) =>
       processMatchesOwnership(process, filter) &&
       (executionMode === "all" ||
-        (process.executionMode ?? "unknown") === executionMode),
+        getProcessExecutionMode(graph, process) === executionMode),
   );
   const flow = useMemo(
     () => workflowFlow(graph, workflowId, filter, executionMode),
@@ -2518,8 +2525,8 @@ function WorkflowView({
             {
               processes.filter(
                 (process) =>
-                  process.executionMode === "automatic" ||
-                  process.executionMode === "mixed",
+                  getProcessExecutionMode(graph, process) === "automatic" ||
+                  getProcessExecutionMode(graph, process) === "mixed",
               ).length
             }
           </strong>
