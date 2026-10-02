@@ -789,6 +789,46 @@ function ReviewPanel({
     });
   };
 
+  const addTransition = () => {
+    const from = review.steps[0]?.stepKey ?? "";
+    const to = review.steps[1]?.stepKey ?? review.steps[0]?.stepKey ?? "";
+
+    changeReview({
+      ...review,
+      transitions: [
+        ...review.transitions,
+        {
+          fromStepKey: from,
+          toStepKey: to,
+          condition: null,
+          evidence: "手動追加",
+        },
+      ],
+    });
+  };
+
+  const updateTransition = (
+    index: number,
+    patch: Partial<ExtractionReview["transitions"][number]>,
+  ) => {
+    changeReview({
+      ...review,
+      transitions: review.transitions.map((transition, itemIndex) =>
+        itemIndex === index ? { ...transition, ...patch } : transition,
+      ),
+    });
+  };
+
+  const removeTransition = (index: number) => {
+    if (!window.confirm("このステップ間の接続を削除しますか？")) return;
+    changeReview({
+      ...review,
+      transitions: review.transitions.filter(
+        (_, itemIndex) => itemIndex !== index,
+      ),
+    });
+  };
+
   const updateDataFlow = (
     index: number,
     patch: Partial<ExtractionReview["dataFlows"][number]>,
@@ -1207,6 +1247,82 @@ function ReviewPanel({
                 </details>
               </article>
             ))}
+          </div>
+        </details>
+
+        <details className="model-section">
+          <summary>
+            <span>ステップ間の接続・条件分岐</span>
+            <b>{review.transitions.length}</b>
+          </summary>
+
+          <div className="model-section-toolbar">
+            <span>
+              通常の順番だけでなく「在庫あり」「承認NG」などの条件分岐を編集できます。
+            </span>
+            <button className="button-secondary" onClick={addTransition}>
+              ＋ 接続
+            </button>
+          </div>
+
+          <div className="transition-editor">
+            {review.transitions.map((transition, index) => (
+              <div
+                className="transition-row"
+                key={`${transition.fromStepKey}-${transition.toStepKey}-${index}`}
+              >
+                <select
+                  value={transition.fromStepKey}
+                  onChange={(event) =>
+                    updateTransition(index, {
+                      fromStepKey: event.target.value,
+                    })
+                  }
+                >
+                  {review.steps.map((step) => (
+                    <option key={step.stepKey} value={step.stepKey}>
+                      {step.order}. {step.name}
+                    </option>
+                  ))}
+                </select>
+                <span>→</span>
+                <select
+                  value={transition.toStepKey}
+                  onChange={(event) =>
+                    updateTransition(index, {
+                      toStepKey: event.target.value,
+                    })
+                  }
+                >
+                  {review.steps.map((step) => (
+                    <option key={step.stepKey} value={step.stepKey}>
+                      {step.order}. {step.name}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  value={transition.condition ?? ""}
+                  placeholder="条件（空欄なら通常遷移）"
+                  onChange={(event) =>
+                    updateTransition(index, {
+                      condition: event.target.value || null,
+                    })
+                  }
+                />
+                <button
+                  className="row-remove"
+                  title="接続を削除"
+                  onClick={() => removeTransition(index)}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+            {review.transitions.length === 0 ? (
+              <p className="inline-empty">
+                明示的な接続はありません。保存時はステップ順に直列接続されます。
+              </p>
+            ) : null}
           </div>
         </details>
 
