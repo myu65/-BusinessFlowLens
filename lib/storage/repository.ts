@@ -1,5 +1,6 @@
 import type {
   ExtractionReview,
+  FollowUpAnswer,
   LensGraph,
 } from "@/lib/graph";
 
@@ -31,6 +32,7 @@ export type WorkflowRevision = WorkflowRevisionSummary & {
   effectiveFrom?: string;
   effectiveTo?: string;
   sourceNotes: string;
+  followUpAnswers: FollowUpAnswer[];
   review: ExtractionReview;
 };
 
@@ -46,6 +48,7 @@ export type NewWorkflowRevision = {
   effectiveFrom?: string;
   effectiveTo?: string;
   sourceNotes: string;
+  followUpAnswers: FollowUpAnswer[];
   review: ExtractionReview;
   updatedBy: string;
   createdAt: string;
