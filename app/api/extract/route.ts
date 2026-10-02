@@ -75,6 +75,8 @@ function localReview(patch: GraphPatch): ExtractionReview {
       name: node.label,
       order: node.stepOrder ?? index + 1,
       actor: node.actor ?? null,
+      department: node.department ?? null,
+      responsiblePerson: node.responsiblePerson ?? null,
       action: node.action ?? node.description,
       certainty:
         node.status === "confirmed"
@@ -112,6 +114,7 @@ function localReview(patch: GraphPatch): ExtractionReview {
     outcome: null,
     steps,
     transitions,
+    dataFlows: [],
     questions: patch.questions.map((question) => ({
       question,
       reason: "ヒアリングから確定できないため",
