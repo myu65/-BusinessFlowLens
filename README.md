@@ -4,7 +4,7 @@ Turn business interviews into a reviewable map of **workflows, systems, and data
 
 BusinessFlowLens is not intended to be a "put every node on one giant canvas" diagramming tool. The prototype is organized around four concrete jobs:
 
-1. **Interview** — capture what people say and review the AI extraction before it changes the model.
+1. **Business input** — create a new workflow or edit an existing workflow's name, description, source notes, and AI-derived structure.
 2. **Workflow** — understand one business workflow step-by-step, including department, responsible person, systems, and data touched at each step.
 3. **Data flow** — understand what business data moves between systems, how it moves, and whether the transfer is automatic or manual.
 4. **System / Data impact** — select a shared asset and see which workflows, departments, people, and steps depend on it.
@@ -15,7 +15,7 @@ BusinessFlowLens is not intended to be a "put every node on one giant canvas" di
 Large cross-business graphs become unreadable quickly. The canonical graph is still stored underneath, but each screen is a projection answering a different question.
 
 ```text
-Interview
+Business input / interview notes
    ↓
 evidence-first AI draft
    ↓
@@ -41,7 +41,7 @@ The AI pipeline is deliberately two-stage.
 
 ### 1. Evidence-first workflow extraction
 
-The first call does **not** see the existing canonical asset catalog. It extracts:
+The first call extracts the workflow while also receiving a compact read-only set of existing System/Data/Workflow candidates for context. It extracts:
 
 - meaningful business steps
 - actor/role, department/team, responsible person, and action
@@ -91,9 +91,19 @@ The resolver prefers `uncertain` over a false merge. Uncertain assets remain vis
 
 ## UI
 
-### ヒアリング
+### 業務入力
 
-Create/select a workflow, paste rough interview notes, run structured extraction, and review the AI draft.
+This is the create/update workspace for business workflows.
+
+- create a new workflow
+- select an existing workflow
+- edit its workflow name and description
+- edit or replace the source interview/business notes
+- regenerate an AI draft for an existing workflow
+- answer follow-up questions and refine the draft
+- apply the reviewed result back to the same Workflow ID
+
+Updating an existing workflow replaces that workflow's Process structure and workflow-scoped relationships while preserving shared canonical System/Data assets and other workflows.
 
 ### 業務フロー
 
