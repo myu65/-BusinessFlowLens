@@ -31,6 +31,7 @@ function localReview(patch: GraphPatch): ExtractionReview {
   const steps = processNodes.map((node, index) => {
     const systems: ExtractionReview["steps"][number]["systems"] = [];
     const data: ExtractionReview["steps"][number]["data"] = [];
+    let executingSystem: string | null = null;
 
     for (const edge of patch.edges) {
       if (
@@ -48,6 +49,11 @@ function localReview(patch: GraphPatch): ExtractionReview {
       if (!target) continue;
 
       if (target.kind === "system") {
+        if (edge.relation === "executes") {
+          executingSystem = target.label;
+          continue;
+        }
+
         systems.push({
           name: target.label,
           interaction:
@@ -82,6 +88,14 @@ function localReview(patch: GraphPatch): ExtractionReview {
       actor: node.actor ?? null,
       department: node.department ?? null,
       responsiblePerson: node.responsiblePerson ?? null,
+      executionMode:
+        node.executionMode ??
+        (executingSystem
+          ? "automatic"
+          : node.actor || node.responsiblePerson
+            ? "manual"
+            : "unknown"),
+      executingSystem,
       action: node.action ?? node.description,
       certainty:
         node.status === "confirmed"
