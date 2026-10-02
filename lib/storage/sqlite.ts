@@ -120,9 +120,13 @@ function normalizeSnapshotGraph(graph: LensGraph): LensGraph {
 
   for (const edge of graph.edges) {
     const sourceKind: NodeKind | undefined =
-      edge.relation === "next" ? "process" : undefined;
-    const targetKind: NodeKind | undefined =
       edge.relation === "next"
+        ? "process"
+        : edge.relation === "executes"
+          ? "system"
+          : undefined;
+    const targetKind: NodeKind | undefined =
+      edge.relation === "next" || edge.relation === "executes"
         ? "process"
         : edge.relation === "uses"
           ? "system"
