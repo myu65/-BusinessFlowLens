@@ -357,6 +357,9 @@ export class SqliteBusinessFlowRepository
     ].join("\n"));
 
     this.ensureColumn("workflows", "family_id", "TEXT");
+    this.ensureColumn("workflows", "summary", "TEXT");
+    this.ensureColumn("workflows", "trigger", "TEXT");
+    this.ensureColumn("workflows", "outcome", "TEXT");
     this.ensureColumn("workflows", "scenario", "TEXT");
     this.ensureColumn("workflows", "scenario_label", "TEXT");
     this.ensureColumn("workflows", "based_on_workflow_id", "TEXT");
@@ -426,6 +429,9 @@ export class SqliteBusinessFlowRepository
     const workflows: Workflow[] = workflowRows.map((row) => ({
       id: String(row.id),
       name: String(row.name),
+      summary: row.summary == null ? undefined : String(row.summary),
+      trigger: row.trigger == null ? null : String(row.trigger),
+      outcome: row.outcome == null ? null : String(row.outcome),
       description:
         row.description == null ? undefined : String(row.description),
       familyId:
@@ -707,8 +713,8 @@ export class SqliteBusinessFlowRepository
     const insertWorkflow = this.db.prepare([
       "INSERT INTO workflows (",
       "  project_id, id, name, description, family_id, scenario, scenario_label,",
-      "  based_on_workflow_id, effective_from, effective_to, source_notes",
-      ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "  based_on_workflow_id, effective_from, effective_to, source_notes, summary, trigger, outcome",
+      ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     ].join("\n"));
 
     const insertNode = this.db.prepare([
@@ -762,6 +768,9 @@ export class SqliteBusinessFlowRepository
           workflow.effectiveFrom ?? null,
           workflow.effectiveTo ?? null,
           snapshot.transcripts[workflow.id] ?? "",
+          workflow.summary ?? null,
+          workflow.trigger ?? null,
+          workflow.outcome ?? null,
         );
       }
 

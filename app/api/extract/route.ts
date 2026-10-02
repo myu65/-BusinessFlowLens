@@ -184,7 +184,9 @@ export async function POST(request: Request) {
             body.interview!,
             body.workflow!.id,
           );
-          const baseReview = body.previousReview ?? localReview(patch);
+          const baseReview = body.previousReview?.steps.length
+            ? body.previousReview
+            : localReview(patch);
           const answered = new Set(
             (body.followUpAnswers ?? [])
               .filter((item) => item.answer.trim())

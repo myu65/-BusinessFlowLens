@@ -1031,6 +1031,7 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
       )
       .map((flow) => ({
         ...flow,
+        data: (flow.data ?? []).map((item) => item.trim()).filter(Boolean),
         relatedStepKeys: (flow.relatedStepKeys ?? [])
           .map((key) => normalizeName(key))
           .filter((key) => validKeys.has(key)),

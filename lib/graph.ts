@@ -23,6 +23,9 @@ export type Workflow = {
   id: string;
   name: string;
   description?: string;
+  summary?: string;
+  trigger?: string | null;
+  outcome?: string | null;
   familyId?: string;
   scenario?: WorkflowScenario;
   scenarioLabel?: string;
@@ -1259,13 +1262,17 @@ export function buildWorkflowReviewFromGraph(
 
       if (link.asset.kind === "data") {
         const operation =
-          link.relation === "reads"
-            ? "read"
-            : link.relation === "writes"
-              ? "update"
-              : link.relation === "sends"
-                ? "send"
-                : "read";
+          link.label === "create"
+            ? "create"
+            : link.label === "receive"
+              ? "receive"
+              : link.relation === "reads"
+                ? "read"
+                : link.relation === "writes"
+                  ? "update"
+                  : link.relation === "sends"
+                    ? "send"
+                    : "read";
 
         data.push({
           name: link.asset.label,
@@ -1350,10 +1357,10 @@ export function buildWorkflowReviewFromGraph(
 
   return {
     summary:
-      workflow?.description ??
+      workflow?.summary ?? workflow?.description ??
       (workflow ? `${workflow.name}の現在の業務構造` : ""),
-    trigger: null,
-    outcome: null,
+    trigger: workflow?.trigger ?? null,
+    outcome: workflow?.outcome ?? null,
     steps,
     transitions,
     dataFlows,
@@ -1454,6 +1461,9 @@ export function branchWorkflowScenario(
     }));
 
   const workflow: Workflow = {
+    summary: sourceWorkflow.summary,
+    trigger: sourceWorkflow.trigger,
+    outcome: sourceWorkflow.outcome,
     ...nextWorkflow,
     familyId: nextWorkflow.familyId ?? workflowFamilyId(sourceWorkflow),
     basedOnWorkflowId:

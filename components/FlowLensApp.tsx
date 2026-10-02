@@ -1386,7 +1386,7 @@ function ReviewPanel({
           <div className="review-dataflows">
             {review.dataFlows.map((flow, index) => (
               <article
-                key={`${flow.sourceSystem}-${flow.targetSystem}-${index}`}
+                key={index}
               >
                 <div className="review-dataflow-title">
                   <input
@@ -1423,14 +1423,16 @@ function ReviewPanel({
                   <span>流れるData</span>
                   <input
                     className="review-dataflow-data"
-                    value={flow.data.join(", ")}
+                    value={flow.data.join(",")}
                     placeholder="受注データ, 出荷指示"
                     onChange={(event) =>
                       updateDataFlow(index, {
-                        data: event.target.value
-                          .split(",")
-                          .map((item) => item.trim())
-                          .filter(Boolean),
+                        data: event.target.value.split(","),
+                      })
+                    }
+                    onBlur={() =>
+                      updateDataFlow(index, {
+                        data: flow.data.map((item) => item.trim()).filter(Boolean),
                       })
                     }
                   />

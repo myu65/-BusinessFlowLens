@@ -69,7 +69,12 @@ export async function POST(request: Request) {
 
     const graph = replaceWorkflowGraph(
       body.graph,
-      body.workflow,
+      {
+        ...body.workflow,
+        summary: result.review.summary,
+        trigger: result.review.trigger,
+        outcome: result.review.outcome,
+      },
       result.patch,
     );
 
