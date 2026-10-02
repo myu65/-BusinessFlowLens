@@ -2594,6 +2594,103 @@ function Workspace() {
   );
   const [pending, setPending] = useState<PendingExtraction | null>(null);
   const [provider, setProvider] = useState("local-demo-extractor");
+  const [hydrated, setHydrated] = useState(false);
+  const [storageBackend, setStorageBackend] = useState("sqlite");
+  const [saveStatus, setSaveStatus] = useState<
+    "loading" | "saving" | "saved" | "error"
+  >("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadProject() {
+      try {
+        const response = await fetch("/api/project?projectId=default", {
+          cache: "no-store",
+        });
+        const payload = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            payload?.error ?? "保存済みプロジェクトの読込に失敗しました。",
+          );
+        }
+
+        if (cancelled) return;
+
+        setStorageBackend(payload.storage ?? "sqlite");
+
+        if (payload.project) {
+          const loadedGraph = payload.project.graph as LensGraph;
+          const loadedTranscripts =
+            payload.project.transcripts as Record<string, string>;
+
+          setGraph(loadedGraph);
+          setTranscripts(loadedTranscripts);
+
+          const firstId = loadedGraph.workflows[0]?.id;
+          if (firstId) setSelectedWorkflowId(firstId);
+        }
+
+        setSaveStatus("saved");
+      } catch (error) {
+        console.error(error);
+        if (!cancelled) setSaveStatus("error");
+      } finally {
+        if (!cancelled) setHydrated(true);
+      }
+    }
+
+    void loadProject();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+
+    const timer = window.setTimeout(async () => {
+      setSaveStatus("saving");
+
+      try {
+        const response = await fetch("/api/project", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            projectId: "default",
+            projectName: "BusinessFlowLens",
+            graph,
+            transcripts,
+            updatedAt: new Date().toISOString(),
+          }),
+        });
+        const payload = await response.json();
+
+        if (!response.ok) {
+          throw new Error(payload?.error ?? "保存に失敗しました。");
+        }
+
+        setStorageBackend(payload.storage ?? storageBackend);
+        setSaveStatus("saved");
+      } catch (error) {
+        console.error(error);
+        setSaveStatus("error");
+      }
+    }, 700);
+
+    return () => window.clearTimeout(timer);
+  }, [graph, transcripts, hydrated]);
+
+  const saveLabel =
+    saveStatus === "loading"
+      ? "読込中"
+      : saveStatus === "saving"
+        ? "保存中"
+        : saveStatus === "error"
+          ? "保存エラー"
+          : "保存済み";
 
   return (
     <main className="app-shell">
@@ -2602,7 +2699,7 @@ function Workspace() {
           <div className="brand-mark">FL</div>
           <div>
             <strong>BusinessFlowLens</strong>
-            <span>Interviews → workflows → shared business architecture</span>
+            <span>Business input → workflows → shared architecture</span>
           </div>
         </div>
 
@@ -2610,6 +2707,14 @@ function Workspace() {
 
         <div className="header-meta">
           <span>{graph.workflows.length} workflows</span>
+          <span
+            className={[
+              "storage-status",
+              `storage-status--${saveStatus}`,
+            ].join(" ")}
+          >
+            {storageBackend} · {saveLabel}
+          </span>
           <span className="prototype-badge">PROTOTYPE</span>
         </div>
       </header>
