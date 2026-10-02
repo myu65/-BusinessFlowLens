@@ -277,6 +277,9 @@ function Workspace() {
   const [revision, setRevision] = useState(1);
   const [mapping, setMapping] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [creatingInterview, setCreatingInterview] = useState(false);
+  const [newWorkflowName, setNewWorkflowName] = useState("");
+  const [newWorkflowDescription, setNewWorkflowDescription] = useState("");
 
   const flow = useMemo(
     () => graphToFlow(graph, view, scope),
@@ -298,6 +301,50 @@ function Workspace() {
       node.kind !== "process" &&
       getNodeWorkflowIds(graph, node).length > 1,
   ).length;
+
+  function createInterview() {
+    const name = newWorkflowName.trim();
+    if (!name) return;
+
+    const slug =
+      name
+        .toLowerCase()
+        .normalize("NFKC")
+        .replace(/[^a-z0-9\u3040-\u30ff\u3400-\u9fff]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 32) || "workflow";
+
+    let id = slug;
+    let suffix = 2;
+    const existingIds = new Set(graph.workflows.map((workflow) => workflow.id));
+    while (existingIds.has(id)) {
+      id = `${slug}-${suffix++}`;
+    }
+
+    const workflow = {
+      id,
+      name,
+      description: newWorkflowDescription.trim() || undefined,
+    };
+
+    setGraph((current) => ({
+      ...current,
+      workflows: [...current.workflows, workflow],
+    }));
+    setTranscripts((current) => ({
+      ...current,
+      [id]: "",
+    }));
+    setSelectedWorkflowId(id);
+    setScope(id);
+    setView("all");
+    setQuestions([]);
+    setSelected(null);
+    setError(null);
+    setNewWorkflowName("");
+    setNewWorkflowDescription("");
+    setCreatingInterview(false);
+  }
 
   async function mapInterview() {
     if (!selectedWorkflow) return;
@@ -384,12 +431,78 @@ function Workspace() {
                 onClick={() => {
                   setSelectedWorkflowId(workflow.id);
                   setQuestions([]);
+                  setCreatingInterview(false);
                 }}
               >
                 <span>{workflow.name}</span>
                 <small>Interview</small>
               </button>
             ))}
+
+            <button
+              className="workflow-add"
+              onClick={() => setCreatingInterview((value) => !value)}
+              aria-expanded={creatingInterview}
+            >
+              <span>＋ 新規ヒアリング</span>
+              <small>New workflow</small>
+            </button>
+          </div>
+
+          {creatingInterview ? (
+            <div className="new-interview-form">
+              <div className="kicker">NEW INTERVIEW</div>
+              <label>
+                <span>業務名</span>
+                <input
+                  autoFocus
+                  value={newWorkflowName}
+                  onChange={(event) => setNewWorkflowName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") createInterview();
+                    if (event.key === "Escape") setCreatingInterview(false);
+                  }}
+                  placeholder="例: 購買業務"
+                />
+              </label>
+              <label>
+                <span>概要 <small>任意</small></span>
+                <input
+                  value={newWorkflowDescription}
+                  onChange={(event) =>
+                    setNewWorkflowDescription(event.target.value)
+                  }
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") createInterview();
+                    if (event.key === "Escape") setCreatingInterview(false);
+                  }}
+                  placeholder="例: 発注から入荷まで"
+                />
+              </label>
+              <div className="new-interview-actions">
+                <button
+                  className="secondary-button"
+                  onClick={() => setCreatingInterview(false)}
+                >
+                  キャンセル
+                </button>
+                <button
+                  className="primary-button"
+                  onClick={createInterview}
+                  disabled={!newWorkflowName.trim()}
+                >
+                  作成してヒアリング開始
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="interview-context">
+            <strong>{selectedWorkflow?.name ?? "ヒアリング"}</strong>
+            <span>
+              {selectedWorkflow?.description ??
+                "現状の業務を、話したまま・メモのまま入力してください。"}
+            </span>
           </div>
 
           <textarea
