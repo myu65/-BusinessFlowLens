@@ -1,0 +1,353 @@
+import { mkdirSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import type {
+  Confidence,
+  DataFlowAutomation,
+  DataFlowDirection,
+  DataFlowTransferType,
+  LensEdge,
+  LensGraph,
+  LensNode,
+  NodeKind,
+  Relation,
+  SystemDataFlow,
+  Workflow,
+} from "@/lib/graph";
+import type {
+  BusinessFlowRepository,
+  ProjectSnapshot,
+} from "@/lib/storage/repository";
+
+type SqliteRow = Record<string, unknown>;
+
+function sqlitePath() {
+  return resolve(
+    process.env.BUSINESS_FLOW_SQLITE_PATH ??
+      ".data/business-flow-lens.sqlite",
+  );
+}
+
+function encodeArray(value: unknown): string {
+  return JSON.stringify(value ?? []);
+}
+
+function parseArray(value: unknown): string[] {
+  if (typeof value !== "string" || !value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export class SqliteBusinessFlowRepository
+  implements BusinessFlowRepository
+{
+  private readonly db: DatabaseSync;
+
+  constructor(path = sqlitePath()) {
+    mkdirSync(dirname(path), { recursive: true });
+    this.db = new DatabaseSync(path);
+    this.db.exec("PRAGMA foreign_keys = ON");
+    this.db.exec("PRAGMA journal_mode = WAL");
+    this.migrate();
+  }
+
+  private migrate() {
+    this.db.exec([
+      "CREATE TABLE IF NOT EXISTS projects (",
+      "  id TEXT PRIMARY KEY,",
+      "  name TEXT NOT NULL,",
+      "  updated_at TEXT NOT NULL",
+      ");",
+      "CREATE TABLE IF NOT EXISTS workflows (",
+      "  project_id TEXT NOT NULL,",
+      "  id TEXT NOT NULL,",
+      "  name TEXT NOT NULL,",
+      "  description TEXT,",
+      "  source_notes TEXT NOT NULL DEFAULT '',",
+      "  PRIMARY KEY (project_id, id),",
+      "  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE",
+      ");",
+      "CREATE TABLE IF NOT EXISTS graph_nodes (",
+      "  project_id TEXT NOT NULL,",
+      "  id TEXT NOT NULL,",
+      "  canonical_key TEXT NOT NULL,",
+      "  kind TEXT NOT NULL,",
+      "  label TEXT NOT NULL,",
+      "  description TEXT NOT NULL,",
+      "  status TEXT NOT NULL,",
+      "  workflow_id TEXT,",
+      "  actor TEXT,",
+      "  department TEXT,",
+      "  responsible_person TEXT,",
+      "  evidence TEXT,",
+      "  step_order INTEGER,",
+      "  action TEXT,",
+      "  PRIMARY KEY (project_id, id),",
+      "  UNIQUE (project_id, canonical_key),",
+      "  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE",
+      ");",
+      "CREATE TABLE IF NOT EXISTS graph_edges (",
+      "  project_id TEXT NOT NULL,",
+      "  id TEXT NOT NULL,",
+      "  source_id TEXT NOT NULL,",
+      "  target_id TEXT NOT NULL,",
+      "  label TEXT,",
+      "  relation TEXT NOT NULL,",
+      "  workflow_ids_json TEXT NOT NULL,",
+      "  PRIMARY KEY (project_id, id),",
+      "  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE",
+      ");",
+      "CREATE TABLE IF NOT EXISTS data_flows (",
+      "  project_id TEXT NOT NULL,",
+      "  id TEXT NOT NULL,",
+      "  source_system_id TEXT NOT NULL,",
+      "  target_system_id TEXT NOT NULL,",
+      "  data_ids_json TEXT NOT NULL,",
+      "  transfer_type TEXT NOT NULL,",
+      "  direction TEXT NOT NULL,",
+      "  automation TEXT NOT NULL,",
+      "  frequency TEXT,",
+      "  evidence TEXT,",
+      "  status TEXT NOT NULL,",
+      "  workflow_ids_json TEXT NOT NULL,",
+      "  process_ids_json TEXT NOT NULL,",
+      "  PRIMARY KEY (project_id, id),",
+      "  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE",
+      ");",
+      "CREATE INDEX IF NOT EXISTS idx_workflows_project ON workflows(project_id);",
+      "CREATE INDEX IF NOT EXISTS idx_nodes_project_kind ON graph_nodes(project_id, kind);",
+      "CREATE INDEX IF NOT EXISTS idx_nodes_project_workflow ON graph_nodes(project_id, workflow_id);",
+      "CREATE INDEX IF NOT EXISTS idx_edges_project_source ON graph_edges(project_id, source_id);",
+      "CREATE INDEX IF NOT EXISTS idx_edges_project_target ON graph_edges(project_id, target_id);",
+      "CREATE INDEX IF NOT EXISTS idx_data_flows_project_source ON data_flows(project_id, source_system_id);",
+      "CREATE INDEX IF NOT EXISTS idx_data_flows_project_target ON data_flows(project_id, target_system_id);",
+    ].join("\n"));
+  }
+
+  async loadProject(projectId: string): Promise<ProjectSnapshot | null> {
+    const project = this.db
+      .prepare("SELECT id, name, updated_at FROM projects WHERE id = ?")
+      .get(projectId) as SqliteRow | undefined;
+
+    if (!project) return null;
+
+    const workflowRows = this.db
+      .prepare(
+        "SELECT id, name, description, source_notes FROM workflows WHERE project_id = ? ORDER BY rowid",
+      )
+      .all(projectId) as SqliteRow[];
+
+    const nodeRows = this.db
+      .prepare("SELECT * FROM graph_nodes WHERE project_id = ? ORDER BY rowid")
+      .all(projectId) as SqliteRow[];
+
+    const edgeRows = this.db
+      .prepare("SELECT * FROM graph_edges WHERE project_id = ? ORDER BY rowid")
+      .all(projectId) as SqliteRow[];
+
+    const flowRows = this.db
+      .prepare("SELECT * FROM data_flows WHERE project_id = ? ORDER BY rowid")
+      .all(projectId) as SqliteRow[];
+
+    const workflows: Workflow[] = workflowRows.map((row) => ({
+      id: String(row.id),
+      name: String(row.name),
+      description:
+        row.description == null ? undefined : String(row.description),
+    }));
+
+    const transcripts = Object.fromEntries(
+      workflowRows.map((row) => [
+        String(row.id),
+        String(row.source_notes ?? ""),
+      ]),
+    );
+
+    const nodes: LensNode[] = nodeRows.map((row) => ({
+      id: String(row.id),
+      canonicalKey: String(row.canonical_key),
+      kind: String(row.kind) as NodeKind,
+      label: String(row.label),
+      description: String(row.description),
+      status: String(row.status) as Confidence,
+      workflowId:
+        row.workflow_id == null ? undefined : String(row.workflow_id),
+      actor: row.actor == null ? undefined : String(row.actor),
+      department:
+        row.department == null ? undefined : String(row.department),
+      responsiblePerson:
+        row.responsible_person == null
+          ? undefined
+          : String(row.responsible_person),
+      evidence: row.evidence == null ? undefined : String(row.evidence),
+      stepOrder:
+        row.step_order == null ? undefined : Number(row.step_order),
+      action: row.action == null ? undefined : String(row.action),
+    }));
+
+    const edges: LensEdge[] = edgeRows.map((row) => ({
+      id: String(row.id),
+      source: String(row.source_id),
+      target: String(row.target_id),
+      label: row.label == null ? undefined : String(row.label),
+      relation: String(row.relation) as Relation,
+      workflowIds: parseArray(row.workflow_ids_json),
+    }));
+
+    const dataFlows: SystemDataFlow[] = flowRows.map((row) => ({
+      id: String(row.id),
+      sourceSystemId: String(row.source_system_id),
+      targetSystemId: String(row.target_system_id),
+      dataIds: parseArray(row.data_ids_json),
+      transferType: String(row.transfer_type) as DataFlowTransferType,
+      direction: String(row.direction) as DataFlowDirection,
+      automation: String(row.automation) as DataFlowAutomation,
+      frequency:
+        row.frequency == null ? undefined : String(row.frequency),
+      evidence: row.evidence == null ? undefined : String(row.evidence),
+      status: String(row.status) as Confidence,
+      workflowIds: parseArray(row.workflow_ids_json),
+      processIds: parseArray(row.process_ids_json),
+    }));
+
+    return {
+      projectId: String(project.id),
+      projectName: String(project.name),
+      graph: {
+        workflows,
+        nodes,
+        edges,
+        dataFlows,
+      },
+      transcripts,
+      updatedAt: String(project.updated_at),
+    };
+  }
+
+  async saveProject(snapshot: ProjectSnapshot): Promise<void> {
+    const now = snapshot.updatedAt || new Date().toISOString();
+
+    const upsertProject = this.db.prepare([
+      "INSERT INTO projects (id, name, updated_at)",
+      "VALUES (?, ?, ?)",
+      "ON CONFLICT(id) DO UPDATE SET",
+      "  name = excluded.name,",
+      "  updated_at = excluded.updated_at",
+    ].join("\n"));
+
+    const insertWorkflow = this.db.prepare([
+      "INSERT INTO workflows (",
+      "  project_id, id, name, description, source_notes",
+      ") VALUES (?, ?, ?, ?, ?)",
+    ].join("\n"));
+
+    const insertNode = this.db.prepare([
+      "INSERT INTO graph_nodes (",
+      "  project_id, id, canonical_key, kind, label, description, status,",
+      "  workflow_id, actor, department, responsible_person, evidence, step_order, action",
+      ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ].join("\n"));
+
+    const insertEdge = this.db.prepare([
+      "INSERT INTO graph_edges (",
+      "  project_id, id, source_id, target_id, label, relation, workflow_ids_json",
+      ") VALUES (?, ?, ?, ?, ?, ?, ?)",
+    ].join("\n"));
+
+    const insertFlow = this.db.prepare([
+      "INSERT INTO data_flows (",
+      "  project_id, id, source_system_id, target_system_id, data_ids_json,",
+      "  transfer_type, direction, automation, frequency, evidence, status,",
+      "  workflow_ids_json, process_ids_json",
+      ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ].join("\n"));
+
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      upsertProject.run(snapshot.projectId, snapshot.projectName, now);
+
+      this.db
+        .prepare("DELETE FROM data_flows WHERE project_id = ?")
+        .run(snapshot.projectId);
+      this.db
+        .prepare("DELETE FROM graph_edges WHERE project_id = ?")
+        .run(snapshot.projectId);
+      this.db
+        .prepare("DELETE FROM graph_nodes WHERE project_id = ?")
+        .run(snapshot.projectId);
+      this.db
+        .prepare("DELETE FROM workflows WHERE project_id = ?")
+        .run(snapshot.projectId);
+
+      for (const workflow of snapshot.graph.workflows) {
+        insertWorkflow.run(
+          snapshot.projectId,
+          workflow.id,
+          workflow.name,
+          workflow.description ?? null,
+          snapshot.transcripts[workflow.id] ?? "",
+        );
+      }
+
+      for (const node of snapshot.graph.nodes) {
+        insertNode.run(
+          snapshot.projectId,
+          node.id,
+          node.canonicalKey,
+          node.kind,
+          node.label,
+          node.description,
+          node.status,
+          node.workflowId ?? null,
+          node.actor ?? null,
+          node.department ?? null,
+          node.responsiblePerson ?? null,
+          node.evidence ?? null,
+          node.stepOrder ?? null,
+          node.action ?? null,
+        );
+      }
+
+      for (const edge of snapshot.graph.edges) {
+        insertEdge.run(
+          snapshot.projectId,
+          edge.id,
+          edge.source,
+          edge.target,
+          edge.label ?? null,
+          edge.relation,
+          encodeArray(edge.workflowIds),
+        );
+      }
+
+      for (const flow of snapshot.graph.dataFlows ?? []) {
+        insertFlow.run(
+          snapshot.projectId,
+          flow.id,
+          flow.sourceSystemId,
+          flow.targetSystemId,
+          encodeArray(flow.dataIds),
+          flow.transferType,
+          flow.direction,
+          flow.automation,
+          flow.frequency ?? null,
+          flow.evidence ?? null,
+          flow.status,
+          encodeArray(flow.workflowIds),
+          encodeArray(flow.processIds),
+        );
+      }
+
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+}
