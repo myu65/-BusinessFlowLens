@@ -968,43 +968,6 @@ export function createDemoGraph(): LensGraph {
     }),
   };
 
-  const excel = graph.nodes.find(
-    (node) => node.canonicalKey === "system:excel-order-sheet",
-  );
-  const erp = graph.nodes.find(
-    (node) => node.canonicalKey === "system:erp",
-  );
-  const orderData = graph.nodes.find(
-    (node) => node.canonicalKey === "data:order",
-  );
-  const orderProcesses = graph.nodes
-    .filter(
-      (node) => node.kind === "process" && node.workflowId === "order",
-    )
-    .map((node) => node.id);
-
-  if (excel && erp && orderData) {
-    graph = {
-      ...graph,
-      dataFlows: [
-        ...graph.dataFlows,
-        {
-          id: "demo-excel-to-erp-order",
-          sourceSystemId: excel.id,
-          targetSystemId: erp.id,
-          dataIds: [orderData.id],
-          transferType: "manual",
-          direction: "push",
-          automation: "manual",
-          evidence: "Excelの受注管理表に入力して、その後ERPにも同じ内容を登録",
-          status: "confirmed",
-          workflowIds: ["order"],
-          processIds: orderProcesses,
-        },
-      ],
-    };
-  }
-
   return graph;
 }
 
