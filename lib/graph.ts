@@ -1468,3 +1468,27 @@ export function branchWorkflowScenario(
     dataFlows: [...(graph.dataFlows ?? []), ...clonedDataFlows],
   };
 }
+
+
+export function getProcessExecutionMode(
+  graph: LensGraph,
+  process: LensNode,
+): ProcessExecutionMode {
+  if (process.executionMode) return process.executionMode;
+  if (process.kind !== "process") return "unknown";
+
+  const executedBySystem = graph.edges.some(
+    (edge) =>
+      edge.relation === "executes" &&
+      edge.target === process.id &&
+      graph.nodes.some(
+        (node) =>
+          node.id === edge.source &&
+          node.kind === "system",
+      ),
+  );
+
+  if (executedBySystem) return "automatic";
+  if (process.responsiblePerson || process.actor) return "manual";
+  return "unknown";
+}
