@@ -2583,3 +2583,456 @@ button:disabled {
   font-size: 7.5px;
   line-height: 1.5;
 }
+
+
+/* UX hardening: business model editor + automatic internal processing */
+
+.interview-layout {
+  grid-template-columns: 220px minmax(380px, 1fr) minmax(520px, 620px);
+}
+
+.review-panel {
+  padding: 14px;
+}
+
+.review-scroll {
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.review-header {
+  padding: 2px 2px 0;
+}
+
+.review-header h2 {
+  font-size: 20px;
+}
+
+.review-summary--editable textarea {
+  min-height: 68px;
+  font-size: 10px;
+}
+
+.review-summary--editable input,
+.review-step--editable input,
+.review-step--editable textarea,
+.review-dataflows input,
+.review-dataflows select {
+  font-size: 9px;
+}
+
+.model-section {
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.55);
+  overflow: hidden;
+}
+
+.model-section > summary,
+.step-subsection > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.model-section > summary::-webkit-details-marker,
+.step-subsection > summary::-webkit-details-marker {
+  display: none;
+}
+
+.model-section > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 11px;
+  background: #f0f1ec;
+  color: #596159;
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.model-section > summary::before {
+  content: "▸";
+  width: 12px;
+  color: var(--muted-2);
+}
+
+.model-section[open] > summary::before {
+  content: "▾";
+}
+
+.model-section > summary > span {
+  flex: 1;
+}
+
+.model-section > summary > b,
+.step-subsection > summary > b {
+  min-width: 26px;
+  border-radius: 999px;
+  background: var(--surface);
+  padding: 3px 6px;
+  text-align: center;
+  font-size: 8px;
+}
+
+.model-section-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.model-section-toolbar > span {
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.4;
+}
+
+.model-section .review-steps,
+.model-section .review-dataflows,
+.model-section .transition-editor {
+  padding: 9px;
+}
+
+.review-step--editable {
+  padding: 11px;
+}
+
+.review-step__top--actions {
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+}
+
+.step-order-actions {
+  display: flex;
+  gap: 3px;
+}
+
+.step-order-actions button,
+.row-remove,
+.inline-add {
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.step-order-actions button {
+  min-width: 24px;
+  height: 24px;
+  background: #eff1eb;
+  color: #667067;
+  font-size: 10px;
+}
+
+.step-order-actions button:disabled {
+  opacity: 0.3;
+}
+
+.step-order-actions .review-delete {
+  background: #f4ece8;
+  color: var(--danger);
+}
+
+.review-step-name {
+  min-height: 30px;
+  font-size: 10px;
+}
+
+.review-step-action {
+  min-height: 58px;
+  font-size: 9.5px;
+}
+
+.step-execution-editor {
+  display: grid;
+  grid-template-columns: 140px minmax(150px, 1fr);
+  gap: 7px;
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px solid #d9ddd8;
+  border-radius: 8px;
+  background: #f7f8f4;
+}
+
+.step-execution-editor label,
+.dataflow-field,
+.review-dataflow-options label,
+.execution-filter {
+  display: grid;
+  gap: 3px;
+}
+
+.step-execution-editor label > span,
+.dataflow-field > span,
+.review-dataflow-options label > span,
+.execution-filter > span {
+  color: var(--muted-2);
+  font-size: 7.5px;
+  font-weight: 850;
+}
+
+.step-execution-editor input,
+.step-execution-editor select,
+.resource-row input,
+.resource-row select,
+.transition-row input,
+.transition-row select,
+.execution-filter select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  outline: none;
+  background: var(--surface);
+  padding: 7px;
+  color: var(--ink);
+  font-size: 9px;
+}
+
+.step-execution-editor input:focus,
+.step-execution-editor select:focus,
+.resource-row input:focus,
+.resource-row select:focus,
+.transition-row input:focus,
+.transition-row select:focus,
+.execution-filter select:focus {
+  border-color: #9dae9f;
+  box-shadow: 0 0 0 2px rgba(47, 81, 64, 0.06);
+}
+
+.review-step-meta--ownership {
+  margin-top: 7px;
+}
+
+.review-evidence {
+  margin-top: 7px;
+  font-size: 7.5px;
+  line-height: 1.5;
+}
+
+.step-subsection {
+  margin-top: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+}
+
+.step-subsection > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #687068;
+  font-size: 8px;
+  font-weight: 850;
+}
+
+.step-subsection > summary::before {
+  content: "▸";
+  color: var(--muted-2);
+}
+
+.step-subsection[open] > summary::before {
+  content: "▾";
+}
+
+.step-subsection > summary > span {
+  flex: 1;
+}
+
+.resource-editor {
+  display: grid;
+  gap: 5px;
+  margin-top: 6px;
+}
+
+.resource-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 100px 25px;
+  gap: 5px;
+  align-items: center;
+}
+
+.row-remove {
+  width: 25px;
+  height: 25px;
+  background: #f4ece8;
+  color: var(--danger);
+}
+
+.inline-add {
+  justify-self: start;
+  background: #eef1eb;
+  padding: 6px 8px;
+  color: #5e685f;
+  font-size: 8px;
+}
+
+.transition-editor {
+  display: grid;
+  gap: 6px;
+}
+
+.transition-row {
+  display: grid;
+  grid-template-columns:
+    minmax(105px, 1fr)
+    18px
+    minmax(105px, 1fr)
+    minmax(120px, 1fr)
+    25px;
+  gap: 5px;
+  align-items: center;
+}
+
+.transition-row > span {
+  color: var(--muted);
+  text-align: center;
+  font-size: 10px;
+}
+
+.inline-empty {
+  margin: 0;
+  padding: 8px;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.review-dataflows {
+  margin-top: 0;
+}
+
+.review-dataflows article {
+  padding: 10px;
+}
+
+.review-dataflow-options {
+  grid-template-columns: repeat(4, minmax(90px, 1fr));
+}
+
+.review-dataflow-options label input,
+.review-dataflow-options label select {
+  width: 100%;
+}
+
+.dataflow-field {
+  width: 100%;
+}
+
+.review-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  margin: 0 -14px -14px;
+  padding: 10px 14px 12px;
+  background: rgba(247, 246, 241, 0.96);
+  backdrop-filter: blur(10px);
+}
+
+.workflow-filter-row {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.execution-filter select {
+  min-width: 130px;
+}
+
+.workflow-summary {
+  grid-template-columns: minmax(180px, 2fr) repeat(4, minmax(76px, 0.7fr));
+}
+
+.step-node--execution-automatic {
+  border-top-color: #6678d8;
+  background: #fbfbff;
+}
+
+.step-node--execution-mixed {
+  border-top-color: #8c70b7;
+}
+
+.step-node--execution-manual {
+  border-top-color: #d1a54c;
+}
+
+.step-node--execution-unknown {
+  border-top-color: #a5aaa4;
+  border-top-style: dashed;
+}
+
+.execution-badge--automatic {
+  background: var(--system-soft) !important;
+  color: #5265c8 !important;
+}
+
+.execution-badge--mixed {
+  background: #f1ebf8 !important;
+  color: #75569b !important;
+}
+
+.execution-badge--manual {
+  background: #f8f1df !important;
+  color: #8a671f !important;
+}
+
+.execution-badge--unknown {
+  background: #eff0ed !important;
+  color: #737873 !important;
+}
+
+.review-warning,
+.answered-followups,
+.review-questions,
+.revision-history {
+  margin-top: 10px;
+}
+
+@media (max-width: 1450px) {
+  .interview-layout {
+    height: auto;
+    min-height: calc(100vh - 120px);
+    grid-template-columns: 210px minmax(0, 1fr);
+    grid-template-rows: minmax(620px, auto) auto;
+    overflow: visible;
+  }
+
+  .review-panel {
+    grid-column: 1 / -1;
+    min-height: 560px;
+    max-height: none;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
+  .review-scroll {
+    max-height: none;
+    overflow: visible;
+  }
+}
+
+@media (max-width: 900px) {
+  .step-execution-editor,
+  .review-dataflow-options,
+  .transition-row {
+    grid-template-columns: 1fr;
+  }
+
+  .transition-row > span {
+    display: none;
+  }
+
+  .resource-row {
+    grid-template-columns: minmax(0, 1fr) 92px 25px;
+  }
+
+  .workflow-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workflow-summary > div:first-child {
+    grid-column: 1 / -1;
+  }
+}
