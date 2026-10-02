@@ -23,6 +23,7 @@ import {
   getDepartments,
   getNodeRelationships,
   getNodeWorkflowIds,
+  getProcessExecutionMode,
   getProcessAssetLinks,
   getResponsiblePeople,
   getWorkflowProcesses,
@@ -33,6 +34,7 @@ import {
   type LensNode,
   type NodeKind,
   type OwnershipFilter,
+  type ProcessExecutionMode,
   type Relation,
   type SystemDataFlow,
   type Workflow,
@@ -48,6 +50,7 @@ type Section =
 type AssetFilter = "all" | "system" | "data";
 
 type PendingExtraction = {
+  workflowId: string;
   review: ExtractionReview;
   provider: string;
   answers: Record<string, string>;
@@ -81,6 +84,7 @@ type RevisionDetail = RevisionSummary & {
 type StepNodeData = {
   step: LensNode;
   systems: string[];
+  executingSystem?: string;
   data: Array<{ label: string; relation: Relation }>;
 };
 
@@ -92,6 +96,7 @@ const relationLabel: Record<Relation, string> = {
   reads: "参照",
   writes: "更新",
   sends: "送信",
+  executes: "自動実行",
 };
 
 const kindLabel: Record<NodeKind, string> = {
@@ -101,7 +106,26 @@ const kindLabel: Record<NodeKind, string> = {
 };
 
 function WorkflowStepCard({ data, selected }: NodeProps<WorkflowStepNode>) {
-  const { step, systems, data: dataAssets } = data;
+  const {
+    step,
+    systems,
+    executingSystem,
+    data: dataAssets,
+  } = data;
+
+  const executionMode =
+    step.executionMode ??
+    (executingSystem
+      ? "automatic"
+      : step.actor || step.responsiblePerson
+        ? "manual"
+        : "unknown");
+  const executionLabel: Record<ProcessExecutionMode, string> = {
+    manual: "👤 手作業",
+    automatic: "⚙ 自動",
+    mixed: "👤⚙ 人＋自動",
+    unknown: "? 実行不明",
+  };
 
   return (
     <div
@@ -109,6 +133,7 @@ function WorkflowStepCard({ data, selected }: NodeProps<WorkflowStepNode>) {
         "step-node",
         selected ? "step-node--selected" : "",
         step.status === "inferred" ? "step-node--inferred" : "",
+        `step-node--execution-${executionMode}`,
       ].join(" ")}
     >
       <Handle type="target" position={Position.Left} className="step-handle" />
@@ -130,6 +155,10 @@ function WorkflowStepCard({ data, selected }: NodeProps<WorkflowStepNode>) {
       <p>{step.action ?? step.description}</p>
 
       <div className="step-ownership">
+        <span className={`execution-badge execution-badge--${executionMode}`}>
+          {executionLabel[executionMode]}
+        </span>
+        {executingSystem ? <span>⚙ {executingSystem}</span> : null}
         {step.department ? <span>🏢 {step.department}</span> : null}
         {step.responsiblePerson ? (
           <span>👤 {step.responsiblePerson}</span>
@@ -180,16 +209,29 @@ function workflowFlow(
   graph: LensGraph,
   workflowId: string,
   ownership: OwnershipFilter,
+  executionMode: "all" | ProcessExecutionMode = "all",
 ): { nodes: WorkflowStepNode[]; edges: Edge[] } {
-  const processes = getWorkflowProcesses(graph, workflowId).filter((process) =>
-    processMatchesOwnership(process, ownership),
+  const processes = getWorkflowProcesses(graph, workflowId).filter(
+    (process) =>
+      processMatchesOwnership(process, ownership) &&
+      (executionMode === "all" ||
+        getProcessExecutionMode(graph, process) === executionMode),
   );
   const processIds = new Set(processes.map((process) => process.id));
 
   const nodes: WorkflowStepNode[] = processes.map((step, index) => {
     const links = getProcessAssetLinks(graph, step.id);
+    const executingSystem = links.find(
+      (link) =>
+        link.asset.kind === "system" &&
+        link.relation === "executes",
+    )?.asset.label;
     const systems = links
-      .filter((link) => link.asset.kind === "system")
+      .filter(
+        (link) =>
+          link.asset.kind === "system" &&
+          link.relation !== "executes",
+      )
       .map((link) => link.asset.label);
     const data = links
       .filter((link) => link.asset.kind === "data")
@@ -205,7 +247,7 @@ function workflowFlow(
         x: index * 330,
         y: index % 2 === 0 ? 80 : 118,
       },
-      data: { step, systems, data },
+      data: { step, systems, executingSystem, data },
     };
   });
 
@@ -390,6 +432,16 @@ function RelationshipPanel({
 
       {node.kind === "process" ? (
         <div className="relationship-owner">
+          <span>実行方式</span>
+          <strong>
+            {node.executionMode === "automatic"
+              ? "System内で自動"
+              : node.executionMode === "mixed"
+                ? "人＋自動"
+                : node.executionMode === "manual"
+                  ? "手作業"
+                  : "未確認"}
+          </strong>
           <span>部署</span>
           <strong>{node.department ?? "未確認"}</strong>
           <span>担当者</span>
@@ -499,6 +551,7 @@ function WorkflowPicker({
 }
 
 function ReviewPanel({
+  graph,
   model,
   dirty,
   onChange,
@@ -513,6 +566,7 @@ function ReviewPanel({
   onOpenRevision,
   onCloseHistory,
 }: {
+  graph: LensGraph;
   model: PendingExtraction | null;
   dirty: boolean;
   onChange: (pending: PendingExtraction) => void;
@@ -546,6 +600,20 @@ function ReviewPanel({
   }
 
   const { review } = model;
+  const systemOptions = [
+    ...new Set(
+      graph.nodes
+        .filter((node) => node.kind === "system")
+        .map((node) => node.label),
+    ),
+  ].sort((a, b) => a.localeCompare(b, "ja"));
+  const dataOptions = [
+    ...new Set(
+      graph.nodes
+        .filter((node) => node.kind === "data")
+        .map((node) => node.label),
+    ),
+  ].sort((a, b) => a.localeCompare(b, "ja"));
 
   const changeReview = (nextReview: ExtractionReview) =>
     onChange({ ...model, review: nextReview });
@@ -575,12 +643,70 @@ function ReviewPanel({
     });
   };
 
-  const removeStep = (stepKey: string) => {
+  const addStep = () => {
+    const used = new Set(review.steps.map((step) => step.stepKey));
+    let index = review.steps.length + 1;
+    let stepKey = `manual-step-${index}`;
+    while (used.has(stepKey)) {
+      index += 1;
+      stepKey = `manual-step-${index}`;
+    }
+
+    const steps = [
+      ...review.steps,
+      {
+        stepKey,
+        name: "新しいステップ",
+        order: review.steps.length + 1,
+        actor: null,
+        department: null,
+        responsiblePerson: null,
+        executionMode: "unknown" as const,
+        executingSystem: null,
+        action: "",
+        certainty: "explicit" as const,
+        evidence: "手動追加",
+        systems: [],
+        data: [],
+      },
+    ];
+
     changeReview({
       ...review,
-      steps: review.steps
-        .filter((step) => step.stepKey !== stepKey)
-        .map((step, index) => ({ ...step, order: index + 1 })),
+      steps,
+    });
+  };
+
+  const moveStep = (stepKey: string, direction: -1 | 1) => {
+    const index = review.steps.findIndex(
+      (step) => step.stepKey === stepKey,
+    );
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= review.steps.length) return;
+
+    const steps = [...review.steps];
+    [steps[index], steps[target]] = [steps[target], steps[index]];
+    const reordered = steps.map((step, itemIndex) => ({
+      ...step,
+      order: itemIndex + 1,
+    }));
+
+    changeReview({
+      ...review,
+      steps: reordered,
+    });
+  };
+
+  const removeStep = (stepKey: string) => {
+    if (!window.confirm("この業務ステップを削除しますか？")) return;
+
+    const steps = review.steps
+      .filter((step) => step.stepKey !== stepKey)
+      .map((step, index) => ({ ...step, order: index + 1 }));
+
+    changeReview({
+      ...review,
+      steps,
       transitions: review.transitions.filter(
         (transition) =>
           transition.fromStepKey !== stepKey &&
@@ -593,6 +719,75 @@ function ReviewPanel({
         ),
       })),
     });
+  };
+
+  const updateSystem = (
+    stepKey: string,
+    index: number,
+    patch: Partial<ExtractionReview["steps"][number]["systems"][number]>,
+  ) => {
+    const step = review.steps.find((item) => item.stepKey === stepKey);
+    if (!step) return;
+    updateStep(stepKey, {
+      systems: step.systems.map((system, itemIndex) =>
+        itemIndex === index ? { ...system, ...patch } : system,
+      ),
+    });
+  };
+
+  const addSystem = (stepKey: string) => {
+    const step = review.steps.find((item) => item.stepKey === stepKey);
+    if (!step) return;
+    updateStep(stepKey, {
+      systems: [
+        ...step.systems,
+        {
+          name: "",
+          interaction: "other",
+          evidence: "手動追加",
+        },
+      ],
+    });
+  };
+
+  const updateData = (
+    stepKey: string,
+    index: number,
+    patch: Partial<ExtractionReview["steps"][number]["data"][number]>,
+  ) => {
+    const step = review.steps.find((item) => item.stepKey === stepKey);
+    if (!step) return;
+    updateStep(stepKey, {
+      data: step.data.map((data, itemIndex) =>
+        itemIndex === index ? { ...data, ...patch } : data,
+      ),
+    });
+  };
+
+  const addData = (stepKey: string) => {
+    const step = review.steps.find((item) => item.stepKey === stepKey);
+    if (!step) return;
+    updateStep(stepKey, {
+      data: [
+        ...step.data,
+        {
+          name: "",
+          operation: "read",
+          evidence: "手動追加",
+        },
+      ],
+    });
+  };
+
+  const removeStepAsset = (
+    type: "system" | "data",
+    stepKey: string,
+    index: number,
+  ) => {
+    const label = type === "system" ? "System" : "Data";
+    if (!window.confirm(`この${label}参照を削除しますか？`)) return;
+    if (type === "system") removeSystem(stepKey, index);
+    else removeData(stepKey, index);
   };
 
   const removeSystem = (stepKey: string, index: number) => {
@@ -611,6 +806,46 @@ function ReviewPanel({
     });
   };
 
+  const addTransition = () => {
+    const from = review.steps[0]?.stepKey ?? "";
+    const to = review.steps[1]?.stepKey ?? review.steps[0]?.stepKey ?? "";
+
+    changeReview({
+      ...review,
+      transitions: [
+        ...review.transitions,
+        {
+          fromStepKey: from,
+          toStepKey: to,
+          condition: null,
+          evidence: "手動追加",
+        },
+      ],
+    });
+  };
+
+  const updateTransition = (
+    index: number,
+    patch: Partial<ExtractionReview["transitions"][number]>,
+  ) => {
+    changeReview({
+      ...review,
+      transitions: review.transitions.map((transition, itemIndex) =>
+        itemIndex === index ? { ...transition, ...patch } : transition,
+      ),
+    });
+  };
+
+  const removeTransition = (index: number) => {
+    if (!window.confirm("このステップ間の接続を削除しますか？")) return;
+    changeReview({
+      ...review,
+      transitions: review.transitions.filter(
+        (_, itemIndex) => itemIndex !== index,
+      ),
+    });
+  };
+
   const updateDataFlow = (
     index: number,
     patch: Partial<ExtractionReview["dataFlows"][number]>,
@@ -623,7 +858,43 @@ function ReviewPanel({
     });
   };
 
+  const addDataFlow = () => {
+    changeReview({
+      ...review,
+      dataFlows: [
+        ...review.dataFlows,
+        {
+          sourceSystem: "",
+          targetSystem: "",
+          data: [],
+          transferType: "unknown",
+          direction: "unknown",
+          automation: "unknown",
+          frequency: null,
+          evidence: "手動追加",
+          certainty: "explicit",
+          relatedStepKeys: [],
+        },
+      ],
+    });
+  };
+
+  const toggleDataFlowStep = (
+    index: number,
+    stepKey: string,
+  ) => {
+    const flow = review.dataFlows[index];
+    if (!flow) return;
+
+    const relatedStepKeys = flow.relatedStepKeys.includes(stepKey)
+      ? flow.relatedStepKeys.filter((key) => key !== stepKey)
+      : [...flow.relatedStepKeys, stepKey];
+
+    updateDataFlow(index, { relatedStepKeys });
+  };
+
   const removeDataFlow = (index: number) => {
+    if (!window.confirm("このSystem間データフローを削除しますか？")) return;
     changeReview({
       ...review,
       dataFlows: review.dataFlows.filter(
@@ -634,6 +905,16 @@ function ReviewPanel({
 
   return (
     <aside className="review-panel">
+      <datalist id="existing-system-options">
+        {systemOptions.map((name) => (
+          <option key={name} value={name} />
+        ))}
+      </datalist>
+      <datalist id="existing-data-options">
+        {dataOptions.map((name) => (
+          <option key={name} value={name} />
+        ))}
+      </datalist>
       <div className="review-header">
         <div>
           <div className="eyebrow">
@@ -758,126 +1039,360 @@ function ReviewPanel({
       </div>
 
       <div className="review-scroll">
-        <div className="review-section-title">
-          <span>業務ステップ</span>
-          <b>{review.steps.length}</b>
-        </div>
+        <details className="model-section" open>
+          <summary>
+            <span>業務ステップ</span>
+            <b>{review.steps.length}</b>
+          </summary>
 
-        <div className="review-steps">
-          {review.steps.map((step) => (
-            <article
-              key={step.stepKey}
-              className="review-step review-step--editable"
-            >
-              <div className="review-step__top">
-                <span>{String(step.order).padStart(2, "0")}</span>
-                <input
-                  className="review-step-name"
-                  value={step.name}
+          <div className="model-section-toolbar">
+            <span>順番・担当・自動処理・System/Dataを直接編集できます。</span>
+            <button className="button-secondary" onClick={addStep}>
+              ＋ ステップ
+            </button>
+          </div>
+
+          <div className="review-steps">
+            {review.steps.map((step, stepIndex) => (
+              <article
+                key={step.stepKey}
+                className="review-step review-step--editable"
+              >
+                <div className="review-step__top review-step__top--actions">
+                  <span>{String(step.order).padStart(2, "0")}</span>
+                  <input
+                    className="review-step-name"
+                    value={step.name}
+                    placeholder="ステップ名"
+                    onChange={(event) =>
+                      updateStep(step.stepKey, { name: event.target.value })
+                    }
+                  />
+                  <div className="step-order-actions">
+                    <button
+                      title="1つ前へ"
+                      disabled={stepIndex === 0}
+                      onClick={() => moveStep(step.stepKey, -1)}
+                    >
+                      ↑
+                    </button>
+                    <button
+                      title="1つ後へ"
+                      disabled={stepIndex === review.steps.length - 1}
+                      onClick={() => moveStep(step.stepKey, 1)}
+                    >
+                      ↓
+                    </button>
+                    <button
+                      className="review-delete"
+                      title="このステップを削除"
+                      onClick={() => removeStep(step.stepKey)}
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+
+                <textarea
+                  className="review-step-action"
+                  value={step.action}
+                  placeholder="このステップで何をするか"
                   onChange={(event) =>
-                    updateStep(step.stepKey, { name: event.target.value })
+                    updateStep(step.stepKey, { action: event.target.value })
+                  }
+                />
+
+                <div className="step-execution-editor">
+                  <label>
+                    <span>実行方式</span>
+                    <select
+                      value={step.executionMode}
+                      onChange={(event) =>
+                        updateStep(step.stepKey, {
+                          executionMode:
+                            event.target.value as ProcessExecutionMode,
+                        })
+                      }
+                    >
+                      <option value="manual">手作業</option>
+                      <option value="automatic">System内で自動</option>
+                      <option value="mixed">人＋自動</option>
+                      <option value="unknown">未確認</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>実行System</span>
+                    <input
+                      value={step.executingSystem ?? ""}
+                      list="existing-system-options"
+                      placeholder="例: SAP / ERP"
+                      onChange={(event) =>
+                        updateStep(step.stepKey, {
+                          executingSystem: event.target.value || null,
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+
+                <div className="review-step-meta review-step-meta--ownership">
+                  <input
+                    value={step.actor ?? ""}
+                    placeholder="役割 例: 営業担当"
+                    onChange={(event) =>
+                      updateStep(step.stepKey, {
+                        actor: event.target.value || null,
+                      })
+                    }
+                  />
+                  <input
+                    value={step.department ?? ""}
+                    placeholder="部署 例: 営業部"
+                    onChange={(event) =>
+                      updateStep(step.stepKey, {
+                        department: event.target.value || null,
+                      })
+                    }
+                  />
+                  <input
+                    value={step.responsiblePerson ?? ""}
+                    placeholder="担当者 例: 田中さん"
+                    onChange={(event) =>
+                      updateStep(step.stepKey, {
+                        responsiblePerson: event.target.value || null,
+                      })
+                    }
+                  />
+                </div>
+
+                <div className="review-evidence">
+                  {step.certainty === "explicit" ? "明示" : "AI推定"} · 根拠:{" "}
+                  {step.evidence || "—"}
+                </div>
+
+                <details className="step-subsection" open>
+                  <summary>
+                    <span>利用System</span>
+                    <b>{step.systems.length}</b>
+                  </summary>
+                  <div className="resource-editor">
+                    {step.systems.map((system, index) => (
+                      <div
+                        className="resource-row"
+                        key={`s-${step.stepKey}-${index}`}
+                      >
+                        <input
+                          value={system.name}
+                          list="existing-system-options"
+                          placeholder="System名"
+                          onChange={(event) =>
+                            updateSystem(step.stepKey, index, {
+                              name: event.target.value,
+                            })
+                          }
+                        />
+                        <select
+                          value={system.interaction}
+                          onChange={(event) =>
+                            updateSystem(step.stepKey, index, {
+                              interaction:
+                                event.target
+                                  .value as typeof system.interaction,
+                            })
+                          }
+                        >
+                          <option value="view">閲覧</option>
+                          <option value="search">検索</option>
+                          <option value="input">入力</option>
+                          <option value="approve">承認</option>
+                          <option value="send">送信</option>
+                          <option value="receive">受信</option>
+                          <option value="other">その他</option>
+                        </select>
+                        <button
+                          className="row-remove"
+                          title="System参照を削除"
+                          onClick={() =>
+                            removeStepAsset(
+                              "system",
+                              step.stepKey,
+                              index,
+                            )
+                          }
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      className="inline-add"
+                      onClick={() => addSystem(step.stepKey)}
+                    >
+                      ＋ System
+                    </button>
+                  </div>
+                </details>
+
+                <details className="step-subsection" open>
+                  <summary>
+                    <span>Data</span>
+                    <b>{step.data.length}</b>
+                  </summary>
+                  <div className="resource-editor">
+                    {step.data.map((data, index) => (
+                      <div
+                        className="resource-row"
+                        key={`d-${step.stepKey}-${index}`}
+                      >
+                        <input
+                          value={data.name}
+                          list="existing-data-options"
+                          placeholder="Data / 文書名"
+                          onChange={(event) =>
+                            updateData(step.stepKey, index, {
+                              name: event.target.value,
+                            })
+                          }
+                        />
+                        <select
+                          value={data.operation}
+                          onChange={(event) =>
+                            updateData(step.stepKey, index, {
+                              operation:
+                                event.target
+                                  .value as typeof data.operation,
+                            })
+                          }
+                        >
+                          <option value="read">参照</option>
+                          <option value="create">作成</option>
+                          <option value="update">更新</option>
+                          <option value="send">送信</option>
+                          <option value="receive">受信</option>
+                        </select>
+                        <button
+                          className="row-remove"
+                          title="Data参照を削除"
+                          onClick={() =>
+                            removeStepAsset("data", step.stepKey, index)
+                          }
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      className="inline-add"
+                      onClick={() => addData(step.stepKey)}
+                    >
+                      ＋ Data
+                    </button>
+                  </div>
+                </details>
+              </article>
+            ))}
+          </div>
+        </details>
+
+        <details className="model-section">
+          <summary>
+            <span>ステップ間の接続・条件分岐</span>
+            <b>{review.transitions.length}</b>
+          </summary>
+
+          <div className="model-section-toolbar">
+            <span>
+              通常の順番だけでなく「在庫あり」「承認NG」などの条件分岐を編集できます。
+            </span>
+            <button className="button-secondary" onClick={addTransition}>
+              ＋ 接続
+            </button>
+          </div>
+
+          <div className="transition-editor">
+            {review.transitions.map((transition, index) => (
+              <div
+                className="transition-row"
+                key={`${transition.fromStepKey}-${transition.toStepKey}-${index}`}
+              >
+                <select
+                  value={transition.fromStepKey}
+                  onChange={(event) =>
+                    updateTransition(index, {
+                      fromStepKey: event.target.value,
+                    })
+                  }
+                >
+                  {review.steps.map((step) => (
+                    <option key={step.stepKey} value={step.stepKey}>
+                      {step.order}. {step.name}
+                    </option>
+                  ))}
+                </select>
+                <span>→</span>
+                <select
+                  value={transition.toStepKey}
+                  onChange={(event) =>
+                    updateTransition(index, {
+                      toStepKey: event.target.value,
+                    })
+                  }
+                >
+                  {review.steps.map((step) => (
+                    <option key={step.stepKey} value={step.stepKey}>
+                      {step.order}. {step.name}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  value={transition.condition ?? ""}
+                  placeholder="条件（空欄なら通常遷移）"
+                  onChange={(event) =>
+                    updateTransition(index, {
+                      condition: event.target.value || null,
+                    })
                   }
                 />
                 <button
-                  className="review-delete"
-                  title="このステップを除外"
-                  onClick={() => removeStep(step.stepKey)}
+                  className="row-remove"
+                  title="接続を削除"
+                  onClick={() => removeTransition(index)}
                 >
                   ×
                 </button>
               </div>
+            ))}
+            {review.transitions.length === 0 ? (
+              <p className="inline-empty">
+                接続はありません。必要な場合だけ「＋ 接続」から追加してください。
+              </p>
+            ) : null}
+          </div>
+        </details>
 
-              <textarea
-                className="review-step-action"
-                value={step.action}
-                onChange={(event) =>
-                  updateStep(step.stepKey, { action: event.target.value })
-                }
-              />
+        <details className="model-section" open>
+          <summary>
+            <span>System間データフロー</span>
+            <b>{review.dataFlows.length}</b>
+          </summary>
 
-              <div className="review-step-meta review-step-meta--ownership">
-                <input
-                  value={step.actor ?? ""}
-                  placeholder="役割 例: 営業担当"
-                  onChange={(event) =>
-                    updateStep(step.stepKey, {
-                      actor: event.target.value || null,
-                    })
-                  }
-                />
-                <input
-                  value={step.department ?? ""}
-                  placeholder="部署 例: 営業部"
-                  onChange={(event) =>
-                    updateStep(step.stepKey, {
-                      department: event.target.value || null,
-                    })
-                  }
-                />
-                <input
-                  value={step.responsiblePerson ?? ""}
-                  placeholder="担当者 例: 田中さん"
-                  onChange={(event) =>
-                    updateStep(step.stepKey, {
-                      responsiblePerson: event.target.value || null,
-                    })
-                  }
-                />
-              </div>
-              <div className="review-evidence">
-                {step.certainty === "explicit" ? "明示" : "AI推定"} · 根拠:{" "}
-                {step.evidence || "—"}
-              </div>
+          <div className="model-section-toolbar">
+            <span>連携だけでなくCSV転送や人手転記もここで追加できます。</span>
+            <button className="button-secondary" onClick={addDataFlow}>
+              ＋ Data Flow
+            </button>
+          </div>
 
-              {(step.systems.length > 0 || step.data.length > 0) && (
-                <div className="review-assets review-assets--editable">
-                  {step.systems.map((system, index) => (
-                    <span
-                      key={`s-${system.name}-${index}`}
-                      className="asset-chip asset-chip--system"
-                    >
-                      {system.name} · {system.interaction}
-                      <button
-                        title="除外"
-                        onClick={() => removeSystem(step.stepKey, index)}
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                  {step.data.map((data, index) => (
-                    <span
-                      key={`d-${data.name}-${data.operation}-${index}`}
-                      className="asset-chip asset-chip--data"
-                    >
-                      {data.name} · {data.operation}
-                      <button
-                        title="除外"
-                        onClick={() => removeData(step.stepKey, index)}
-                      >
-                        ×
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              )}
-            </article>
-          ))}
-        </div>
-
-        {review.dataFlows.length > 0 ? (
           <div className="review-dataflows">
-            <div className="review-section-title">
-              <span>System間データフロー</span>
-              <b>{review.dataFlows.length}</b>
-            </div>
             {review.dataFlows.map((flow, index) => (
               <article
-                key={`${flow.sourceSystem}-${flow.targetSystem}-${index}`}
+                key={index}
               >
                 <div className="review-dataflow-title">
                   <input
                     value={flow.sourceSystem}
+                    list="existing-system-options"
+                    placeholder="送信元System"
                     onChange={(event) =>
                       updateDataFlow(index, {
                         sourceSystem: event.target.value,
@@ -887,6 +1402,8 @@ function ReviewPanel({
                   <span>→</span>
                   <input
                     value={flow.targetSystem}
+                    list="existing-system-options"
+                    placeholder="送信先System"
                     onChange={(event) =>
                       updateDataFlow(index, {
                         targetSystem: event.target.value,
@@ -896,97 +1413,150 @@ function ReviewPanel({
                   <button
                     className="review-delete"
                     onClick={() => removeDataFlow(index)}
-                    title="このデータフローを除外"
+                    title="このデータフローを削除"
                   >
                     ×
                   </button>
                 </div>
-                <input
-                  className="review-dataflow-data"
-                  value={flow.data.join(", ")}
-                  placeholder="流れるデータ（カンマ区切り）"
-                  onChange={(event) =>
-                    updateDataFlow(index, {
-                      data: event.target.value
-                        .split(",")
-                        .map((item) => item.trim())
-                        .filter(Boolean),
-                    })
-                  }
-                />
-                <div className="review-dataflow-options">
-                  <select
-                    value={flow.transferType}
-                    onChange={(event) =>
-                      updateDataFlow(index, {
-                        transferType:
-                          event.target.value as typeof flow.transferType,
-                      })
-                    }
-                  >
-                    {[
-                      "api",
-                      "file",
-                      "database",
-                      "message",
-                      "email",
-                      "manual",
-                      "unknown",
-                    ].map((item) => (
-                      <option key={item} value={item}>
-                        {item}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={flow.direction}
-                    onChange={(event) =>
-                      updateDataFlow(index, {
-                        direction:
-                          event.target.value as typeof flow.direction,
-                      })
-                    }
-                  >
-                    {["push", "pull", "bidirectional", "unknown"].map(
-                      (item) => (
-                        <option key={item} value={item}>
-                          {item}
-                        </option>
-                      ),
-                    )}
-                  </select>
-                  <select
-                    value={flow.automation}
-                    onChange={(event) =>
-                      updateDataFlow(index, {
-                        automation:
-                          event.target.value as typeof flow.automation,
-                      })
-                    }
-                  >
-                    {["automatic", "manual", "mixed", "unknown"].map(
-                      (item) => (
-                        <option key={item} value={item}>
-                          {item}
-                        </option>
-                      ),
-                    )}
-                  </select>
+
+                <label className="dataflow-field">
+                  <span>流れるData</span>
                   <input
-                    value={flow.frequency ?? ""}
-                    placeholder="頻度 例: 15分ごと"
+                    className="review-dataflow-data"
+                    value={flow.data.join(",")}
+                    placeholder="受注データ, 出荷指示"
                     onChange={(event) =>
                       updateDataFlow(index, {
-                        frequency: event.target.value || null,
+                        data: event.target.value.split(","),
+                      })
+                    }
+                    onBlur={() =>
+                      updateDataFlow(index, {
+                        data: flow.data.map((item) => item.trim()).filter(Boolean),
                       })
                     }
                   />
+                </label>
+
+                <div className="review-dataflow-options">
+                  <label>
+                    <span>方式</span>
+                    <select
+                      value={flow.transferType}
+                      onChange={(event) =>
+                        updateDataFlow(index, {
+                          transferType:
+                            event.target
+                              .value as typeof flow.transferType,
+                        })
+                      }
+                    >
+                      {[
+                        "api",
+                        "file",
+                        "database",
+                        "message",
+                        "email",
+                        "manual",
+                        "unknown",
+                      ].map((item) => (
+                        <option key={item} value={item}>
+                          {item}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>方向</span>
+                    <select
+                      value={flow.direction}
+                      onChange={(event) =>
+                        updateDataFlow(index, {
+                          direction:
+                            event.target.value as typeof flow.direction,
+                        })
+                      }
+                    >
+                      {["push", "pull", "bidirectional", "unknown"].map(
+                        (item) => (
+                          <option key={item} value={item}>
+                            {item}
+                          </option>
+                        ),
+                      )}
+                    </select>
+                  </label>
+                  <label>
+                    <span>自動化</span>
+                    <select
+                      value={flow.automation}
+                      onChange={(event) =>
+                        updateDataFlow(index, {
+                          automation:
+                            event.target.value as typeof flow.automation,
+                        })
+                      }
+                    >
+                      {["automatic", "manual", "mixed", "unknown"].map(
+                        (item) => (
+                          <option key={item} value={item}>
+                            {item}
+                          </option>
+                        ),
+                      )}
+                    </select>
+                  </label>
+                  <label>
+                    <span>頻度</span>
+                    <input
+                      value={flow.frequency ?? ""}
+                      placeholder="例: 15分ごと"
+                      onChange={(event) =>
+                        updateDataFlow(index, {
+                          frequency: event.target.value || null,
+                        })
+                      }
+                    />
+                  </label>
                 </div>
-                <small>根拠: {flow.evidence || "—"}</small>
+                <label className="dataflow-field">
+                  <span>メモ / 根拠</span>
+                  <input
+                    value={flow.evidence}
+                    placeholder="例: 15分ごとにERPからWMSへCSV送信"
+                    onChange={(event) =>
+                      updateDataFlow(index, {
+                        evidence: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+
+                <div className="dataflow-related-steps">
+                  <span>関連ステップ</span>
+                  <div>
+                    {review.steps.map((step) => {
+                      const selected = flow.relatedStepKeys.includes(
+                        step.stepKey,
+                      );
+                      return (
+                        <button
+                          key={step.stepKey}
+                          className={selected ? "active" : ""}
+                          onClick={() =>
+                            toggleDataFlowStep(index, step.stepKey)
+                          }
+                        >
+                          {step.order}. {step.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </article>
             ))}
           </div>
-        ) : null}
+        </details>
 
         {review.warnings.length > 0 ? (
           <div className="review-warning">
@@ -1160,8 +1730,9 @@ function InterviewsView({
   const isStructured = existingProcessCount > 0;
 
   const currentModel: PendingExtraction | null =
-    workflow && isStructured
+    workflow
       ? {
+          workflowId: workflow.id,
           review: buildWorkflowReviewFromGraph(graph, workflow.id),
           provider: "current-state",
           answers: {},
@@ -1169,7 +1740,14 @@ function InterviewsView({
         }
       : null;
 
-  const model = pending ?? currentModel;
+  const model =
+    pending && pending.workflowId === selectedWorkflowId
+      ? pending
+      : currentModel;
+  const selectedPending =
+    pending && pending.workflowId === selectedWorkflowId
+      ? pending
+      : null;
 
   async function refreshHistory(workflowId = selectedWorkflowId) {
     if (!workflowId) {
@@ -1348,6 +1926,7 @@ function InterviewsView({
 
       setProvider(payload.provider ?? "unknown");
       setPending({
+        workflowId: workflow.id,
         review: payload.review,
         provider: payload.provider ?? "unknown",
         answers: {},
@@ -1363,7 +1942,9 @@ function InterviewsView({
   }
 
   async function refineDraft() {
-    if (!workflow || !pending) return;
+    if (!workflow || !selectedPending) return;
+
+    const pending = selectedPending;
 
     const interview = transcripts[workflow.id]?.trim();
     if (!interview) return;
@@ -1405,6 +1986,7 @@ function InterviewsView({
 
       setProvider(payload.provider ?? pending.provider);
       setPending({
+        workflowId: workflow.id,
         review: payload.review,
         provider: payload.provider ?? pending.provider,
         answers: {},
@@ -1422,7 +2004,9 @@ function InterviewsView({
   }
 
   async function applyDraft() {
-    if (!workflow || !pending) return;
+    if (!workflow || !selectedPending) return;
+
+    const pending = selectedPending;
 
     setApplying(true);
     setError(null);
@@ -1472,6 +2056,29 @@ function InterviewsView({
       setApplying(false);
     }
   }
+
+  const selectBusiness = (workflowId: string) => {
+    if (
+      selectedPending &&
+      selectedPending.workflowId !== workflowId &&
+      !window.confirm(
+        "現在の業務構造に未保存の変更があります。変更を破棄して別の業務へ移動しますか？",
+      )
+    ) {
+      return;
+    }
+
+    if (
+      selectedPending &&
+      selectedPending.workflowId !== workflowId
+    ) {
+      setPending(null);
+    }
+
+    setSelectedWorkflowId(workflowId);
+    setError(null);
+    setBranching(false);
+  };
 
   const scenarioLabel = (item: Workflow) => {
     if (item.scenarioLabel) return item.scenarioLabel;
@@ -1538,12 +2145,7 @@ function InterviewsView({
               <button
                 key={item.id}
                 className={selectedWorkflowId === item.id ? "active" : ""}
-                onClick={() => {
-                  setSelectedWorkflowId(item.id);
-                  setPending(null);
-                  setError(null);
-                  setBranching(false);
-                }}
+                onClick={() => selectBusiness(item.id)}
               >
                 <span>
                   <strong>{item.name}</strong>
@@ -1763,8 +2365,9 @@ PDFを見ながらSAPに受注内容を入力します…"
       </main>
 
       <ReviewPanel
+        graph={graph}
         model={model}
-        dirty={Boolean(pending)}
+        dirty={Boolean(selectedPending)}
         onChange={setPending}
         onDiscard={() => setPending(null)}
         onRefine={refineDraft}
@@ -1795,15 +2398,27 @@ function WorkflowView({
     department: "",
     responsiblePerson: "",
   });
+  const [executionMode, setExecutionMode] = useState<
+    "all" | ProcessExecutionMode
+  >("all");
 
   const workflow = graph.workflows.find((item) => item.id === workflowId);
   const filter = ownershipFilter(ownership);
-  const processes = getWorkflowProcesses(graph, workflowId).filter((process) =>
-    processMatchesOwnership(process, filter),
+  const processes = getWorkflowProcesses(graph, workflowId).filter(
+    (process) =>
+      processMatchesOwnership(process, filter) &&
+      (executionMode === "all" ||
+        getProcessExecutionMode(graph, process) === executionMode),
   );
   const flow = useMemo(
-    () => workflowFlow(graph, workflowId, filter),
-    [graph, workflowId, ownership.department, ownership.responsiblePerson],
+    () => workflowFlow(graph, workflowId, filter, executionMode),
+    [
+      graph,
+      workflowId,
+      ownership.department,
+      ownership.responsiblePerson,
+      executionMode,
+    ],
   );
 
   const selectedNode =
@@ -1837,14 +2452,34 @@ function WorkflowView({
               setSelectedNodeId(null);
             }}
           />
-          <OwnershipFilters
-            graph={graph}
-            value={ownership}
-            onChange={(value) => {
-              setOwnership(value);
-              setSelectedNodeId(null);
-            }}
-          />
+          <div className="workflow-filter-row">
+            <OwnershipFilters
+              graph={graph}
+              value={ownership}
+              onChange={(value) => {
+                setOwnership(value);
+                setSelectedNodeId(null);
+              }}
+            />
+            <label className="execution-filter">
+              <span>実行方式</span>
+              <select
+                value={executionMode}
+                onChange={(event) => {
+                  setExecutionMode(
+                    event.target.value as "all" | ProcessExecutionMode,
+                  );
+                  setSelectedNodeId(null);
+                }}
+              >
+                <option value="all">すべて</option>
+                <option value="manual">手作業</option>
+                <option value="automatic">System内で自動</option>
+                <option value="mixed">人＋自動</option>
+                <option value="unknown">未確認</option>
+              </select>
+            </label>
+          </div>
         </div>
       </header>
 
@@ -1864,6 +2499,18 @@ function WorkflowView({
         <div>
           <span>データ</span>
           <strong>{dataIds.size}</strong>
+        </div>
+        <div>
+          <span>自動ステップ</span>
+          <strong>
+            {
+              processes.filter(
+                (process) =>
+                  getProcessExecutionMode(graph, process) === "automatic" ||
+                  getProcessExecutionMode(graph, process) === "mixed",
+              ).length
+            }
+          </strong>
         </div>
       </div>
 

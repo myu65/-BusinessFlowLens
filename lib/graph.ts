@@ -1,6 +1,18 @@
 export type NodeKind = "process" | "system" | "data";
 export type Confidence = "confirmed" | "inferred" | "unknown";
-export type Relation = "next" | "uses" | "reads" | "writes" | "sends";
+export type Relation =
+  | "next"
+  | "uses"
+  | "reads"
+  | "writes"
+  | "sends"
+  | "executes";
+
+export type ProcessExecutionMode =
+  | "manual"
+  | "automatic"
+  | "mixed"
+  | "unknown";
 
 export type WorkflowScenario =
   | "current"
@@ -11,6 +23,9 @@ export type Workflow = {
   id: string;
   name: string;
   description?: string;
+  summary?: string;
+  trigger?: string | null;
+  outcome?: string | null;
   familyId?: string;
   scenario?: WorkflowScenario;
   scenarioLabel?: string;
@@ -30,6 +45,7 @@ export type LensNode = {
   actor?: string;
   department?: string;
   responsiblePerson?: string;
+  executionMode?: ProcessExecutionMode;
   evidence?: string;
   stepOrder?: number;
   action?: string;
@@ -96,6 +112,7 @@ export type GraphPatchNode = {
   actor?: string | null;
   department?: string | null;
   responsiblePerson?: string | null;
+  executionMode?: ProcessExecutionMode | null;
   evidence?: string | null;
   stepOrder?: number | null;
   action?: string | null;
@@ -146,6 +163,8 @@ export type ExtractionReviewStep = {
   actor: string | null;
   department: string | null;
   responsiblePerson: string | null;
+  executionMode: ProcessExecutionMode;
+  executingSystem: string | null;
   action: string;
   certainty: "explicit" | "inferred";
   evidence: string;
@@ -328,6 +347,8 @@ export function replaceWorkflowGraph(
       existing.department = patchNode.department ?? existing.department;
       existing.responsiblePerson =
         patchNode.responsiblePerson ?? existing.responsiblePerson;
+      existing.executionMode =
+        patchNode.executionMode ?? existing.executionMode;
       existing.evidence = patchNode.evidence ?? existing.evidence;
       existing.stepOrder = patchNode.stepOrder ?? existing.stepOrder;
       existing.action = patchNode.action ?? existing.action;
@@ -345,6 +366,7 @@ export function replaceWorkflowGraph(
       actor: patchNode.actor ?? undefined,
       department: patchNode.department ?? undefined,
       responsiblePerson: patchNode.responsiblePerson ?? undefined,
+      executionMode: patchNode.executionMode ?? undefined,
       evidence: patchNode.evidence ?? undefined,
       stepOrder: patchNode.stepOrder ?? undefined,
       action: patchNode.action ?? undefined,
@@ -1209,9 +1231,15 @@ export function buildWorkflowReviewFromGraph(
   const steps: ExtractionReviewStep[] = processes.map((process, index) => {
     const systems: ExtractionReviewStep["systems"] = [];
     const data: ExtractionReviewStep["data"] = [];
+    let executingSystem: string | null = null;
 
     for (const link of getProcessAssetLinks(graph, process.id)) {
       if (link.asset.kind === "system") {
+        if (link.relation === "executes") {
+          executingSystem = link.asset.label;
+          continue;
+        }
+
         const interaction =
           link.label === "search"
             ? "search"
@@ -1234,13 +1262,17 @@ export function buildWorkflowReviewFromGraph(
 
       if (link.asset.kind === "data") {
         const operation =
-          link.relation === "reads"
-            ? "read"
-            : link.relation === "writes"
-              ? "update"
-              : link.relation === "sends"
-                ? "send"
-                : "read";
+          link.label === "create"
+            ? "create"
+            : link.label === "receive"
+              ? "receive"
+              : link.relation === "reads"
+                ? "read"
+                : link.relation === "writes"
+                  ? "update"
+                  : link.relation === "sends"
+                    ? "send"
+                    : "read";
 
         data.push({
           name: link.asset.label,
@@ -1258,6 +1290,14 @@ export function buildWorkflowReviewFromGraph(
       actor: process.actor ?? null,
       department: process.department ?? null,
       responsiblePerson: process.responsiblePerson ?? null,
+      executionMode:
+        process.executionMode ??
+        (executingSystem
+          ? "automatic"
+          : process.actor || process.responsiblePerson
+            ? "manual"
+            : "unknown"),
+      executingSystem,
       action: process.action ?? process.description,
       certainty:
         process.status === "confirmed"
@@ -1317,10 +1357,10 @@ export function buildWorkflowReviewFromGraph(
 
   return {
     summary:
-      workflow?.description ??
+      workflow?.summary ?? workflow?.description ??
       (workflow ? `${workflow.name}の現在の業務構造` : ""),
-    trigger: null,
-    outcome: null,
+    trigger: workflow?.trigger ?? null,
+    outcome: workflow?.outcome ?? null,
     steps,
     transitions,
     dataFlows,
@@ -1421,6 +1461,9 @@ export function branchWorkflowScenario(
     }));
 
   const workflow: Workflow = {
+    summary: sourceWorkflow.summary,
+    trigger: sourceWorkflow.trigger,
+    outcome: sourceWorkflow.outcome,
     ...nextWorkflow,
     familyId: nextWorkflow.familyId ?? workflowFamilyId(sourceWorkflow),
     basedOnWorkflowId:
@@ -1434,4 +1477,28 @@ export function branchWorkflowScenario(
     edges: [...graph.edges, ...clonedEdges],
     dataFlows: [...(graph.dataFlows ?? []), ...clonedDataFlows],
   };
+}
+
+
+export function getProcessExecutionMode(
+  graph: LensGraph,
+  process: LensNode,
+): ProcessExecutionMode {
+  if (process.executionMode) return process.executionMode;
+  if (process.kind !== "process") return "unknown";
+
+  const executedBySystem = graph.edges.some(
+    (edge) =>
+      edge.relation === "executes" &&
+      edge.target === process.id &&
+      graph.nodes.some(
+        (node) =>
+          node.id === edge.source &&
+          node.kind === "system",
+      ),
+  );
+
+  if (executedBySystem) return "automatic";
+  if (process.responsiblePerson || process.actor) return "manual";
+  return "unknown";
 }
