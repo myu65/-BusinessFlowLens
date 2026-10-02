@@ -53,9 +53,13 @@ The first call does **not** see the existing canonical asset catalog. It extract
 
 The prompt explicitly avoids inventing a system just because an activity such as "check inventory" exists.
 
+### Human review and correction
+
+The first call returns only a draft. Before any canonical resolution happens, the user can edit the summary, start/end conditions, step name, actor, and action, and remove incorrectly extracted steps or System/Data mentions.
+
 ### 2. Precision-first entity resolution
 
-A separate call compares only the extracted System/Data mentions with the existing canonical assets.
+Only after the user applies that corrected draft does a separate call compare its System/Data mentions with the existing canonical assets.
 
 Each candidate is classified as:
 
@@ -67,7 +71,7 @@ The resolver prefers `uncertain` over a false merge. Uncertain assets remain vis
 
 ### Review before apply
 
-Extraction returns a preview graph and a review model. The UI shows the extracted steps, evidence, assets, warnings, and next questions first. The user explicitly chooses **この内容で反映** before the canonical graph changes.
+`/api/extract` returns the editable review draft only. It does not modify or even resolve against the canonical graph. When the user chooses **修正内容を反映**, `/api/apply` performs asset resolution against the corrected draft and then updates the canonical graph.
 
 ## UI
 
@@ -164,8 +168,8 @@ Process nodes are workflow-scoped. System/Data identities are project-wide.
 
 ## Next important work
 
-- edit individual items in the AI review before applying
 - explicit merge/split UI for uncertain shared assets
+- add/reorder steps and System/Data mentions directly in the review
 - persistence and graph version history
 - evidence history across repeated interviews
 - Snowflake metadata / lineage enrichment
