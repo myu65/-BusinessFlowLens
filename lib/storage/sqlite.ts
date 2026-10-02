@@ -28,8 +28,7 @@ type SqliteRow = Record<string, unknown>;
 
 function sqlitePath() {
   return resolve(
-    process.env.BUSINESS_FLOW_SQLITE_PATH ??
-      ".data/business-flow-lens.sqlite",
+    process.env.BUSINESS_FLOW_SQLITE_PATH ?? ".data/business-flow-lens.sqlite",
   );
 }
 
@@ -93,9 +92,7 @@ function normalizeSnapshotGraph(graph: LensGraph): LensGraph {
     let narrowed = candidates;
 
     if (expectedKind) {
-      const kindMatches = narrowed.filter(
-        (node) => node.kind === expectedKind,
-      );
+      const kindMatches = narrowed.filter((node) => node.kind === expectedKind);
       if (kindMatches.length > 0) narrowed = kindMatches;
     }
 
@@ -130,16 +127,8 @@ function normalizeSnapshotGraph(graph: LensGraph): LensGraph {
             ? "data"
             : undefined;
 
-    const source = resolveLegacyId(
-      edge.source,
-      sourceKind,
-      edge.workflowIds,
-    );
-    const target = resolveLegacyId(
-      edge.target,
-      targetKind,
-      edge.workflowIds,
-    );
+    const source = resolveLegacyId(edge.source, sourceKind, edge.workflowIds);
+    const target = resolveLegacyId(edge.target, targetKind, edge.workflowIds);
 
     if (!source || !target) continue;
     if (!validNodeIds.has(source) || !validNodeIds.has(target)) continue;
@@ -183,9 +172,7 @@ function normalizeSnapshotGraph(graph: LensGraph): LensGraph {
     const dataIds = [
       ...new Set(
         flow.dataIds
-          .map((id) =>
-            resolveLegacyId(id, "data", flow.workflowIds),
-          )
+          .map((id) => resolveLegacyId(id, "data", flow.workflowIds))
           .filter((id): id is string => Boolean(id)),
       ),
     ];
@@ -193,9 +180,7 @@ function normalizeSnapshotGraph(graph: LensGraph): LensGraph {
     const processIds = [
       ...new Set(
         flow.processIds
-          .map((id) =>
-            resolveLegacyId(id, "process", flow.workflowIds),
-          )
+          .map((id) => resolveLegacyId(id, "process", flow.workflowIds))
           .filter((id): id is string => Boolean(id)),
       ),
     ];
@@ -205,6 +190,11 @@ function normalizeSnapshotGraph(graph: LensGraph): LensGraph {
       targetSystemId,
       flow.transferType,
       [...dataIds].sort().join(","),
+      flow.direction,
+      flow.automation,
+      flow.frequency ?? "",
+      flow.evidence ?? "",
+      flow.status,
     ].join("--");
 
     const existing = flowById.get(id);
@@ -237,9 +227,7 @@ function normalizeSnapshotGraph(graph: LensGraph): LensGraph {
   };
 }
 
-export class SqliteBusinessFlowRepository
-  implements BusinessFlowRepository
-{
+export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
   private readonly db: DatabaseSync;
 
   constructor(path = sqlitePath()) {
@@ -251,106 +239,118 @@ export class SqliteBusinessFlowRepository
   }
 
   private migrate() {
-    this.db.exec([
-      "CREATE TABLE IF NOT EXISTS projects (",
-      "  id TEXT PRIMARY KEY,",
-      "  name TEXT NOT NULL,",
-      "  updated_at TEXT NOT NULL",
-      ");",
-      "CREATE TABLE IF NOT EXISTS workflows (",
-      "  project_id TEXT NOT NULL,",
-      "  id TEXT NOT NULL,",
-      "  name TEXT NOT NULL,",
-      "  description TEXT,",
-      "  family_id TEXT,",
-      "  scenario TEXT,",
-      "  scenario_label TEXT,",
-      "  based_on_workflow_id TEXT,",
-      "  effective_from TEXT,",
-      "  effective_to TEXT,",
-      "  source_notes TEXT NOT NULL DEFAULT '',",
-      "  PRIMARY KEY (project_id, id),",
-      "  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE",
-      ");",
-      "CREATE TABLE IF NOT EXISTS graph_nodes (",
-      "  project_id TEXT NOT NULL,",
-      "  id TEXT NOT NULL,",
-      "  canonical_key TEXT NOT NULL,",
-      "  kind TEXT NOT NULL,",
-      "  label TEXT NOT NULL,",
-      "  description TEXT NOT NULL,",
-      "  status TEXT NOT NULL,",
-      "  workflow_id TEXT,",
-      "  actor TEXT,",
-      "  department TEXT,",
-      "  responsible_person TEXT,",
-      "  evidence TEXT,",
-      "  step_order INTEGER,",
-      "  action TEXT,",
-      "  PRIMARY KEY (project_id, id),",
-      "  UNIQUE (project_id, canonical_key),",
-      "  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE",
-      ");",
-      "CREATE TABLE IF NOT EXISTS graph_edges (",
-      "  project_id TEXT NOT NULL,",
-      "  id TEXT NOT NULL,",
-      "  source_id TEXT NOT NULL,",
-      "  target_id TEXT NOT NULL,",
-      "  label TEXT,",
-      "  relation TEXT NOT NULL,",
-      "  workflow_ids_json TEXT NOT NULL,",
-      "  PRIMARY KEY (project_id, id),",
-      "  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE",
-      ");",
-      "CREATE TABLE IF NOT EXISTS data_flows (",
-      "  project_id TEXT NOT NULL,",
-      "  id TEXT NOT NULL,",
-      "  source_system_id TEXT NOT NULL,",
-      "  target_system_id TEXT NOT NULL,",
-      "  data_ids_json TEXT NOT NULL,",
-      "  transfer_type TEXT NOT NULL,",
-      "  direction TEXT NOT NULL,",
-      "  automation TEXT NOT NULL,",
-      "  frequency TEXT,",
-      "  evidence TEXT,",
-      "  status TEXT NOT NULL,",
-      "  workflow_ids_json TEXT NOT NULL,",
-      "  process_ids_json TEXT NOT NULL,",
-      "  PRIMARY KEY (project_id, id),",
-      "  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE",
-      ");",
-      "CREATE TABLE IF NOT EXISTS workflow_revisions (",
-      "  id INTEGER PRIMARY KEY AUTOINCREMENT,",
-      "  project_id TEXT NOT NULL,",
-      "  workflow_id TEXT NOT NULL,",
-      "  revision_number INTEGER NOT NULL,",
-      "  workflow_name TEXT NOT NULL,",
-      "  workflow_description TEXT,",
-      "  family_id TEXT,",
-      "  scenario TEXT,",
-      "  scenario_label TEXT,",
-      "  based_on_workflow_id TEXT,",
-      "  effective_from TEXT,",
-      "  effective_to TEXT,",
-      "  source_notes TEXT NOT NULL,",
-      "  follow_up_answers_json TEXT NOT NULL DEFAULT '[]',",
-      "  summary TEXT NOT NULL,",
-      "  review_json TEXT NOT NULL,",
-      "  updated_by TEXT NOT NULL,",
-      "  created_at TEXT NOT NULL,",
-      "  UNIQUE (project_id, workflow_id, revision_number),",
-      "  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE",
-      ");",
-      "CREATE INDEX IF NOT EXISTS idx_workflows_project ON workflows(project_id);",
-      "CREATE INDEX IF NOT EXISTS idx_nodes_project_kind ON graph_nodes(project_id, kind);",
-      "CREATE INDEX IF NOT EXISTS idx_nodes_project_workflow ON graph_nodes(project_id, workflow_id);",
-      "CREATE INDEX IF NOT EXISTS idx_edges_project_source ON graph_edges(project_id, source_id);",
-      "CREATE INDEX IF NOT EXISTS idx_edges_project_target ON graph_edges(project_id, target_id);",
-      "CREATE INDEX IF NOT EXISTS idx_data_flows_project_source ON data_flows(project_id, source_system_id);",
-      "CREATE INDEX IF NOT EXISTS idx_data_flows_project_target ON data_flows(project_id, target_system_id);",
-      "CREATE INDEX IF NOT EXISTS idx_workflow_revisions_lookup ON workflow_revisions(project_id, workflow_id, revision_number DESC);",
-    ].join("\n"));
+    this.db.exec(
+      [
+        "CREATE TABLE IF NOT EXISTS projects (",
+        "  id TEXT PRIMARY KEY,",
+        "  name TEXT NOT NULL,",
+        "  updated_at TEXT NOT NULL",
+        ");",
+        "CREATE TABLE IF NOT EXISTS workflows (",
+        "  project_id TEXT NOT NULL,",
+        "  id TEXT NOT NULL,",
+        "  name TEXT NOT NULL,",
+        "  description TEXT,",
+        "  family_id TEXT,",
+        "  scenario TEXT,",
+        "  scenario_label TEXT,",
+        "  based_on_workflow_id TEXT,",
+        "  effective_from TEXT,",
+        "  effective_to TEXT,",
+        "  source_notes TEXT NOT NULL DEFAULT '',",
+        "  PRIMARY KEY (project_id, id),",
+        "  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE",
+        ");",
+        "CREATE TABLE IF NOT EXISTS graph_nodes (",
+        "  project_id TEXT NOT NULL,",
+        "  id TEXT NOT NULL,",
+        "  canonical_key TEXT NOT NULL,",
+        "  kind TEXT NOT NULL,",
+        "  label TEXT NOT NULL,",
+        "  description TEXT NOT NULL,",
+        "  status TEXT NOT NULL,",
+        "  workflow_id TEXT,",
+        "  actor TEXT,",
+        "  department TEXT,",
+        "  responsible_person TEXT,",
+        "  evidence TEXT,",
+        "  step_order INTEGER,",
+        "  action TEXT,",
+        "  PRIMARY KEY (project_id, id),",
+        "  UNIQUE (project_id, canonical_key),",
+        "  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE",
+        ");",
+        "CREATE TABLE IF NOT EXISTS graph_edges (",
+        "  project_id TEXT NOT NULL,",
+        "  id TEXT NOT NULL,",
+        "  source_id TEXT NOT NULL,",
+        "  target_id TEXT NOT NULL,",
+        "  label TEXT,",
+        "  relation TEXT NOT NULL,",
+        "  workflow_ids_json TEXT NOT NULL,",
+        "  PRIMARY KEY (project_id, id),",
+        "  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE",
+        ");",
+        "CREATE TABLE IF NOT EXISTS data_flows (",
+        "  project_id TEXT NOT NULL,",
+        "  id TEXT NOT NULL,",
+        "  source_system_id TEXT NOT NULL,",
+        "  target_system_id TEXT NOT NULL,",
+        "  data_ids_json TEXT NOT NULL,",
+        "  transfer_type TEXT NOT NULL,",
+        "  direction TEXT NOT NULL,",
+        "  automation TEXT NOT NULL,",
+        "  frequency TEXT,",
+        "  evidence TEXT,",
+        "  status TEXT NOT NULL,",
+        "  workflow_ids_json TEXT NOT NULL,",
+        "  process_ids_json TEXT NOT NULL,",
+        "  PRIMARY KEY (project_id, id),",
+        "  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE",
+        ");",
+        "CREATE TABLE IF NOT EXISTS workflow_revisions (",
+        "  id INTEGER PRIMARY KEY AUTOINCREMENT,",
+        "  project_id TEXT NOT NULL,",
+        "  workflow_id TEXT NOT NULL,",
+        "  revision_number INTEGER NOT NULL,",
+        "  workflow_name TEXT NOT NULL,",
+        "  workflow_description TEXT,",
+        "  family_id TEXT,",
+        "  scenario TEXT,",
+        "  scenario_label TEXT,",
+        "  based_on_workflow_id TEXT,",
+        "  effective_from TEXT,",
+        "  effective_to TEXT,",
+        "  source_notes TEXT NOT NULL,",
+        "  follow_up_answers_json TEXT NOT NULL DEFAULT '[]',",
+        "  summary TEXT NOT NULL,",
+        "  review_json TEXT NOT NULL,",
+        "  updated_by TEXT NOT NULL,",
+        "  created_at TEXT NOT NULL,",
+        "  UNIQUE (project_id, workflow_id, revision_number),",
+        "  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE",
+        ");",
+        "CREATE INDEX IF NOT EXISTS idx_workflows_project ON workflows(project_id);",
+        "CREATE INDEX IF NOT EXISTS idx_nodes_project_kind ON graph_nodes(project_id, kind);",
+        "CREATE INDEX IF NOT EXISTS idx_nodes_project_workflow ON graph_nodes(project_id, workflow_id);",
+        "CREATE INDEX IF NOT EXISTS idx_edges_project_source ON graph_edges(project_id, source_id);",
+        "CREATE INDEX IF NOT EXISTS idx_edges_project_target ON graph_edges(project_id, target_id);",
+        "CREATE INDEX IF NOT EXISTS idx_data_flows_project_source ON data_flows(project_id, source_system_id);",
+        "CREATE INDEX IF NOT EXISTS idx_data_flows_project_target ON data_flows(project_id, target_system_id);",
+        "CREATE INDEX IF NOT EXISTS idx_workflow_revisions_lookup ON workflow_revisions(project_id, workflow_id, revision_number DESC);",
+      ].join("\n"),
+    );
 
+    this.ensureColumn(
+      "graph_nodes",
+      "details_json",
+      "TEXT NOT NULL DEFAULT '{}'",
+    );
+    this.ensureColumn(
+      "workflows",
+      "review_context_json",
+      "TEXT NOT NULL DEFAULT '{}'",
+    );
     this.ensureColumn("workflows", "family_id", "TEXT");
     this.ensureColumn("workflows", "scenario", "TEXT");
     this.ensureColumn("workflows", "scenario_label", "TEXT");
@@ -361,11 +361,7 @@ export class SqliteBusinessFlowRepository
     this.ensureColumn("workflow_revisions", "family_id", "TEXT");
     this.ensureColumn("workflow_revisions", "scenario", "TEXT");
     this.ensureColumn("workflow_revisions", "scenario_label", "TEXT");
-    this.ensureColumn(
-      "workflow_revisions",
-      "based_on_workflow_id",
-      "TEXT",
-    );
+    this.ensureColumn("workflow_revisions", "based_on_workflow_id", "TEXT");
     this.ensureColumn("workflow_revisions", "effective_from", "TEXT");
     this.ensureColumn("workflow_revisions", "effective_to", "TEXT");
     this.ensureColumn(
@@ -375,20 +371,14 @@ export class SqliteBusinessFlowRepository
     );
   }
 
-  private ensureColumn(
-    table: string,
-    column: string,
-    definition: string,
-  ) {
+  private ensureColumn(table: string, column: string, definition: string) {
     const rows = this.db
       .prepare(`PRAGMA table_info(${table})`)
       .all() as SqliteRow[];
     const exists = rows.some((row) => String(row.name) === column);
 
     if (!exists) {
-      this.db.exec(
-        `ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`,
-      );
+      this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
     }
   }
 
@@ -400,9 +390,7 @@ export class SqliteBusinessFlowRepository
     if (!project) return null;
 
     const workflowRows = this.db
-      .prepare(
-        "SELECT * FROM workflows WHERE project_id = ? ORDER BY rowid",
-      )
+      .prepare("SELECT * FROM workflows WHERE project_id = ? ORDER BY rowid")
       .all(projectId) as SqliteRow[];
 
     const nodeRows = this.db
@@ -422,28 +410,22 @@ export class SqliteBusinessFlowRepository
       name: String(row.name),
       description:
         row.description == null ? undefined : String(row.description),
-      familyId:
-        row.family_id == null ? undefined : String(row.family_id),
+      familyId: row.family_id == null ? undefined : String(row.family_id),
       scenario:
         row.scenario == null
           ? undefined
           : (String(row.scenario) as Workflow["scenario"]),
       scenarioLabel:
-        row.scenario_label == null
-          ? undefined
-          : String(row.scenario_label),
+        row.scenario_label == null ? undefined : String(row.scenario_label),
       basedOnWorkflowId:
         row.based_on_workflow_id == null
           ? undefined
           : String(row.based_on_workflow_id),
       effectiveFrom:
-        row.effective_from == null
-          ? undefined
-          : String(row.effective_from),
+        row.effective_from == null ? undefined : String(row.effective_from),
       effectiveTo:
-        row.effective_to == null
-          ? undefined
-          : String(row.effective_to),
+        row.effective_to == null ? undefined : String(row.effective_to),
+      reviewContext: JSON.parse(String(row.review_context_json ?? "{}")),
     }));
 
     const transcripts = Object.fromEntries(
@@ -460,19 +442,17 @@ export class SqliteBusinessFlowRepository
       label: String(row.label),
       description: String(row.description),
       status: String(row.status) as Confidence,
-      workflowId:
-        row.workflow_id == null ? undefined : String(row.workflow_id),
+      workflowId: row.workflow_id == null ? undefined : String(row.workflow_id),
       actor: row.actor == null ? undefined : String(row.actor),
-      department:
-        row.department == null ? undefined : String(row.department),
+      department: row.department == null ? undefined : String(row.department),
       responsiblePerson:
         row.responsible_person == null
           ? undefined
           : String(row.responsible_person),
       evidence: row.evidence == null ? undefined : String(row.evidence),
-      stepOrder:
-        row.step_order == null ? undefined : Number(row.step_order),
+      stepOrder: row.step_order == null ? undefined : Number(row.step_order),
       action: row.action == null ? undefined : String(row.action),
+      ...JSON.parse(String(row.details_json ?? "{}")),
     }));
 
     const edges: LensEdge[] = edgeRows.map((row) => ({
@@ -492,8 +472,7 @@ export class SqliteBusinessFlowRepository
       transferType: String(row.transfer_type) as DataFlowTransferType,
       direction: String(row.direction) as DataFlowDirection,
       automation: String(row.automation) as DataFlowAutomation,
-      frequency:
-        row.frequency == null ? undefined : String(row.frequency),
+      frequency: row.frequency == null ? undefined : String(row.frequency),
       evidence: row.evidence == null ? undefined : String(row.evidence),
       status: String(row.status) as Confidence,
       workflowIds: parseArray(row.workflow_ids_json),
@@ -513,7 +492,6 @@ export class SqliteBusinessFlowRepository
       updatedAt: String(project.updated_at),
     };
   }
-
 
   async appendWorkflowRevision(
     revision: NewWorkflowRevision,
@@ -629,9 +607,7 @@ export class SqliteBusinessFlowRepository
     try {
       review = JSON.parse(String(row.review_json)) as ExtractionReview;
     } catch {
-      throw new Error(
-        `Revision ${revisionId} contains invalid review JSON.`,
-      );
+      throw new Error(`Revision ${revisionId} contains invalid review JSON.`);
     }
 
     return {
@@ -644,32 +620,22 @@ export class SqliteBusinessFlowRepository
         row.workflow_description == null
           ? undefined
           : String(row.workflow_description),
-      familyId:
-        row.family_id == null ? undefined : String(row.family_id),
-      scenario:
-        row.scenario == null ? undefined : String(row.scenario),
+      familyId: row.family_id == null ? undefined : String(row.family_id),
+      scenario: row.scenario == null ? undefined : String(row.scenario),
       scenarioLabel:
-        row.scenario_label == null
-          ? undefined
-          : String(row.scenario_label),
+        row.scenario_label == null ? undefined : String(row.scenario_label),
       basedOnWorkflowId:
         row.based_on_workflow_id == null
           ? undefined
           : String(row.based_on_workflow_id),
       effectiveFrom:
-        row.effective_from == null
-          ? undefined
-          : String(row.effective_from),
+        row.effective_from == null ? undefined : String(row.effective_from),
       effectiveTo:
-        row.effective_to == null
-          ? undefined
-          : String(row.effective_to),
+        row.effective_to == null ? undefined : String(row.effective_to),
       sourceNotes: String(row.source_notes ?? ""),
       followUpAnswers: (() => {
         try {
-          const parsed = JSON.parse(
-            String(row.follow_up_answers_json ?? "[]"),
-          );
+          const parsed = JSON.parse(String(row.follow_up_answers_json ?? "[]"));
           return Array.isArray(parsed) ? parsed : [];
         } catch {
           return [];
@@ -686,41 +652,51 @@ export class SqliteBusinessFlowRepository
     const now = snapshot.updatedAt || new Date().toISOString();
     const graph = normalizeSnapshotGraph(snapshot.graph);
 
-    const upsertProject = this.db.prepare([
-      "INSERT INTO projects (id, name, updated_at)",
-      "VALUES (?, ?, ?)",
-      "ON CONFLICT(id) DO UPDATE SET",
-      "  name = excluded.name,",
-      "  updated_at = excluded.updated_at",
-    ].join("\n"));
+    const upsertProject = this.db.prepare(
+      [
+        "INSERT INTO projects (id, name, updated_at)",
+        "VALUES (?, ?, ?)",
+        "ON CONFLICT(id) DO UPDATE SET",
+        "  name = excluded.name,",
+        "  updated_at = excluded.updated_at",
+      ].join("\n"),
+    );
 
-    const insertWorkflow = this.db.prepare([
-      "INSERT INTO workflows (",
-      "  project_id, id, name, description, family_id, scenario, scenario_label,",
-      "  based_on_workflow_id, effective_from, effective_to, source_notes",
-      ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    ].join("\n"));
+    const insertWorkflow = this.db.prepare(
+      [
+        "INSERT INTO workflows (",
+        "  project_id, id, name, description, family_id, scenario, scenario_label,",
+        "  based_on_workflow_id, effective_from, effective_to, source_notes, review_context_json",
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ].join("\n"),
+    );
 
-    const insertNode = this.db.prepare([
-      "INSERT INTO graph_nodes (",
-      "  project_id, id, canonical_key, kind, label, description, status,",
-      "  workflow_id, actor, department, responsible_person, evidence, step_order, action",
-      ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    ].join("\n"));
+    const insertNode = this.db.prepare(
+      [
+        "INSERT INTO graph_nodes (",
+        "  project_id, id, canonical_key, kind, label, description, status,",
+        "  workflow_id, actor, department, responsible_person, evidence, step_order, action, details_json",
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ].join("\n"),
+    );
 
-    const insertEdge = this.db.prepare([
-      "INSERT INTO graph_edges (",
-      "  project_id, id, source_id, target_id, label, relation, workflow_ids_json",
-      ") VALUES (?, ?, ?, ?, ?, ?, ?)",
-    ].join("\n"));
+    const insertEdge = this.db.prepare(
+      [
+        "INSERT INTO graph_edges (",
+        "  project_id, id, source_id, target_id, label, relation, workflow_ids_json",
+        ") VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ].join("\n"),
+    );
 
-    const insertFlow = this.db.prepare([
-      "INSERT INTO data_flows (",
-      "  project_id, id, source_system_id, target_system_id, data_ids_json,",
-      "  transfer_type, direction, automation, frequency, evidence, status,",
-      "  workflow_ids_json, process_ids_json",
-      ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    ].join("\n"));
+    const insertFlow = this.db.prepare(
+      [
+        "INSERT INTO data_flows (",
+        "  project_id, id, source_system_id, target_system_id, data_ids_json,",
+        "  transfer_type, direction, automation, frequency, evidence, status,",
+        "  workflow_ids_json, process_ids_json",
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ].join("\n"),
+    );
 
     this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -752,6 +728,7 @@ export class SqliteBusinessFlowRepository
           workflow.effectiveFrom ?? null,
           workflow.effectiveTo ?? null,
           snapshot.transcripts[workflow.id] ?? "",
+          JSON.stringify(workflow.reviewContext ?? {}),
         );
       }
 
@@ -771,6 +748,11 @@ export class SqliteBusinessFlowRepository
           node.evidence ?? null,
           node.stepOrder ?? null,
           node.action ?? null,
+          JSON.stringify({
+            technicalDetails: node.technicalDetails ?? [],
+            detailSteps: node.detailSteps ?? [],
+            aliases: node.aliases ?? [],
+          }),
         );
       }
 

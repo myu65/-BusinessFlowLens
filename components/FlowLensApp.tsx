@@ -1,5 +1,11 @@
 "use client";
 
+import {
+  AssetMergePanel,
+  StepDetailEditor,
+  TechnicalDetails,
+  WorkflowExplorer,
+} from "./ProgressiveWorkflow";
 import { useEffect, useMemo, useState } from "react";
 import {
   Background,
@@ -39,12 +45,7 @@ import {
   type WorkflowScenario,
 } from "@/lib/graph";
 
-type Section =
-  | "interviews"
-  | "workflow"
-  | "dataflow"
-  | "assets"
-  | "overview";
+type Section = "interviews" | "workflow" | "dataflow" | "assets" | "overview";
 type AssetFilter = "all" | "system" | "data";
 
 type PendingExtraction = {
@@ -121,7 +122,7 @@ function WorkflowStepCard({ data, selected }: NodeProps<WorkflowStepNode>) {
           {step.status === "confirmed"
             ? "確認済み"
             : step.status === "inferred"
-              ? "AI推定"
+              ? "推定"
               : "要確認"}
         </span>
       </div>
@@ -205,7 +206,11 @@ function workflowFlow(
         x: index * 330,
         y: index % 2 === 0 ? 80 : 118,
       },
-      data: { step, systems, data },
+      data: {
+        step: { ...step, stepOrder: step.stepOrder ?? index + 1 },
+        systems,
+        data,
+      },
     };
   });
 
@@ -342,9 +347,7 @@ function OwnershipFilters({
       {value.department || value.responsiblePerson ? (
         <button
           className="filter-clear"
-          onClick={() =>
-            onChange({ department: "", responsiblePerson: "" })
-          }
+          onClick={() => onChange({ department: "", responsiblePerson: "" })}
         >
           クリア
         </button>
@@ -398,6 +401,7 @@ function RelationshipPanel({
       ) : null}
 
       <p>{node.description}</p>
+      {node.kind === "process" ? <TechnicalDetails node={node} /> : null}
 
       <div className="relationship-section">
         <header>
@@ -410,9 +414,7 @@ function RelationshipPanel({
               key={`${item.node.id}-${item.relation}-${index}`}
               onClick={() => onSelectNode?.(item.node)}
             >
-              <span
-                className={`asset-kind asset-kind--${item.node.kind}`}
-              >
+              <span className={`asset-kind asset-kind--${item.node.kind}`}>
                 {item.node.kind === "process"
                   ? "STEP"
                   : item.node.kind === "system"
@@ -588,9 +590,7 @@ function ReviewPanel({
       ),
       dataFlows: review.dataFlows.map((flow) => ({
         ...flow,
-        relatedStepKeys: flow.relatedStepKeys.filter(
-          (key) => key !== stepKey,
-        ),
+        relatedStepKeys: flow.relatedStepKeys.filter((key) => key !== stepKey),
       })),
     });
   };
@@ -626,9 +626,7 @@ function ReviewPanel({
   const removeDataFlow = (index: number) => {
     changeReview({
       ...review,
-      dataFlows: review.dataFlows.filter(
-        (_, itemIndex) => itemIndex !== index,
-      ),
+      dataFlows: review.dataFlows.filter((_, itemIndex) => itemIndex !== index),
     });
   };
 
@@ -652,8 +650,7 @@ function ReviewPanel({
             <div>
               <div className="eyebrow">HISTORY SNAPSHOT</div>
               <strong>
-                v{historyDetail.revisionNumber} ·{" "}
-                {historyDetail.workflowName}
+                v{historyDetail.revisionNumber} · {historyDetail.workflowName}
               </strong>
               <small>
                 {new Date(historyDetail.createdAt).toLocaleString("ja-JP")} ·{" "}
@@ -705,6 +702,28 @@ function ReviewPanel({
                   <b>{String(step.order).padStart(2, "0")}</b>
                   <span>
                     <strong>{step.name}</strong>
+                    <small>
+                      {(step.detailSteps ?? [])
+                        .map(
+                          (detail) =>
+                            `${detail.action}${detail.condition ? `（${detail.condition}）` : ""}`,
+                        )
+                        .join(" → ")}
+                    </small>
+                    {(step.technicalDetails ?? []).map((detail, index) => (
+                      <small key={index}>
+                        {[
+                          detail.system,
+                          detail.module,
+                          detail.transaction,
+                          detail.hanaArea,
+                          detail.objects,
+                        ]
+                          .filter(Boolean)
+                          .join(" / ")}{" "}
+                        · 根拠：{detail.evidence || "未確認"}
+                      </small>
+                    ))}
                     <small>
                       {step.department ?? "部署未確認"} ·{" "}
                       {step.responsiblePerson ?? step.actor ?? "担当未確認"}
@@ -824,8 +843,12 @@ function ReviewPanel({
                   }
                 />
               </div>
+              <StepDetailEditor
+                step={step}
+                onChange={(patch) => updateStep(step.stepKey, patch)}
+              />
               <div className="review-evidence">
-                {step.certainty === "explicit" ? "明示" : "AI推定"} · 根拠:{" "}
+                {step.certainty === "explicit" ? "明示" : "推定"} · 根拠:{" "}
                 {step.evidence || "—"}
               </div>
 
@@ -833,10 +856,51 @@ function ReviewPanel({
                 <div className="review-assets review-assets--editable">
                   {step.systems.map((system, index) => (
                     <span
-                      key={`s-${system.name}-${index}`}
+                      key={`s-${index}`}
                       className="asset-chip asset-chip--system"
                     >
-                      {system.name} · {system.interaction}
+                      <input
+                        aria-label="システム名"
+                        value={system.name}
+                        onChange={(event) =>
+                          updateStep(step.stepKey, {
+                            systems: step.systems.map((item, i) =>
+                              i === index
+                                ? { ...item, name: event.target.value }
+                                : item,
+                            ),
+                          })
+                        }
+                      />
+                      <select
+                        aria-label="システム操作"
+                        value={system.interaction}
+                        onChange={(event) =>
+                          updateStep(step.stepKey, {
+                            systems: step.systems.map((item, i) =>
+                              i === index
+                                ? {
+                                    ...item,
+                                    interaction: event.target
+                                      .value as typeof item.interaction,
+                                  }
+                                : item,
+                            ),
+                          })
+                        }
+                      >
+                        {[
+                          "view",
+                          "search",
+                          "input",
+                          "approve",
+                          "send",
+                          "receive",
+                          "other",
+                        ].map((value) => (
+                          <option key={value}>{value}</option>
+                        ))}
+                      </select>
                       <button
                         title="除外"
                         onClick={() => removeSystem(step.stepKey, index)}
@@ -847,10 +911,45 @@ function ReviewPanel({
                   ))}
                   {step.data.map((data, index) => (
                     <span
-                      key={`d-${data.name}-${data.operation}-${index}`}
+                      key={`d-${index}`}
                       className="asset-chip asset-chip--data"
                     >
-                      {data.name} · {data.operation}
+                      <input
+                        aria-label="業務データ名"
+                        value={data.name}
+                        onChange={(event) =>
+                          updateStep(step.stepKey, {
+                            data: step.data.map((item, i) =>
+                              i === index
+                                ? { ...item, name: event.target.value }
+                                : item,
+                            ),
+                          })
+                        }
+                      />
+                      <select
+                        aria-label="データ操作"
+                        value={data.operation}
+                        onChange={(event) =>
+                          updateStep(step.stepKey, {
+                            data: step.data.map((item, i) =>
+                              i === index
+                                ? {
+                                    ...item,
+                                    operation: event.target
+                                      .value as typeof item.operation,
+                                  }
+                                : item,
+                            ),
+                          })
+                        }
+                      >
+                        {["read", "create", "update", "send", "receive"].map(
+                          (value) => (
+                            <option key={value}>{value}</option>
+                          ),
+                        )}
+                      </select>
                       <button
                         title="除外"
                         onClick={() => removeData(step.stepKey, index)}
@@ -861,8 +960,84 @@ function ReviewPanel({
                   ))}
                 </div>
               )}
+              <div className="detail-actions">
+                <button
+                  onClick={() =>
+                    updateStep(step.stepKey, {
+                      systems: [
+                        ...step.systems,
+                        {
+                          name: "未確認のシステム",
+                          interaction: "other",
+                          evidence: "",
+                        },
+                      ],
+                    })
+                  }
+                >
+                  ＋ システム
+                </button>
+                <button
+                  onClick={() =>
+                    updateStep(step.stepKey, {
+                      data: [
+                        ...step.data,
+                        {
+                          name: "未確認のデータ",
+                          operation: "read",
+                          evidence: "",
+                        },
+                      ],
+                    })
+                  }
+                >
+                  ＋ 業務データ
+                </button>
+              </div>
             </article>
           ))}
+          <button
+            className="add-step"
+            onClick={() => {
+              const stepKey = `step-${crypto.randomUUID()}`;
+              const last = review.steps.at(-1);
+              changeReview({
+                ...review,
+                steps: [
+                  ...review.steps,
+                  {
+                    stepKey,
+                    name: "新しいステップ",
+                    order: review.steps.length + 1,
+                    action: "分かっている作業を入力してください",
+                    actor: null,
+                    department: null,
+                    responsiblePerson: null,
+                    certainty: "inferred",
+                    evidence: "",
+                    systems: [],
+                    data: [],
+                    technicalDetails: [],
+                    detailSteps: [],
+                  },
+                ],
+                transitions:
+                  last && review.transitions.length
+                    ? [
+                        ...review.transitions,
+                        {
+                          fromStepKey: last.stepKey,
+                          toStepKey: stepKey,
+                          condition: null,
+                          evidence: "利用者が手順を追加",
+                        },
+                      ]
+                    : review.transitions,
+              });
+            }}
+          >
+            ＋ 業務ステップを追加
+          </button>
         </div>
 
         {review.dataFlows.length > 0 ? (
@@ -919,8 +1094,8 @@ function ReviewPanel({
                     value={flow.transferType}
                     onChange={(event) =>
                       updateDataFlow(index, {
-                        transferType:
-                          event.target.value as typeof flow.transferType,
+                        transferType: event.target
+                          .value as typeof flow.transferType,
                       })
                     }
                   >
@@ -942,8 +1117,7 @@ function ReviewPanel({
                     value={flow.direction}
                     onChange={(event) =>
                       updateDataFlow(index, {
-                        direction:
-                          event.target.value as typeof flow.direction,
+                        direction: event.target.value as typeof flow.direction,
                       })
                     }
                   >
@@ -959,18 +1133,16 @@ function ReviewPanel({
                     value={flow.automation}
                     onChange={(event) =>
                       updateDataFlow(index, {
-                        automation:
-                          event.target.value as typeof flow.automation,
+                        automation: event.target
+                          .value as typeof flow.automation,
                       })
                     }
                   >
-                    {["automatic", "manual", "mixed", "unknown"].map(
-                      (item) => (
-                        <option key={item} value={item}>
-                          {item}
-                        </option>
-                      ),
-                    )}
+                    {["automatic", "manual", "mixed", "unknown"].map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
                   </select>
                   <input
                     value={flow.frequency ?? ""}
@@ -1096,12 +1268,7 @@ function ReviewPanel({
         <button
           className="button-primary"
           onClick={onApply}
-          disabled={
-            !dirty ||
-            applying ||
-            refining ||
-            review.steps.length === 0
-          }
+          disabled={!dirty || applying || refining || review.steps.length === 0}
         >
           {applying ? "保存中…" : "業務構造を保存"}
         </button>
@@ -1126,9 +1293,7 @@ function InterviewsView({
   selectedWorkflowId: string;
   setSelectedWorkflowId: (id: string) => void;
   transcripts: Record<string, string>;
-  setTranscripts: React.Dispatch<
-    React.SetStateAction<Record<string, string>>
-  >;
+  setTranscripts: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   pending: PendingExtraction | null;
   setPending: (pending: PendingExtraction | null) => void;
   provider: string;
@@ -1147,8 +1312,9 @@ function InterviewsView({
   const [branchLabel, setBranchLabel] = useState("将来案");
   const [branchEffectiveFrom, setBranchEffectiveFrom] = useState("");
   const [revisions, setRevisions] = useState<RevisionSummary[]>([]);
-  const [historyDetail, setHistoryDetail] =
-    useState<RevisionDetail | null>(null);
+  const [historyDetail, setHistoryDetail] = useState<RevisionDetail | null>(
+    null,
+  );
   const [historyLoading, setHistoryLoading] = useState(false);
 
   const workflow = graph.workflows.find(
@@ -1165,7 +1331,7 @@ function InterviewsView({
           review: buildWorkflowReviewFromGraph(graph, workflow.id),
           provider: "current-state",
           answers: {},
-          answerHistory: [],
+          answerHistory: workflow.reviewContext?.followUpAnswers ?? [],
         }
       : null;
 
@@ -1235,8 +1401,7 @@ function InterviewsView({
           ? {
               ...item,
               ...patch,
-              familyId:
-                patch.familyId ?? item.familyId ?? item.id,
+              familyId: patch.familyId ?? item.familyId ?? item.id,
             }
           : item,
       ),
@@ -1279,9 +1444,7 @@ function InterviewsView({
 
     const name =
       branchName.trim() || `${workflow.name}（${branchLabel || "将来案"}）`;
-    const base = slugifyWorkflow(
-      `${workflow.id}-${branchLabel || "future"}`,
-    );
+    const base = slugifyWorkflow(`${workflow.id}-${branchLabel || "future"}`);
     const ids = new Set(graph.workflows.map((item) => item.id));
     let id = base;
     let suffix = 2;
@@ -1298,11 +1461,7 @@ function InterviewsView({
       effectiveFrom: branchEffectiveFrom || undefined,
     };
 
-    const nextGraph = branchWorkflowScenario(
-      graph,
-      workflow.id,
-      nextWorkflow,
-    );
+    const nextGraph = branchWorkflowScenario(graph, workflow.id, nextWorkflow);
 
     onGraphApply(nextGraph);
     setTranscripts((current) => ({
@@ -1377,10 +1536,7 @@ function InterviewsView({
 
     if (newAnswers.length === 0) return;
 
-    const followUpAnswers = [
-      ...pending.answerHistory,
-      ...newAnswers,
-    ];
+    const followUpAnswers = [...pending.answerHistory, ...newAnswers];
 
     setRefining(true);
     setError(null);
@@ -1465,9 +1621,7 @@ function InterviewsView({
       setHistoryDetail(null);
       void refreshHistory(workflow.id);
     } catch (cause) {
-      setError(
-        cause instanceof Error ? cause.message : "保存に失敗しました。",
-      );
+      setError(cause instanceof Error ? cause.message : "保存に失敗しました。");
     } finally {
       setApplying(false);
     }
@@ -1672,9 +1826,7 @@ function InterviewsView({
                       )?.name ?? workflow.basedOnWorkflowId}
                     </small>
                   ) : (
-                    <small>
-                      family: {workflow.familyId ?? workflow.id}
-                    </small>
+                    <small>family: {workflow.familyId ?? workflow.id}</small>
                   )}
                 </div>
               ) : null}
@@ -1719,7 +1871,7 @@ function InterviewsView({
         <div className="business-notes-label">
           <span>ヒアリング / 業務メモ</span>
           <small>
-            会話メモ、手順、PDF転記などの補足をそのまま入力できます。
+            ざっくりしたメモで大丈夫です。不明な項目はあとから補足できます。SAPやHANAの詳細も追記できます。
           </small>
         </div>
 
@@ -1785,10 +1937,12 @@ function WorkflowView({
   graph,
   workflowId,
   setWorkflowId,
+  onEdit,
 }: {
   graph: LensGraph;
   workflowId: string;
   setWorkflowId: (id: string) => void;
+  onEdit: () => void;
 }) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [ownership, setOwnership] = useState<OwnershipState>({
@@ -1819,91 +1973,109 @@ function WorkflowView({
   }
 
   return (
-    <section className="page-view">
-      <header className="page-header page-header--stackable">
-        <div>
-          <div className="eyebrow">WORKFLOW DETAIL</div>
-          <h1>1業務を、担当の視点で読む</h1>
-          <p>
-            部署・担当者で絞りながら、ステップを押すと前後工程・利用System・Dataまで関連を辿れます。
-          </p>
-        </div>
-        <div className="page-header-controls">
-          <WorkflowPicker
-            graph={graph}
-            selectedWorkflowId={workflowId}
-            onSelect={(id) => {
-              setWorkflowId(id);
-              setSelectedNodeId(null);
-            }}
-          />
-          <OwnershipFilters
-            graph={graph}
-            value={ownership}
-            onChange={(value) => {
-              setOwnership(value);
-              setSelectedNodeId(null);
-            }}
-          />
-        </div>
-      </header>
-
-      <div className="workflow-summary">
-        <div>
-          <span>業務</span>
-          <strong>{workflow?.name ?? "—"}</strong>
-        </div>
-        <div>
-          <span>表示ステップ</span>
-          <strong>{processes.length}</strong>
-        </div>
-        <div>
-          <span>システム</span>
-          <strong>{systemIds.size}</strong>
-        </div>
-        <div>
-          <span>データ</span>
-          <strong>{dataIds.size}</strong>
-        </div>
-      </div>
-
-      {processes.length === 0 ? (
-        <div className="empty-state">
-          <strong>条件に合うステップがありません</strong>
-          <p>部署・担当者フィルタを変更するか、ヒアリング内容を確認してください。</p>
-        </div>
-      ) : (
-        <div className="workflow-canvas-wrap">
-          <ReactFlow
-            nodes={flow.nodes}
-            edges={flow.edges}
-            nodeTypes={nodeTypes}
-            fitView
-            fitViewOptions={{ padding: 0.15 }}
-            minZoom={0.4}
-            maxZoom={1.25}
-            onNodeClick={(_, node) => setSelectedNodeId(node.id)}
-            proOptions={{ hideAttribution: true }}
-          >
-            <Background gap={28} size={1} />
-            <Controls position="bottom-right" showInteractive={false} />
-          </ReactFlow>
-
-          {selectedNode ? (
-            <RelationshipPanel
+    <WorkflowExplorer
+      graph={graph}
+      workflowId={workflowId}
+      selectedStepId={
+        selectedNode?.kind === "process" ? selectedNode.id : undefined
+      }
+      onSelectWorkflow={setWorkflowId}
+      onEdit={onEdit}
+    >
+      <section className="page-view">
+        <header className="page-header page-header--stackable">
+          <div>
+            <div className="eyebrow">WORKFLOW DETAIL</div>
+            <h1>1業務を、担当の視点で読む</h1>
+            <p>
+              部署・担当者で絞りながら、ステップを押すと前後工程・利用System・Dataまで関連を辿れます。
+            </p>
+          </div>
+          <div className="page-header-controls">
+            <WorkflowPicker
               graph={graph}
-              node={selectedNode}
-              onClose={() => setSelectedNodeId(null)}
-              onSelectNode={(node) => setSelectedNodeId(node.id)}
+              selectedWorkflowId={workflowId}
+              onSelect={(id) => {
+                setWorkflowId(id);
+                setSelectedNodeId(null);
+              }}
             />
-          ) : null}
+            <OwnershipFilters
+              graph={graph}
+              value={ownership}
+              onChange={(value) => {
+                setOwnership(value);
+                setSelectedNodeId(null);
+              }}
+            />
+          </div>
+        </header>
+
+        <div className="workflow-summary">
+          <div>
+            <span>業務</span>
+            <strong>{workflow?.name ?? "—"}</strong>
+          </div>
+          <div>
+            <span>表示ステップ</span>
+            <strong>{processes.length}</strong>
+          </div>
+          <div>
+            <span>システム</span>
+            <strong>{systemIds.size}</strong>
+          </div>
+          <div>
+            <span>データ</span>
+            <strong>{dataIds.size}</strong>
+          </div>
         </div>
-      )}
-    </section>
+
+        {processes.length === 0 ? (
+          <div className="empty-state">
+            <strong>条件に合うステップがありません</strong>
+            <p>
+              部署・担当者フィルタを変更するか、ヒアリング内容を確認してください。
+            </p>
+          </div>
+        ) : (
+          <div className="workflow-canvas-wrap">
+            <ReactFlow
+              nodes={flow.nodes}
+              edges={flow.edges}
+              nodeTypes={nodeTypes}
+              fitView
+              fitViewOptions={{ padding: 0.15 }}
+              minZoom={0.4}
+              maxZoom={1.25}
+              onNodeClick={(_, node) => setSelectedNodeId(node.id)}
+              proOptions={{ hideAttribution: true }}
+            >
+              <Background gap={28} size={1} />
+              <Controls position="bottom-right" showInteractive={false} />
+            </ReactFlow>
+
+            {selectedNode ? (
+              <RelationshipPanel
+                graph={graph}
+                node={selectedNode}
+                onClose={() => setSelectedNodeId(null)}
+                onSelectNode={(node) => setSelectedNodeId(node.id)}
+              />
+            ) : null}
+          </div>
+        )}
+      </section>
+    </WorkflowExplorer>
   );
 }
 
-function AssetsView({ graph }: { graph: LensGraph }) {
+function AssetsView({
+  graph,
+  onGraphApply,
+}: {
+  graph: LensGraph;
+  onGraphApply: (graph: LensGraph) => void;
+}) {
   const [filter, setFilter] = useState<AssetFilter>("all");
   const [search, setSearch] = useState("");
   const [ownership, setOwnership] = useState<OwnershipState>({
@@ -1936,18 +2108,20 @@ function AssetsView({ graph }: { graph: LensGraph }) {
         (filter === "all" || node.kind === filter) &&
         (!search.trim() ||
           node.label.toLowerCase().includes(search.trim().toLowerCase()) ||
-          node.description
-            .toLowerCase()
-            .includes(search.trim().toLowerCase())),
+          (node.aliases ?? []).some((alias) =>
+            alias.toLowerCase().includes(search.trim().toLowerCase()),
+          ) ||
+          node.description.toLowerCase().includes(search.trim().toLowerCase())),
     )
     .sort((a, b) => b.usages.length - a.usages.length);
 
   const selected =
-    assets.find(({ node }) => node.id === selectedAssetId) ??
-    assets[0] ??
-    null;
+    assets.find(({ node }) => node.id === selectedAssetId) ?? assets[0] ?? null;
 
-  const workflowGroups = new Map<string, NonNullable<typeof selected>["usages"]>();
+  const workflowGroups = new Map<
+    string,
+    NonNullable<typeof selected>["usages"]
+  >();
   if (selected) {
     for (const usage of selected.usages) {
       const list = workflowGroups.get(usage.workflowId) ?? [];
@@ -1959,7 +2133,8 @@ function AssetsView({ graph }: { graph: LensGraph }) {
   const selectedFlows =
     selected?.node.kind === "system"
       ? getDataFlowsForSystem(graph, selected.node.id).filter((flow) => {
-          if (!ownership.department && !ownership.responsiblePerson) return true;
+          if (!ownership.department && !ownership.responsiblePerson)
+            return true;
           return flow.processIds.some((processId) => {
             const process = processById.get(processId);
             return process
@@ -2060,35 +2235,42 @@ function AssetsView({ graph }: { graph: LensGraph }) {
                 </div>
               </div>
 
+              {selected.node.aliases?.length ? (
+                <p className="asset-aliases">
+                  確認済みの別名：{selected.node.aliases.join(" / ")}
+                </p>
+              ) : null}
+              <AssetMergePanel
+                key={selected.node.id}
+                graph={graph}
+                source={selected.node}
+                onApply={onGraphApply}
+              />
               <div className="impact-workflows">
-                {[...workflowGroups.entries()].map(
-                  ([workflowId, usages]) => (
-                    <section key={workflowId}>
-                      <header>
-                        <strong>{usages[0].workflowName}</strong>
-                        <span>{usages.length} touchpoints</span>
-                      </header>
-                      {usages.map((usage) => {
-                        const process = processById.get(usage.processId);
-                        return (
-                          <article
-                            key={`${usage.processId}-${usage.relation}`}
-                          >
-                            <span className="impact-owner">
-                              {process?.department ?? "部署未確認"}
-                              {process?.responsiblePerson
-                                ? ` · ${process.responsiblePerson}`
-                                : ""}
-                            </span>
-                            <strong>{usage.processName}</strong>
-                            <span>{relationLabel[usage.relation]}</span>
-                            <small>{usage.label ?? "—"}</small>
-                          </article>
-                        );
-                      })}
-                    </section>
-                  ),
-                )}
+                {[...workflowGroups.entries()].map(([workflowId, usages]) => (
+                  <section key={workflowId}>
+                    <header>
+                      <strong>{usages[0].workflowName}</strong>
+                      <span>{usages.length} touchpoints</span>
+                    </header>
+                    {usages.map((usage) => {
+                      const process = processById.get(usage.processId);
+                      return (
+                        <article key={`${usage.processId}-${usage.relation}`}>
+                          <span className="impact-owner">
+                            {process?.department ?? "部署未確認"}
+                            {process?.responsiblePerson
+                              ? ` · ${process.responsiblePerson}`
+                              : ""}
+                          </span>
+                          <strong>{usage.processName}</strong>
+                          <span>{relationLabel[usage.relation]}</span>
+                          <small>{usage.label ?? "—"}</small>
+                        </article>
+                      );
+                    })}
+                  </section>
+                ))}
               </div>
 
               {selectedFlows.length > 0 ? (
@@ -2159,9 +2341,7 @@ function DataFlowView({ graph }: { graph: LensGraph }) {
     if (!ownership.department && !ownership.responsiblePerson) return true;
     return flow.processIds.some((processId) => {
       const process = processById.get(processId);
-      return process
-        ? processMatchesOwnership(process, ownerFilter)
-        : false;
+      return process ? processMatchesOwnership(process, ownerFilter) : false;
     });
   });
 
@@ -2197,7 +2377,8 @@ function DataFlowView({ graph }: { graph: LensGraph }) {
     const dataLabels = flow.dataIds
       .map((id) => graph.nodes.find((node) => node.id === id)?.label)
       .filter(Boolean);
-    const manual = flow.automation === "manual" || flow.transferType === "manual";
+    const manual =
+      flow.automation === "manual" || flow.transferType === "manual";
 
     return {
       id: flow.id,
@@ -2228,8 +2409,7 @@ function DataFlowView({ graph }: { graph: LensGraph }) {
 
   const selectedNode =
     graph.nodes.find((node) => node.id === selectedNodeId) ?? null;
-  const selectedFlow =
-    flows.find((flow) => flow.id === selectedFlowId) ?? null;
+  const selectedFlow = flows.find((flow) => flow.id === selectedFlowId) ?? null;
 
   return (
     <section className="page-view">
@@ -2347,8 +2527,7 @@ function DataFlowView({ graph }: { graph: LensGraph }) {
                 <strong>
                   {selectedFlow.dataIds
                     .map(
-                      (id) =>
-                        graph.nodes.find((node) => node.id === id)?.label,
+                      (id) => graph.nodes.find((node) => node.id === id)?.label,
                     )
                     .filter(Boolean)
                     .join(" / ") || "未特定"}
@@ -2418,9 +2597,7 @@ function OverviewView({ graph }: { graph: LensGraph }) {
   const filteredUsages = (assetId: string) =>
     getAssetUsages(graph, assetId).filter((usage) => {
       const process = processById.get(usage.processId);
-      return process
-        ? processMatchesOwnership(process, ownerFilter)
-        : false;
+      return process ? processMatchesOwnership(process, ownerFilter) : false;
     });
 
   const workflows = graph.workflows.filter((workflow) => {
@@ -2440,8 +2617,7 @@ function OverviewView({ graph }: { graph: LensGraph }) {
 
   const sharedAssets = assets
     .filter(
-      ({ usages }) =>
-        new Set(usages.map((usage) => usage.workflowId)).size > 1,
+      ({ usages }) => new Set(usages.map((usage) => usage.workflowId)).size > 1,
     )
     .sort((a, b) => b.usages.length - a.usages.length);
 
@@ -2453,9 +2629,7 @@ function OverviewView({ graph }: { graph: LensGraph }) {
     const usages = filteredUsages(assetId).filter(
       (usage) => usage.workflowId === workflowId,
     );
-    return [
-      ...new Set(usages.map((usage) => relationLabel[usage.relation])),
-    ];
+    return [...new Set(usages.map((usage) => relationLabel[usage.relation]))];
   }
 
   return (
@@ -2606,9 +2780,7 @@ function OverviewView({ graph }: { graph: LensGraph }) {
                 .map(({ node }) => (
                   <tr key={node.id}>
                     <th>
-                      <span
-                        className={`asset-kind asset-kind--${node.kind}`}
-                      >
+                      <span className={`asset-kind asset-kind--${node.kind}`}>
                         {node.kind === "system" ? "SYS" : "DATA"}
                       </span>
                       {node.label}
@@ -2676,8 +2848,10 @@ function Workspace() {
 
         if (payload.project) {
           const loadedGraph = payload.project.graph as LensGraph;
-          const loadedTranscripts =
-            payload.project.transcripts as Record<string, string>;
+          const loadedTranscripts = payload.project.transcripts as Record<
+            string,
+            string
+          >;
 
           setGraph(loadedGraph);
           setTranscripts(loadedTranscripts);
@@ -2762,10 +2936,9 @@ function Workspace() {
         <div className="header-meta">
           <span>{graph.workflows.length} workflows</span>
           <span
-            className={[
-              "storage-status",
-              `storage-status--${saveStatus}`,
-            ].join(" ")}
+            className={["storage-status", `storage-status--${saveStatus}`].join(
+              " ",
+            )}
           >
             {storageBackend} · {saveLabel}
           </span>
@@ -2793,12 +2966,21 @@ function Workspace() {
           graph={graph}
           workflowId={selectedWorkflowId}
           setWorkflowId={setSelectedWorkflowId}
+          onEdit={() => setSection("interviews")}
         />
       ) : null}
 
       {section === "dataflow" ? <DataFlowView graph={graph} /> : null}
 
-      {section === "assets" ? <AssetsView graph={graph} /> : null}
+      {section === "assets" ? (
+        <AssetsView
+          graph={graph}
+          onGraphApply={(next) => {
+            setGraph(next);
+            setPending(null);
+          }}
+        />
+      ) : null}
       {section === "overview" ? <OverviewView graph={graph} /> : null}
     </main>
   );

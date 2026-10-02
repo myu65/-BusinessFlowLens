@@ -36,16 +36,10 @@ function requestUser(request: Request) {
 export async function POST(request: Request) {
   const body = (await request.json()) as ApplyRequest;
 
-  if (
-    !body.review ||
-    !body.workflow ||
-    !body.graph ||
-    !body.transcripts
-  ) {
+  if (!body.review || !body.workflow || !body.graph || !body.transcripts) {
     return NextResponse.json(
       {
-        error:
-          "review, workflow, graph, and transcripts are required",
+        error: "review, workflow, graph, and transcripts are required",
       },
       { status: 400 },
     );
@@ -67,15 +61,25 @@ export async function POST(request: Request) {
           provider: "local-demo-resolver",
         };
 
+    const reviewedWorkflow: Workflow = {
+      ...body.workflow,
+      reviewContext: {
+        summary: result.review.summary,
+        trigger: result.review.trigger,
+        outcome: result.review.outcome,
+        questions: result.review.questions,
+        warnings: result.review.warnings,
+        followUpAnswers: body.followUpAnswers ?? [],
+      },
+    };
     const graph = replaceWorkflowGraph(
       body.graph,
-      body.workflow,
+      reviewedWorkflow,
       result.patch,
     );
 
     const projectId = body.projectId?.trim() || "default";
-    const projectName =
-      body.projectName?.trim() || "BusinessFlowLens";
+    const projectName = body.projectName?.trim() || "BusinessFlowLens";
     const now = new Date().toISOString();
     const repository = getBusinessFlowRepository();
 
@@ -98,8 +102,7 @@ export async function POST(request: Request) {
       basedOnWorkflowId: body.workflow.basedOnWorkflowId,
       effectiveFrom: body.workflow.effectiveFrom,
       effectiveTo: body.workflow.effectiveTo,
-      sourceNotes:
-        body.sourceNotes ?? body.transcripts[body.workflow.id] ?? "",
+      sourceNotes: body.sourceNotes ?? body.transcripts[body.workflow.id] ?? "",
       followUpAnswers: body.followUpAnswers ?? [],
       review: result.review,
       updatedBy: requestUser(request),
@@ -123,9 +126,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         error:
-          error instanceof Error
-            ? error.message
-            : "Failed to apply workflow",
+          error instanceof Error ? error.message : "Failed to apply workflow",
       },
       { status: 500 },
     );

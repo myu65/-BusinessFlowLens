@@ -1,3 +1,4 @@
+import { findConfirmedAsset, preserveRefinements } from "../refinement";
 import { existsSync, readFileSync } from "node:fs";
 import type {
   Confidence,
@@ -71,6 +72,43 @@ const WORKFLOW_DRAFT_SCHEMA = {
             enum: ["explicit", "inferred"],
           },
           evidence: { type: "string" },
+          technicalDetails: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                system: { type: "string" },
+                module: { type: ["string", "null"] },
+                transaction: { type: ["string", "null"] },
+                hanaArea: { type: ["string", "null"] },
+                objects: { type: ["string", "null"] },
+                evidence: { type: "string" },
+              },
+              required: [
+                "system",
+                "module",
+                "transaction",
+                "hanaArea",
+                "objects",
+                "evidence",
+              ],
+            },
+          },
+          detailSteps: {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                id: { type: "string" },
+                action: { type: "string" },
+                condition: { type: ["string", "null"] },
+                evidence: { type: "string" },
+              },
+              required: ["id", "action", "condition", "evidence"],
+            },
+          },
           systems: {
             type: "array",
             items: {
@@ -122,6 +160,8 @@ const WORKFLOW_DRAFT_SCHEMA = {
           "action",
           "certainty",
           "evidence",
+          "technicalDetails",
+          "detailSteps",
           "systems",
           "data",
         ],
@@ -138,12 +178,7 @@ const WORKFLOW_DRAFT_SCHEMA = {
           condition: { type: ["string", "null"] },
           evidence: { type: "string" },
         },
-        required: [
-          "fromStepKey",
-          "toStepKey",
-          "condition",
-          "evidence",
-        ],
+        required: ["fromStepKey", "toStepKey", "condition", "evidence"],
       },
     },
     dataFlows: {
@@ -312,8 +347,8 @@ function resolveToken() {
 export function hasAIConfig() {
   return Boolean(
     resolveBaseURL() &&
-      env("AI_MODEL") &&
-      (runtimeTokenAvailable() || env("AI_API_KEY")),
+    env("AI_MODEL") &&
+    (runtimeTokenAvailable() || env("AI_API_KEY")),
   );
 }
 
@@ -340,8 +375,7 @@ function authHeaders(apiKey: string, mode: AIProtocol): HeadersInit {
   }
 
   if (mode === "anthropic") {
-    headers["anthropic-version"] =
-      env("AI_ANTHROPIC_VERSION") ?? "2023-06-01";
+    headers["anthropic-version"] = env("AI_ANTHROPIC_VERSION") ?? "2023-06-01";
   }
 
   return headers;
@@ -447,15 +481,14 @@ Rules:
 15. Existing System/Data/Workflow context may be provided as reference candidates. Use it to understand aliases, shorthand, and handoffs, but NEVER treat a candidate as confirmed solely because it exists in the catalog.
 16. "ERP" may plausibly refer to an existing SAP system, and "いつもの出荷処理" may plausibly refer to an existing shipping workflow. Preserve the interview wording/evidence and surface uncertainty rather than inventing or silently canonicalizing.
 17. Follow-up answers are additional interview evidence. Incorporate them into steps, ownership, data flows, trigger/outcome, warnings, and questions. Remove questions that are answered.
+19. technicalDetails records ONLY explicitly stated system, SAP module, transaction/app, HANA area/schema and physical objects. Never derive transaction codes or tables from a business action. Use null for unknown fields. Physical objects belong here, not in business data unless explicitly described as business data too.
+20. detailSteps are ordered child operations of this business step, with a condition when explicitly stated. Use [] if no detailed operations are stated. Preserve current human edits and stable child IDs. Never expand vague notes into invented detail.
 18. certainty=explicit unless the step itself requires a modest inference to make the workflow coherent.
 
 Write concise Japanese labels/descriptions when the interview is Japanese.`;
 }
 
-function compactExistingContext(
-  graph: LensGraph,
-  currentWorkflowId: string,
-) {
+function compactExistingContext(graph: LensGraph, currentWorkflowId: string) {
   const workflowNames = new Map(
     graph.workflows.map((workflow) => [workflow.id, workflow.name]),
   );
@@ -476,9 +509,7 @@ function compactExistingContext(
         for (const workflowId of flow.workflowIds) ids.add(workflowId);
       }
     }
-    return [...ids]
-      .map((id) => workflowNames.get(id) ?? id)
-      .slice(0, 8);
+    return [...ids].map((id) => workflowNames.get(id) ?? id).slice(0, 8);
   };
 
   const systems = graph.nodes
@@ -486,6 +517,7 @@ function compactExistingContext(
     .map((node) => ({
       canonicalKey: node.canonicalKey,
       name: node.label,
+      aliases: node.aliases ?? [],
       description: node.description,
       usedBy: workflowIdsForNode(node.id),
     }))
@@ -496,6 +528,7 @@ function compactExistingContext(
     .map((node) => ({
       canonicalKey: node.canonicalKey,
       name: node.label,
+      aliases: node.aliases ?? [],
       description: node.description,
       usedBy: workflowIdsForNode(node.id),
     }))
@@ -509,9 +542,7 @@ function compactExistingContext(
       description: workflow.description ?? "",
       steps: graph.nodes
         .filter(
-          (node) =>
-            node.kind === "process" &&
-            node.workflowId === workflow.id,
+          (node) => node.kind === "process" && node.workflowId === workflow.id,
         )
         .sort(
           (a, b) =>
@@ -533,10 +564,7 @@ function extractionUserPrompt(args: {
   previousReview?: ExtractionReview | null;
   followUpAnswers?: FollowUpAnswer[];
 }) {
-  const existingContext = compactExistingContext(
-    args.graph,
-    args.workflow.id,
-  );
+  const existingContext = compactExistingContext(args.graph, args.workflow.id);
   const answered = (args.followUpAnswers ?? []).filter(
     (item) => item.answer.trim().length > 0,
   );
@@ -552,13 +580,21 @@ ${args.interview}
 Existing company context (REFERENCE CANDIDATES ONLY):
 ${JSON.stringify(existingContext, null, 2)}
 
-${args.previousReview ? `Current review draft. It may include human edits; preserve those edits unless the new follow-up answers clearly contradict them:
+${
+  args.previousReview
+    ? `Current review draft. It may include human edits; preserve those edits unless the new follow-up answers clearly contradict them:
 ${JSON.stringify(args.previousReview, null, 2)}
-` : ""}
+`
+    : ""
+}
 
-${answered.length > 0 ? `Follow-up Q&A. Treat the answers as additional interview evidence:
+${
+  answered.length > 0
+    ? `Follow-up Q&A. Treat the answers as additional interview evidence:
 ${JSON.stringify(answered, null, 2)}
-` : ""}
+`
+    : ""
+}
 
 Use existing company context to interpret shorthand and references such as "ERP", "SAP", "the core system", or "the usual shipping process". It is context, not authority:
 - Do not silently replace the interview wording with a canonical name.
@@ -641,6 +677,7 @@ function existingAssets(graph: LensGraph) {
       canonicalKey: node.canonicalKey,
       kind: node.kind,
       label: node.label,
+      aliases: node.aliases ?? [],
       description: node.description,
     }));
 }
@@ -700,6 +737,15 @@ Resolve every candidate exactly once.`,
   );
 
   return candidates.map((candidate) => {
+    const confirmed = findConfirmedAsset(graph, candidate.kind, candidate.name);
+    if (confirmed)
+      return {
+        candidateId: candidate.candidateId,
+        decision: "reuse" as const,
+        existingCanonicalKey: confirmed.canonicalKey,
+        canonicalLabel: confirmed.label,
+        reason: "Unique confirmed label or alias.",
+      };
     const resolution = byCandidate.get(candidate.candidateId);
     if (!resolution) {
       return {
@@ -736,10 +782,7 @@ function makeAssetCanonicalKey(
   candidate: AssetCandidate,
   resolution: AssetResolution,
 ) {
-  if (
-    resolution.decision === "reuse" &&
-    resolution.existingCanonicalKey
-  ) {
+  if (resolution.decision === "reuse" && resolution.existingCanonicalKey) {
     return resolution.existingCanonicalKey;
   }
 
@@ -770,6 +813,7 @@ function buildGraphPatch(
   workflow: Workflow,
   candidates: AssetCandidate[],
   resolutions: AssetResolution[],
+  graph: LensGraph,
 ): GraphPatch {
   const nodes: GraphPatchNode[] = [];
   const edges: GraphPatchEdge[] = [];
@@ -783,7 +827,7 @@ function buildGraphPatch(
   const assetKeyByCandidate = new Map<string, string>();
 
   for (const candidate of candidates) {
-    const resolution =
+    let resolution =
       resolutionByCandidate.get(candidate.candidateId) ??
       ({
         candidateId: candidate.candidateId,
@@ -793,7 +837,18 @@ function buildGraphPatch(
         reason: "No resolution available.",
       } satisfies AssetResolution);
 
-    const canonicalKey = makeAssetCanonicalKey(candidate, resolution);
+    let canonicalKey = makeAssetCanonicalKey(candidate, resolution);
+    if (
+      resolution.decision !== "reuse" &&
+      graph.nodes.some((node) => node.canonicalKey === canonicalKey)
+    ) {
+      resolution = {
+        ...resolution,
+        decision: "uncertain",
+        reason: "既存資産とキーが重なるため、同一性の確認が必要です。",
+      };
+      canonicalKey = `${candidate.kind}:unresolved:${normalizeName(candidate.name)}:${workflow.id}`;
+    }
     assetKeyByCandidate.set(candidate.candidateId, canonicalKey);
 
     nodes.push({
@@ -832,6 +887,8 @@ function buildGraphPatch(
       evidence: step.evidence,
       stepOrder: step.order,
       action: step.action,
+      technicalDetails: step.technicalDetails ?? [],
+      detailSteps: step.detailSteps ?? [],
     });
 
     for (const system of step.systems) {
@@ -908,9 +965,7 @@ function buildGraphPatch(
     if (!sourceKey || !targetKey) continue;
 
     const dataKeys = flow.data
-      .map((name) =>
-        assetKeyByCandidate.get(candidateId("data", name)),
-      )
+      .map((name) => assetKeyByCandidate.get(candidateId("data", name)))
       .filter((key): key is string => Boolean(key));
 
     dataFlows.push({
@@ -954,6 +1009,16 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
         order: Number.isFinite(step.order) ? step.order : index + 1,
         department: step.department ?? null,
         responsiblePerson: step.responsiblePerson ?? null,
+        technicalDetails: (step.technicalDetails ?? []).filter(
+          (detail) =>
+            detail.module ||
+            detail.transaction ||
+            detail.hanaArea ||
+            detail.objects,
+        ),
+        detailSteps: (step.detailSteps ?? []).filter((detail) =>
+          detail.action.trim(),
+        ),
         systems: step.systems ?? [],
         data: step.data ?? [],
       };
@@ -961,15 +1026,17 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
     .sort((a, b) => a.order - b.order);
 
   const validKeys = new Set(steps.map((step) => step.stepKey));
-  const transitions = (raw.transitions ?? []).filter(
-    (transition) =>
-      validKeys.has(normalizeName(transition.fromStepKey)) &&
-      validKeys.has(normalizeName(transition.toStepKey)),
-  ).map((transition) => ({
-    ...transition,
-    fromStepKey: normalizeName(transition.fromStepKey),
-    toStepKey: normalizeName(transition.toStepKey),
-  }));
+  const transitions = (raw.transitions ?? [])
+    .filter(
+      (transition) =>
+        validKeys.has(normalizeName(transition.fromStepKey)) &&
+        validKeys.has(normalizeName(transition.toStepKey)),
+    )
+    .map((transition) => ({
+      ...transition,
+      fromStepKey: normalizeName(transition.fromStepKey),
+      toStepKey: normalizeName(transition.toStepKey),
+    }));
 
   return {
     summary: raw.summary ?? "",
@@ -978,14 +1045,13 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
     steps,
     transitions,
     dataFlows: (raw.dataFlows ?? [])
-      .filter(
-        (flow) =>
-          Boolean(
-            flow.sourceSystem &&
-              flow.targetSystem &&
-              flow.sourceSystem !== flow.targetSystem &&
-              flow.evidence,
-          ),
+      .filter((flow) =>
+        Boolean(
+          flow.sourceSystem &&
+          flow.targetSystem &&
+          flow.sourceSystem !== flow.targetSystem &&
+          flow.evidence,
+        ),
       )
       .map((flow) => ({
         ...flow,
@@ -1015,7 +1081,9 @@ export async function extractWorkflowReviewWithAI(args: {
     user: extractionUserPrompt(args),
   });
 
-  const draft = normalizeDraft(rawDraft);
+  const draft = normalizeDraft(
+    preserveRefinements(rawDraft, args.previousReview),
+  );
 
   return {
     review: {
@@ -1053,6 +1121,7 @@ export async function resolveWorkflowReviewWithAI(args: {
     args.workflow,
     candidates,
     resolutions,
+    args.graph,
   );
 
   const resolutionWarnings = resolutions
@@ -1082,13 +1151,11 @@ export function resolveWorkflowReviewLocally(args: {
     transitions: args.review.transitions ?? [],
   });
   const candidates = collectCandidates(draft);
-  const catalog = existingAssets(args.graph);
-
   const resolutions: AssetResolution[] = candidates.map((candidate) => {
-    const exact = catalog.find(
-      (asset) =>
-        asset.kind === candidate.kind &&
-        normalizeName(asset.label) === normalizeName(candidate.name),
+    const exact = findConfirmedAsset(
+      args.graph,
+      candidate.kind,
+      candidate.name,
     );
 
     if (exact) {
@@ -1116,6 +1183,7 @@ export function resolveWorkflowReviewLocally(args: {
       args.workflow,
       candidates,
       resolutions,
+      args.graph,
     ),
     review: draft,
   };

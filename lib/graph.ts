@@ -2,10 +2,7 @@ export type NodeKind = "process" | "system" | "data";
 export type Confidence = "confirmed" | "inferred" | "unknown";
 export type Relation = "next" | "uses" | "reads" | "writes" | "sends";
 
-export type WorkflowScenario =
-  | "current"
-  | "future"
-  | "alternative";
+export type WorkflowScenario = "current" | "future" | "alternative";
 
 export type Workflow = {
   id: string;
@@ -17,6 +14,28 @@ export type Workflow = {
   basedOnWorkflowId?: string;
   effectiveFrom?: string;
   effectiveTo?: string;
+  reviewContext?: Pick<
+    ExtractionReview,
+    "summary" | "trigger" | "outcome" | "questions" | "warnings"
+  > & {
+    followUpAnswers?: FollowUpAnswer[];
+  };
+};
+
+export type TechnicalDetail = {
+  system: string;
+  module: string | null;
+  transaction: string | null;
+  hanaArea: string | null;
+  objects: string | null;
+  evidence: string;
+};
+
+export type DetailStep = {
+  id: string;
+  action: string;
+  condition: string | null;
+  evidence: string;
 };
 
 export type LensNode = {
@@ -33,6 +52,9 @@ export type LensNode = {
   evidence?: string;
   stepOrder?: number;
   action?: string;
+  technicalDetails?: TechnicalDetail[];
+  detailSteps?: DetailStep[];
+  aliases?: string[];
 };
 
 export type LensEdge = {
@@ -45,25 +67,11 @@ export type LensEdge = {
 };
 
 export type DataFlowTransferType =
-  | "api"
-  | "file"
-  | "database"
-  | "message"
-  | "email"
-  | "manual"
-  | "unknown";
+  "api" | "file" | "database" | "message" | "email" | "manual" | "unknown";
 
-export type DataFlowDirection =
-  | "push"
-  | "pull"
-  | "bidirectional"
-  | "unknown";
+export type DataFlowDirection = "push" | "pull" | "bidirectional" | "unknown";
 
-export type DataFlowAutomation =
-  | "automatic"
-  | "manual"
-  | "mixed"
-  | "unknown";
+export type DataFlowAutomation = "automatic" | "manual" | "mixed" | "unknown";
 
 export type SystemDataFlow = {
   id: string;
@@ -99,6 +107,8 @@ export type GraphPatchNode = {
   evidence?: string | null;
   stepOrder?: number | null;
   action?: string | null;
+  technicalDetails?: TechnicalDetail[];
+  detailSteps?: DetailStep[];
 };
 
 export type GraphPatchEdge = {
@@ -125,13 +135,7 @@ export type ExtractionQuestion = {
   question: string;
   reason: string;
   target:
-    | "system"
-    | "data"
-    | "handoff"
-    | "rule"
-    | "owner"
-    | "exception"
-    | "scope";
+    "system" | "data" | "handoff" | "rule" | "owner" | "exception" | "scope";
 };
 
 export type FollowUpAnswer = {
@@ -149,16 +153,12 @@ export type ExtractionReviewStep = {
   action: string;
   certainty: "explicit" | "inferred";
   evidence: string;
+  technicalDetails?: TechnicalDetail[];
+  detailSteps?: DetailStep[];
   systems: Array<{
     name: string;
     interaction:
-      | "view"
-      | "search"
-      | "input"
-      | "approve"
-      | "send"
-      | "receive"
-      | "other";
+      "view" | "search" | "input" | "approve" | "send" | "receive" | "other";
     evidence: string;
   }>;
   data: Array<{
@@ -281,7 +281,9 @@ export function replaceWorkflowGraph(
   workflow: Workflow,
   patch: GraphPatch,
 ): LensGraph {
-  const existingWorkflow = graph.workflows.some((item) => item.id === workflow.id);
+  const existingWorkflow = graph.workflows.some(
+    (item) => item.id === workflow.id,
+  );
   const workflows = existingWorkflow
     ? graph.workflows.map((item) => (item.id === workflow.id ? workflow : item))
     : [...graph.workflows, workflow];
@@ -290,7 +292,9 @@ export function replaceWorkflowGraph(
   // preserving System/Data entities still used by other workflows.
   const priorProcessIds = new Set(
     graph.nodes
-      .filter((node) => node.kind === "process" && node.workflowId === workflow.id)
+      .filter(
+        (node) => node.kind === "process" && node.workflowId === workflow.id,
+      )
       .map((node) => node.id),
   );
 
@@ -331,6 +335,9 @@ export function replaceWorkflowGraph(
       existing.evidence = patchNode.evidence ?? existing.evidence;
       existing.stepOrder = patchNode.stepOrder ?? existing.stepOrder;
       existing.action = patchNode.action ?? existing.action;
+      existing.technicalDetails =
+        patchNode.technicalDetails ?? existing.technicalDetails;
+      existing.detailSteps = patchNode.detailSteps ?? existing.detailSteps;
       continue;
     }
 
@@ -348,6 +355,8 @@ export function replaceWorkflowGraph(
       evidence: patchNode.evidence ?? undefined,
       stepOrder: patchNode.stepOrder ?? undefined,
       action: patchNode.action ?? undefined,
+      technicalDetails: patchNode.technicalDetails,
+      detailSteps: patchNode.detailSteps,
     };
     nodes.push(created);
     byKey.set(canonicalKey, created);
@@ -406,7 +415,12 @@ export function replaceWorkflowGraph(
   for (const patchFlow of patch.dataFlows ?? []) {
     const source = byKey.get(patchFlow.sourceSystemKey);
     const target = byKey.get(patchFlow.targetSystemKey);
-    if (!source || !target || source.kind !== "system" || target.kind !== "system") {
+    if (
+      !source ||
+      !target ||
+      source.kind !== "system" ||
+      target.kind !== "system"
+    ) {
       continue;
     }
 
@@ -429,6 +443,11 @@ export function replaceWorkflowGraph(
       target.id,
       patchFlow.transferType,
       [...dataIds].sort().join(","),
+      patchFlow.direction,
+      patchFlow.automation,
+      patchFlow.frequency ?? "",
+      patchFlow.evidence ?? "",
+      patchFlow.status,
     ].join("--");
 
     const existing = dataFlows.find((flow) => flow.id === id);
@@ -436,7 +455,9 @@ export function replaceWorkflowGraph(
       if (!existing.workflowIds.includes(workflow.id)) {
         existing.workflowIds = [...existing.workflowIds, workflow.id];
       }
-      existing.processIds = [...new Set([...existing.processIds, ...processIds])];
+      existing.processIds = [
+        ...new Set([...existing.processIds, ...processIds]),
+      ];
       continue;
     }
 
@@ -469,6 +490,7 @@ export function replaceWorkflowGraph(
     nodes: nodes.filter(
       (node) =>
         node.kind === "process" ||
+        Boolean(node.aliases?.length) ||
         usedNodeIds.has(node.id) ||
         dataFlowNodeIds.has(node.id),
     ),
@@ -477,10 +499,7 @@ export function replaceWorkflowGraph(
   };
 }
 
-export function getNodeWorkflowIds(
-  graph: LensGraph,
-  node: LensNode,
-): string[] {
+export function getNodeWorkflowIds(graph: LensGraph, node: LensNode): string[] {
   if (node.kind === "process" && node.workflowId) return [node.workflowId];
 
   const ids = new Set<string>();
@@ -776,8 +795,7 @@ export function extractInterviewLocal(
         sourceKey: source,
         targetKey: "system:erp",
         relation: "uses",
-        label:
-          source === "system:excel-order-sheet" ? "二重入力" : "受注登録",
+        label: source === "system:excel-order-sheet" ? "二重入力" : "受注登録",
       });
       addEdge({
         sourceKey: "system:erp",
@@ -938,7 +956,9 @@ export function extractInterviewLocal(
   }
 
   if (has(/メール|email/i)) {
-    questions.push("メール受信後の担当者割り当てや引き継ぎはどうしていますか？");
+    questions.push(
+      "メール受信後の担当者割り当てや引き継ぎはどうしていますか？",
+    );
   }
 
   return {
@@ -995,7 +1015,6 @@ export function createDemoGraph(): LensGraph {
   return graph;
 }
 
-
 export type StepAssetLink = {
   asset: LensNode;
   relation: Relation;
@@ -1007,10 +1026,7 @@ export function getWorkflowProcesses(
   workflowId: string,
 ): LensNode[] {
   return graph.nodes
-    .filter(
-      (node) =>
-        node.kind === "process" && node.workflowId === workflowId,
-    )
+    .filter((node) => node.kind === "process" && node.workflowId === workflowId)
     .sort((a, b) => {
       const ai = a.stepOrder ?? Number.MAX_SAFE_INTEGER;
       const bi = b.stepOrder ?? Number.MAX_SAFE_INTEGER;
@@ -1067,18 +1083,13 @@ export function getAssetUsages(
 
     const otherId = edge.source === assetId ? edge.target : edge.source;
     const process = byId.get(otherId);
-    if (
-      !process ||
-      process.kind !== "process" ||
-      !process.workflowId
-    ) {
+    if (!process || process.kind !== "process" || !process.workflowId) {
       continue;
     }
 
     usages.push({
       workflowId: process.workflowId,
-      workflowName:
-        workflowName.get(process.workflowId) ?? process.workflowId,
+      workflowName: workflowName.get(process.workflowId) ?? process.workflowId,
       processId: process.id,
       processName: process.label,
       relation: edge.relation,
@@ -1088,7 +1099,6 @@ export function getAssetUsages(
 
   return usages;
 }
-
 
 export type OwnershipFilter = {
   department?: string | null;
@@ -1152,9 +1162,7 @@ export function getNodeRelationships(
     related.set(`${other.id}:${edge.id}`, {
       node: other,
       relation:
-        edge.source === nodeId
-          ? `${edge.relation} →`
-          : `← ${edge.relation}`,
+        edge.source === nodeId ? `${edge.relation} →` : `← ${edge.relation}`,
       workflowIds: edge.workflowIds,
     });
   }
@@ -1192,11 +1200,9 @@ export function getDataFlowsForSystem(
 ): SystemDataFlow[] {
   return (graph.dataFlows ?? []).filter(
     (flow) =>
-      flow.sourceSystemId === systemId ||
-      flow.targetSystemId === systemId,
+      flow.sourceSystemId === systemId || flow.targetSystemId === systemId,
   );
 }
-
 
 export function buildWorkflowReviewFromGraph(
   graph: LensGraph,
@@ -1251,18 +1257,16 @@ export function buildWorkflowReviewFromGraph(
     }
 
     return {
-      stepKey:
-        process.canonicalKey.split(":").at(-1) ?? `step-${index + 1}`,
+      stepKey: process.canonicalKey.split(":").at(-1) ?? `step-${index + 1}`,
       name: process.label,
       order: process.stepOrder ?? index + 1,
       actor: process.actor ?? null,
       department: process.department ?? null,
       responsiblePerson: process.responsiblePerson ?? null,
       action: process.action ?? process.description,
-      certainty:
-        process.status === "confirmed"
-          ? "explicit"
-          : "inferred",
+      technicalDetails: process.technicalDetails ?? [],
+      detailSteps: process.detailSteps ?? [],
+      certainty: process.status === "confirmed" ? "explicit" : "inferred",
       evidence: process.evidence ?? "",
       systems,
       data,
@@ -1294,10 +1298,8 @@ export function buildWorkflowReviewFromGraph(
   const dataFlows: ExtractionDataFlow[] = (graph.dataFlows ?? [])
     .filter((flow) => flow.workflowIds.includes(workflowId))
     .map((flow) => ({
-      sourceSystem:
-        byId.get(flow.sourceSystemId)?.label ?? flow.sourceSystemId,
-      targetSystem:
-        byId.get(flow.targetSystemId)?.label ?? flow.targetSystemId,
+      sourceSystem: byId.get(flow.sourceSystemId)?.label ?? flow.sourceSystemId,
+      targetSystem: byId.get(flow.targetSystemId)?.label ?? flow.targetSystemId,
       data: flow.dataIds
         .map((id) => byId.get(id)?.label)
         .filter((label): label is string => Boolean(label)),
@@ -1306,10 +1308,7 @@ export function buildWorkflowReviewFromGraph(
       automation: flow.automation,
       frequency: flow.frequency ?? null,
       evidence: flow.evidence ?? "",
-      certainty:
-        flow.status === "confirmed"
-          ? "explicit"
-          : "inferred",
+      certainty: flow.status === "confirmed" ? "explicit" : "inferred",
       relatedStepKeys: flow.processIds
         .map((id) => processKeyById.get(id))
         .filter((key): key is string => Boolean(key)),
@@ -1317,18 +1316,18 @@ export function buildWorkflowReviewFromGraph(
 
   return {
     summary:
+      workflow?.reviewContext?.summary ??
       workflow?.description ??
       (workflow ? `${workflow.name}の現在の業務構造` : ""),
-    trigger: null,
-    outcome: null,
+    trigger: workflow?.reviewContext?.trigger ?? null,
+    outcome: workflow?.reviewContext?.outcome ?? null,
     steps,
     transitions,
     dataFlows,
-    questions: [],
-    warnings: [],
+    questions: workflow?.reviewContext?.questions ?? [],
+    warnings: workflow?.reviewContext?.warnings ?? [],
   };
 }
-
 
 export function workflowFamilyId(workflow: Workflow): string {
   return workflow.familyId ?? workflow.id;
@@ -1360,22 +1359,15 @@ export function branchWorkflowScenario(
   }
 
   const sourceProcesses = graph.nodes.filter(
-    (node) =>
-      node.kind === "process" &&
-      node.workflowId === sourceWorkflowId,
+    (node) => node.kind === "process" && node.workflowId === sourceWorkflowId,
   );
-  const sourceProcessIds = new Set(
-    sourceProcesses.map((node) => node.id),
-  );
-  const sourceById = new Map(
-    sourceProcesses.map((node) => [node.id, node]),
-  );
+  const sourceProcessIds = new Set(sourceProcesses.map((node) => node.id));
+  const sourceById = new Map(sourceProcesses.map((node) => [node.id, node]));
 
   const processIdMap = new Map<string, string>();
   const clonedProcesses = sourceProcesses.map((node) => {
     const stepSlug =
-      node.canonicalKey.split(":").at(-1) ??
-      node.id.replace(/^process:/, "");
+      node.canonicalKey.split(":").at(-1) ?? node.id.replace(/^process:/, "");
     const canonicalKey = `process:${nextWorkflow.id}:${stepSlug}`;
     const id = nodeId(canonicalKey);
     processIdMap.set(node.id, id);
@@ -1423,8 +1415,7 @@ export function branchWorkflowScenario(
   const workflow: Workflow = {
     ...nextWorkflow,
     familyId: nextWorkflow.familyId ?? workflowFamilyId(sourceWorkflow),
-    basedOnWorkflowId:
-      nextWorkflow.basedOnWorkflowId ?? sourceWorkflowId,
+    basedOnWorkflowId: nextWorkflow.basedOnWorkflowId ?? sourceWorkflowId,
     scenario: nextWorkflow.scenario ?? "future",
   };
 
