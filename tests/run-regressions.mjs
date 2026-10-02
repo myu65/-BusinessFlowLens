@@ -30,6 +30,7 @@ const server = spawn(
   {
     env,
     stdio: ["ignore", "pipe", "pipe"],
+    detached: process.platform !== "win32",
   },
 );
 
@@ -82,8 +83,17 @@ function runRegressionSuite() {
       },
     );
 
-    test.on("error", reject);
+    const timeout = setTimeout(() => {
+      test.kill("SIGKILL");
+      reject(new Error("Regression suite timed out after 60 seconds."));
+    }, 60_000);
+
+    test.on("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
     test.on("exit", (code, signal) => {
+      clearTimeout(timeout);
       if (code === 0) resolve();
       else {
         reject(
@@ -96,6 +106,42 @@ function runRegressionSuite() {
   });
 }
 
+async function stopServer() {
+  if (!server.pid) return;
+
+  if (process.platform === "win32") {
+    await new Promise((resolve) => {
+      const killer = spawn(
+        "taskkill",
+        ["/pid", String(server.pid), "/T", "/F"],
+        { stdio: "ignore" },
+      );
+      killer.on("exit", resolve);
+      killer.on("error", resolve);
+    });
+    return;
+  }
+
+  try {
+    process.kill(-server.pid, "SIGTERM");
+  } catch {
+    return;
+  }
+
+  const deadline = Date.now() + 3_000;
+  while (server.exitCode === null && Date.now() < deadline) {
+    await sleep(100);
+  }
+
+  if (server.exitCode === null) {
+    try {
+      process.kill(-server.pid, "SIGKILL");
+    } catch {
+      // Process group already exited.
+    }
+  }
+}
+
 let failure;
 try {
   await waitForServer();
@@ -105,18 +151,7 @@ try {
 } finally {
   await fs.writeFile(logPath, serverLog, "utf8");
 
-  if (server.exitCode === null) {
-    server.kill("SIGTERM");
-
-    const deadline = Date.now() + 3_000;
-    while (server.exitCode === null && Date.now() < deadline) {
-      await sleep(100);
-    }
-
-    if (server.exitCode === null) {
-      server.kill("SIGKILL");
-    }
-  }
+  await stopServer();
 }
 
 if (failure) {
