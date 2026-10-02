@@ -62,6 +62,15 @@ for (const route of ['/api/extract','/api/apply','/api/project']) {
  const bad=await api(route,route==='/api/project'?'PUT':'POST',{});
  check('validation_'+route,bad.status===400,{status:bad.status});
 }
+const reportResponse = await fetch(`http://127.0.0.1:${regressionPort}/api/report?projectId=review-api-cases&scope=current&department=${encodeURIComponent('確認部')}`);
+const reportText = await reportResponse.text();
+check('report_download_headers_and_scenario_scope', reportResponse.status === 200 && reportResponse.headers.get('content-disposition')?.includes('attachment') && reportText.includes('業務数: 1') && !reportText.includes('## '+branch.name));
+const emptyReport = await fetch(`http://127.0.0.1:${regressionPort}/api/report?projectId=review-api-cases&workflows=`);
+check('report_empty_selection_not_all_workflows', (await emptyReport.text()).includes('業務数: 0'));
+const badReport = await fetch(`http://127.0.0.1:${regressionPort}/api/report?scope=invalid`);
+check('report_validation', badReport.status === 400);
+const missingReport = await fetch(`http://127.0.0.1:${regressionPort}/api/report?projectId=missing-report-project`);
+check('report_project_not_found', missingReport.status === 404);
 await fs.writeFile('.data/review-remaining-results.json',JSON.stringify(cases,null,2));
 console.log(JSON.stringify(cases,null,2));
 if (cases.some(item => !item.ok)) process.exitCode = 1;

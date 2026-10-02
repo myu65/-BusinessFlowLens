@@ -1,5 +1,8 @@
 "use client";
 
+import { scopedDataFlows, aggregateDataFlows, scenarioGraph } from "@/lib/knowledge";
+import { KnowledgeExplorer } from "./KnowledgeExplorer";
+
 import { AssetMergePanel, StepDetailEditor, TechnicalDetails, WorkflowExplorer } from "./ProgressiveWorkflow";
 
 import { useEffect, useMemo, useState } from "react";
@@ -44,6 +47,7 @@ import {
 } from "@/lib/graph";
 
 type Section =
+  | "company"
   | "interviews"
   | "workflow"
   | "dataflow"
@@ -299,6 +303,7 @@ function ShellNav({
   setSection: (section: Section) => void;
 }) {
   const items: Array<{ id: Section; label: string; hint: string }> = [
+    { id: "company", label: "会社を理解する", hint: "活動・Systemから探索" },
     { id: "interviews", label: "業務入力", hint: "新規・更新" },
     { id: "workflow", label: "業務フロー", hint: "1業務を読む" },
     { id: "dataflow", label: "データフロー", hint: "System間の流れ" },
@@ -538,6 +543,15 @@ function WorkflowPicker({
   selectedWorkflowId: string;
   onSelect: (workflowId: string) => void;
 }) {
+  const [query, setQuery] = useState("");
+  const matching = graph.workflows.filter(w => `${w.name} ${w.description ?? ''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
+  if (graph.workflows.length > 8) return <div className="kg-toolbar">
+    <label>業務選択の検索<input value={query} onChange={e => setQuery(e.target.value)} placeholder="業務名・工場・製品" /></label>
+    <label>表示する業務<select value={selectedWorkflowId} onChange={e => onSelect(e.target.value)}>
+      {!matching.some(w => w.id === selectedWorkflowId) && <option value={selectedWorkflowId}>{graph.workflows.find(w => w.id === selectedWorkflowId)?.name}（現在表示中）</option>}
+      {matching.map(w => <option key={w.id} value={w.id}>{w.name} / {w.scenario ?? 'current'}</option>)}
+    </select></label><span>{matching.length}件</span>
+  </div>;
   return (
     <div className="workflow-tabs">
       {graph.workflows.map((workflow) => (
@@ -1708,6 +1722,7 @@ function ReviewPanel({
 }
 
 function InterviewsView({
+  projectId,
   graph,
   selectedWorkflowId,
   setSelectedWorkflowId,
@@ -1719,6 +1734,7 @@ function InterviewsView({
   setProvider,
   onGraphApply,
 }: {
+  projectId: string;
   graph: LensGraph;
   selectedWorkflowId: string;
   setSelectedWorkflowId: (id: string) => void;
@@ -1733,6 +1749,7 @@ function InterviewsView({
   onGraphApply: (graph: LensGraph) => void;
 }) {
   const [mapping, setMapping] = useState(false);
+  const [workflowQuery, setWorkflowQuery] = useState("");
   const [refining, setRefining] = useState(false);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1785,7 +1802,7 @@ function InterviewsView({
     setHistoryLoading(true);
     try {
       const response = await fetch(
-        `/api/workflow-revisions?projectId=default&workflowId=${encodeURIComponent(
+        `/api/workflow-revisions?projectId=${encodeURIComponent(projectId)}&workflowId=${encodeURIComponent(
           workflowId,
         )}`,
         { cache: "no-store" },
@@ -1813,7 +1830,7 @@ function InterviewsView({
   async function openRevision(revisionId: number) {
     try {
       const response = await fetch(
-        `/api/workflow-revisions?projectId=default&revisionId=${revisionId}`,
+        `/api/workflow-revisions?projectId=${encodeURIComponent(projectId)}&revisionId=${revisionId}`,
         { cache: "no-store" },
       );
       const payload = await response.json();
@@ -2043,7 +2060,7 @@ function InterviewsView({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          projectId: "default",
+          projectId,
           projectName: "BusinessFlowLens",
           review: pending.review,
           workflow,
@@ -2165,8 +2182,9 @@ function InterviewsView({
           </div>
         ) : null}
 
+        <label className="kg-edit-field">編集する業務を検索<input value={workflowQuery} onChange={e => setWorkflowQuery(e.target.value)} placeholder="業務名・工場・製品" /></label>
         <div className="interview-items">
-          {graph.workflows.map((item) => {
+          {graph.workflows.filter(item => `${item.name} ${item.description ?? ''}`.toLocaleLowerCase().includes(workflowQuery.toLocaleLowerCase())).map((item) => {
             const processCount = getWorkflowProcesses(graph, item.id).length;
             return (
               <button
@@ -2465,7 +2483,7 @@ function WorkflowView({
   }
 
   return (
-    <WorkflowExplorer graph={graph} workflowId={workflowId} selectedStepId={selectedNode?.kind === "process" ? selectedNode.id : undefined} onSelectWorkflow={setWorkflowId} onEdit={onEdit} onGraphApply={onGraphApply}>
+    <WorkflowExplorer initialLevel="business" graph={graph} workflowId={workflowId} selectedStepId={selectedNode?.kind === "process" ? selectedNode.id : undefined} onSelectWorkflow={setWorkflowId} onEdit={onEdit} onGraphApply={onGraphApply}>
     <section className="page-view">
       <header className="page-header page-header--stackable">
         <div>
@@ -2823,7 +2841,11 @@ function AssetsView({ graph, onGraphApply }: { graph: LensGraph; onGraphApply: (
   );
 }
 
-function DataFlowView({ graph }: { graph: LensGraph }) {
+function DataFlowView({ graph, initialWorkflowId }: { graph: LensGraph; initialWorkflowId: string }) {
+  const [scope, setScope] = useState<WorkflowScenario>(graph.workflows.find(w => w.id === initialWorkflowId)?.scenario ?? "current");
+  const [workflowId, setWorkflowId] = useState(initialWorkflowId);
+  const [pair, setPair] = useState("");
+  const [page, setPage] = useState(0);
   const [ownership, setOwnership] = useState<OwnershipState>({
     department: "",
     responsiblePerson: "",
@@ -2838,15 +2860,9 @@ function DataFlowView({ graph }: { graph: LensGraph }) {
       .map((node) => [node.id, node]),
   );
 
-  const flows = (graph.dataFlows ?? []).filter((flow) => {
-    if (!ownership.department && !ownership.responsiblePerson) return true;
-    return flow.processIds.some((processId) => {
-      const process = processById.get(processId);
-      return process
-        ? processMatchesOwnership(process, ownerFilter)
-        : false;
-    });
-  });
+  const flows = scopedDataFlows(graph, scope, workflowId, ownerFilter);
+  const grouped = aggregateDataFlows(flows);
+  const listedFlows = flows.filter(f => !pair || `${f.sourceSystemId}|${f.targetSystemId}` === pair);
 
   const systemIds = new Set(
     flows.flatMap((flow) => [flow.sourceSystemId, flow.targetSystemId]),
@@ -2876,38 +2892,12 @@ function DataFlowView({ graph }: { graph: LensGraph }) {
     },
   }));
 
-  const flowEdges: Edge[] = flows.map((flow) => {
-    const dataLabels = flow.dataIds
-      .map((id) => graph.nodes.find((node) => node.id === id)?.label)
-      .filter(Boolean);
-    const manual = flow.automation === "manual" || flow.transferType === "manual";
-
-    return {
-      id: flow.id,
-      source: flow.sourceSystemId,
-      target: flow.targetSystemId,
-      label: [
-        dataLabels.join(" / ") || "データ未特定",
-        flow.transferType,
-        flow.frequency,
-      ]
-        .filter(Boolean)
-        .join(" · "),
-      type: "smoothstep",
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        width: 16,
-        height: 16,
-      },
-      style: {
-        strokeWidth: 2,
-        strokeDasharray: manual ? "7 5" : undefined,
-      },
-      labelStyle: { fontSize: 9, fontWeight: 750 },
-      labelBgPadding: [7, 5],
-      labelBgBorderRadius: 6,
-    };
-  });
+  const flowEdges: Edge[] = grouped.map(g => ({
+    id: g.id, source: g.source, target: g.target, label: `${g.flowIds.length} 受渡し${g.manual ? ' / 手動を含む' : ''}`,
+    type: 'smoothstep', markerEnd: { type: MarkerType.ArrowClosed },
+    style: { strokeWidth: 2, strokeDasharray: g.manual ? '7 5' : undefined },
+    labelStyle: { fontSize: 10 }, labelBgPadding: [7, 5], labelBgBorderRadius: 6,
+  }));
 
   const selectedNode =
     graph.nodes.find((node) => node.id === selectedNodeId) ?? null;
@@ -2921,7 +2911,7 @@ function DataFlowView({ graph }: { graph: LensGraph }) {
           <div className="eyebrow">SYSTEM DATA FLOW</div>
           <h1>System間で、何がどう動くかを見る</h1>
           <p>
-            Systemを主役にして、転送されるData・API/ファイル/手入力・自動/手動・頻度をエッジに集約します。
+            業務・シナリオで範囲を選び、System間の経路を俯瞰します。同じ経路の受渡しは1本に集約し、Data・方式・担当を下の一覧で確認できます。
           </p>
         </div>
         <OwnershipFilters
@@ -2931,10 +2921,23 @@ function DataFlowView({ graph }: { graph: LensGraph }) {
             setOwnership(value);
             setSelectedNodeId(null);
             setSelectedFlowId(null);
+            setPage(0);
+            setPair("");
           }}
         />
       </header>
 
+      <div className="kg-toolbar">
+        <label>データフローのシナリオ<select value={scope} onChange={e => { setScope(e.target.value as WorkflowScenario); setWorkflowId(''); setPair(''); setPage(0); setSelectedFlowId(null); setSelectedNodeId(null); }}><option value="current">Current / 現状</option><option value="future">Future / 将来案</option><option value="alternative">Alternative / 代替案</option></select></label>
+        <label>データフローの業務範囲<select value={workflowId} onChange={e => { setWorkflowId(e.target.value); setPair(''); setPage(0); setSelectedFlowId(null); setSelectedNodeId(null); }}><option value="">全業務（経路を集約）</option>{graph.workflows.filter(w => (w.scenario ?? 'current') === scope).map(w => <option key={w.id} value={w.id}>{w.name}</option>)}</select></label>
+        <span>{grouped.length} System間経路</span>
+        {pair && <button onClick={() => { setPair(''); setPage(0); }}>経路の絞り込みを解除</button>}
+      </div>
+      <div className="kg-links">
+        <p>受渡し一覧: {listedFlows.length}件 / {Math.min(listedFlows.length, page * 20 + 1)}–{Math.min(listedFlows.length, (page + 1) * 20)}を表示</p>
+        {listedFlows.slice(page * 20, (page + 1) * 20).map(f => <button key={f.id} onClick={() => { setSelectedFlowId(f.id); setSelectedNodeId(null); }}>{graph.nodes.find(n => n.id === f.sourceSystemId)?.label} → {graph.nodes.find(n => n.id === f.targetSystemId)?.label} · {f.dataIds.map(id => graph.nodes.find(n => n.id === id)?.label).join(' / ')} · {f.transferType} / {f.automation}</button>)}
+        <div className="kg-toolbar"><button disabled={!page} onClick={() => setPage(p => p - 1)}>前の20受渡し</button><button disabled={(page + 1) * 20 >= listedFlows.length} onClick={() => setPage(p => p + 1)}>次の20受渡し</button></div>
+      </div>
       <div className="dataflow-summary">
         <article>
           <span>表示System</span>
@@ -2985,7 +2988,9 @@ function DataFlowView({ graph }: { graph: LensGraph }) {
               setSelectedFlowId(null);
             }}
             onEdgeClick={(_, edge) => {
-              setSelectedFlowId(edge.id);
+              setPair(edge.id);
+              setPage(0);
+              setSelectedFlowId(null);
               setSelectedNodeId(null);
             }}
             proOptions={{ hideAttribution: true }}
@@ -2996,7 +3001,7 @@ function DataFlowView({ graph }: { graph: LensGraph }) {
 
           {selectedNode ? (
             <RelationshipPanel
-              graph={graph}
+              graph={scenarioGraph(graph, scope, workflowId)}
               node={selectedNode}
               onClose={() => setSelectedNodeId(null)}
               onSelectNode={(node) => {
@@ -3319,7 +3324,8 @@ function OverviewView({ graph }: { graph: LensGraph }) {
 }
 
 function Workspace() {
-  const [section, setSection] = useState<Section>("interviews");
+  const [projectId, setProjectId] = useState("default");
+  const [section, setSection] = useState<Section>("company");
   const [graph, setGraph] = useState<LensGraph>(() => createDemoGraph());
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(
     SAMPLE_WORKFLOWS[0].id,
@@ -3342,7 +3348,9 @@ function Workspace() {
 
     async function loadProject() {
       try {
-        const response = await fetch("/api/project?projectId=default", {
+        const activeProject = new URLSearchParams(window.location.search).get("projectId") || "default";
+        setProjectId(activeProject);
+        const response = await fetch(`/api/project?projectId=${encodeURIComponent(activeProject)}`, {
           cache: "no-store",
         });
         const payload = await response.json();
@@ -3370,11 +3378,10 @@ function Workspace() {
         }
 
         setSaveStatus("saved");
+        setHydrated(true);
       } catch (error) {
         console.error(error);
         if (!cancelled) setSaveStatus("error");
-      } finally {
-        if (!cancelled) setHydrated(true);
       }
     }
 
@@ -3396,7 +3403,7 @@ function Workspace() {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            projectId: "default",
+            projectId,
             projectName: "BusinessFlowLens",
             graph,
             transcripts,
@@ -3456,8 +3463,11 @@ function Workspace() {
         </div>
       </header>
 
+      <div hidden={section !== "company"}><KnowledgeExplorer projectId={projectId} graph={graph} onGraphApply={setGraph} onOpenWorkflow={id => { setSelectedWorkflowId(id); setSection("workflow"); }} /></div>
+
       {section === "interviews" ? (
         <InterviewsView
+          projectId={projectId}
           graph={graph}
           selectedWorkflowId={selectedWorkflowId}
           setSelectedWorkflowId={setSelectedWorkflowId}
@@ -3481,7 +3491,7 @@ function Workspace() {
         />
       ) : null}
 
-      {section === "dataflow" ? <DataFlowView graph={graph} /> : null}
+      {section === "dataflow" ? <DataFlowView graph={graph} initialWorkflowId={selectedWorkflowId} /> : null}
 
       {section === "assets" ? <AssetsView graph={graph} onGraphApply={setGraph} /> : null}
       {section === "overview" ? <OverviewView graph={graph} /> : null}

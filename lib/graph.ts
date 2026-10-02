@@ -98,6 +98,7 @@ export type LensNode = {
   technicalDetails?: TechnicalDetail[];
   detailSteps?: DetailStep[];
   aliases?: string[];
+  executionContext?: { trigger: string; rule: string; exception: string };
 };
 
 export type LensEdge = {
@@ -136,6 +137,19 @@ export type LensGraph = {
   nodes: LensNode[];
   edges: LensEdge[];
   dataFlows: SystemDataFlow[];
+  knowledge?: CompanyKnowledge;
+};
+
+export type CompanyKnowledge = {
+  name: string;
+  description: string;
+  activities: Array<{ id: string; name: string; description: string;
+    capabilities: Array<{ id: string; name: string; description: string; workflowIds: string[] }> }>;
+  categories: Array<{ id: string; name: string; description: string }>;
+  systems: Array<{ systemId: string; categoryId: string; owner: string; purpose: string;
+    dependsOn: Array<{ systemId: string; reason: string }> }>;
+  criticalWorkflows: Array<{ workflowId: string; reason: string }>;
+  handoffs?: Array<{ id: string; sourceWorkflowId: string; targetWorkflowId: string; dataIds: string[]; description: string; kind: 'information' | 'material'; evidence: string }>;
 };
 
 export type GraphPatchNode = {
@@ -153,6 +167,7 @@ export type GraphPatchNode = {
   action?: string | null;
   technicalDetails?: TechnicalDetail[];
   detailSteps?: DetailStep[];
+  executionContext?: LensNode["executionContext"];
 };
 
 export type GraphPatchEdge = {
@@ -188,6 +203,7 @@ export type FollowUpAnswer = {
 };
 
 export type ExtractionReviewStep = {
+  executionContext?: LensNode["executionContext"];
   stepKey: string;
   name: string;
   order: number;
@@ -386,6 +402,7 @@ export function replaceWorkflowGraph(
       existing.technicalDetails =
         patchNode.technicalDetails ?? existing.technicalDetails;
       existing.detailSteps = patchNode.detailSteps ?? existing.detailSteps;
+      existing.executionContext = patchNode.executionContext ?? existing.executionContext;
       continue;
     }
 
@@ -406,6 +423,7 @@ export function replaceWorkflowGraph(
       action: patchNode.action ?? undefined,
       technicalDetails: patchNode.technicalDetails,
       detailSteps: patchNode.detailSteps,
+      executionContext: patchNode.executionContext,
     };
     nodes.push(created);
     byKey.set(canonicalKey, created);
@@ -533,14 +551,16 @@ export function replaceWorkflowGraph(
       ...flow.dataIds,
     ]),
   );
-  const materialDataIds = new Set(workflows.flatMap(w => w.landscape?.materialHandoffs.flatMap(h => h.dataIds) ?? []));
+  const materialDataIds = new Set([...workflows.flatMap(w => w.landscape?.materialHandoffs.flatMap(h => h.dataIds) ?? []), ...(graph.knowledge?.handoffs ?? []).flatMap(h => h.dataIds)]);
 
   return {
     workflows,
+    knowledge: graph.knowledge,
     nodes: nodes.filter(
       (node) =>
         node.kind === "process" ||
         Boolean(node.aliases?.length) ||
+        Boolean(graph.knowledge?.systems.some(s => s.systemId === node.id || s.dependsOn.some(d => d.systemId === node.id))) ||
         usedNodeIds.has(node.id) ||
         materialDataIds.has(node.id) ||
         dataFlowNodeIds.has(node.id),
@@ -1335,6 +1355,7 @@ export function buildWorkflowReviewFromGraph(
       action: process.action ?? process.description,
       technicalDetails: process.technicalDetails ?? [],
       detailSteps: process.detailSteps ?? [],
+      executionContext: process.executionContext,
       certainty: process.status === "confirmed" ? "explicit" : "inferred",
       evidence: process.evidence ?? "",
       systems,
@@ -1502,6 +1523,13 @@ export function branchWorkflowScenario(
     nodes: [...graph.nodes, ...clonedProcesses],
     edges: [...graph.edges, ...clonedEdges],
     dataFlows: [...(graph.dataFlows ?? []), ...clonedDataFlows],
+    knowledge: graph.knowledge ? { ...graph.knowledge,
+      activities: graph.knowledge.activities.map(a => ({ ...a, capabilities: a.capabilities.map(c => ({ ...c,
+        workflowIds: c.workflowIds.includes(sourceWorkflowId) ? [...c.workflowIds, nextWorkflow.id] : c.workflowIds,
+      })) })),
+      criticalWorkflows: [...graph.knowledge.criticalWorkflows, ...graph.knowledge.criticalWorkflows
+        .filter(w => w.workflowId === sourceWorkflowId).map(w => ({ ...w, workflowId: nextWorkflow.id }))],
+    } : undefined,
   };
 }
 

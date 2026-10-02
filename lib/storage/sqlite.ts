@@ -234,6 +234,16 @@ function normalizeSnapshotGraph(graph: LensGraph): LensGraph {
         })),
       },
     } : w),
+    knowledge: graph.knowledge ? {
+      ...graph.knowledge,
+      systems: graph.knowledge.systems.map(s => ({ ...s,
+        systemId: resolveLegacyId(s.systemId, "system") ?? s.systemId,
+        dependsOn: s.dependsOn.map(d => ({ ...d, systemId: resolveLegacyId(d.systemId, "system") ?? d.systemId })),
+      })),
+      handoffs: graph.knowledge.handoffs?.map(h => ({ ...h,
+        dataIds: h.dataIds.map(id => resolveLegacyId(id, "data", [h.sourceWorkflowId, h.targetWorkflowId]) ?? id),
+      })),
+    } : undefined,
     nodes,
     edges: [...edgeById.values()],
     dataFlows: [...flowById.values()],
@@ -365,6 +375,7 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
       "TEXT NOT NULL DEFAULT '{}'",
     );
     this.ensureColumn("workflows", "family_id", "TEXT");
+    this.ensureColumn("projects", "knowledge_json", "TEXT NOT NULL DEFAULT 'null'");
     this.ensureColumn("workflows", "landscape_json", "TEXT NOT NULL DEFAULT 'null'");
     this.ensureColumn("workflows", "summary", "TEXT");
     this.ensureColumn("workflows", "trigger", "TEXT");
@@ -402,7 +413,7 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
 
   async loadProject(projectId: string): Promise<ProjectSnapshot | null> {
     const project = this.db
-      .prepare("SELECT id, name, updated_at FROM projects WHERE id = ?")
+      .prepare("SELECT id, name, updated_at, knowledge_json FROM projects WHERE id = ?")
       .get(projectId) as SqliteRow | undefined;
 
     if (!project) return null;
@@ -509,6 +520,7 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
       projectId: String(project.id),
       projectName: String(project.name),
       graph: {
+        knowledge: JSON.parse(String(project.knowledge_json ?? "null")) ?? undefined,
         workflows,
         nodes,
         edges,
@@ -680,11 +692,12 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
 
     const upsertProject = this.db.prepare(
       [
-        "INSERT INTO projects (id, name, updated_at)",
-        "VALUES (?, ?, ?)",
+        "INSERT INTO projects (id, name, updated_at, knowledge_json)",
+        "VALUES (?, ?, ?, ?)",
         "ON CONFLICT(id) DO UPDATE SET",
         "  name = excluded.name,",
-        "  updated_at = excluded.updated_at",
+        "  updated_at = excluded.updated_at,",
+        "  knowledge_json = excluded.knowledge_json",
       ].join("\n"),
     );
 
@@ -726,7 +739,7 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
 
     this.db.exec("BEGIN IMMEDIATE");
     try {
-      upsertProject.run(snapshot.projectId, snapshot.projectName, now);
+      upsertProject.run(snapshot.projectId, snapshot.projectName, now, JSON.stringify(graph.knowledge ?? null));
 
       this.db
         .prepare("DELETE FROM data_flows WHERE project_id = ?")
@@ -783,6 +796,7 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
             technicalDetails: node.technicalDetails ?? [],
             detailSteps: node.detailSteps ?? [],
             aliases: node.aliases ?? [],
+            executionContext: node.executionContext,
           }),
         );
       }

@@ -3129,3 +3129,30 @@ button:disabled { cursor:not-allowed; opacity:.45; }
   background: var(--accent-soft);
   color: var(--accent);
 }
+/* Company exploration keeps hundreds of workflows in a bounded readable projection. */
+.kg-view { max-width: 1500px; margin: auto; }
+.kg-toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 18px 0; }
+.kg-toolbar label { display: grid; gap: 6px; font-size: 13px; }
+.kg-view button { cursor: pointer; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: #1e3a5f; padding: 10px 14px; text-align: left; }
+.kg-view button:hover { background: #eef6ff; border-color: #517fae; }
+.kg-view button:disabled { opacity: .5; cursor: default; }
+.kg-view input, .kg-view select, .kg-view textarea { padding: 9px; border: 1px solid #cbd5e1; border-radius: 6px; background: white; color: #182f4d; }
+.kg-trail { padding: 14px; background: #eaf2fa; border-radius: 8px; line-height: 1.8; }
+.kg-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin: 20px 0; }
+.kg-cards button { padding: 20px; }
+.kg-cards strong { font-size: 18px; }
+.kg-cards span, .kg-workflows span, .kg-steps span { color: #52657a; font-size: 13px; }
+.kg-workflows { display: grid; gap: 12px; }
+.kg-workflows article, .kg-links article { border: 1px solid #d9e2ec; padding: 16px; border-radius: 8px; background: #fff; }
+.kg-chip { margin: 4px !important; font-size: 13px; padding: 7px 10px !important; }
+.kg-chip--system { background: #e9f4fc !important; }
+.kg-chip--data { background: #e8f7ed !important; }
+.kg-important { display: inline-block; margin-left: 12px; color: #9a5100; }
+.kg-steps { padding-left: 28px; }
+.kg-steps li { padding: 14px 0; border-bottom: 1px solid #d9e2ec; }
+.kg-steps span { margin-left: 12px; }
+.kg-links { display: grid; gap: 10px; margin: 16px 0; }
+.kg-edit-field { display: grid; gap: 6px; margin: 12px 0; max-width: 700px; }
+.kg-view h2 { margin-top: 26px; }
+.kg-view h3 { margin-top: 24px; }
+.kg-view p { line-height: 1.75; }

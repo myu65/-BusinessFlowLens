@@ -235,6 +235,7 @@ export function TechnicalDetails({ node }: { node: LensNode }) {
 
 export function WorkflowExplorer({
   graph,
+  initialLevel = "overview",
   workflowId,
   selectedStepId,
   onSelectWorkflow,
@@ -243,6 +244,7 @@ export function WorkflowExplorer({
   children,
 }: {
   graph: LensGraph;
+  initialLevel?: "overview" | "business" | "detail";
   workflowId: string;
   selectedStepId?: string;
   onSelectWorkflow: (id: string) => void;
@@ -251,7 +253,7 @@ export function WorkflowExplorer({
   children: ReactNode;
 }) {
   const [level, setLevel] = useState<"overview" | "business" | "detail">(
-    "overview",
+    initialLevel,
   );
   const [stepId, setStepId] = useState<string | null>(null);
   useEffect(() => {
