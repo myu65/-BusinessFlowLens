@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Background,
   Controls,
@@ -15,6 +15,8 @@ import {
 } from "@xyflow/react";
 import {
   SAMPLE_WORKFLOWS,
+  branchWorkflowScenario,
+  buildWorkflowReviewFromGraph,
   createDemoGraph,
   getAssetUsages,
   getDataFlowsForSystem,
@@ -32,6 +34,7 @@ import {
   type OwnershipFilter,
   type Relation,
   type SystemDataFlow,
+  type WorkflowScenario,
 } from "@/lib/graph";
 
 type Section =
@@ -46,6 +49,29 @@ type PendingExtraction = {
   review: ExtractionReview;
   provider: string;
   answers: Record<string, string>;
+};
+
+type RevisionSummary = {
+  id: number;
+  projectId: string;
+  workflowId: string;
+  revisionNumber: number;
+  workflowName: string;
+  summary: string;
+  updatedBy: string;
+  createdAt: string;
+};
+
+type RevisionDetail = RevisionSummary & {
+  workflowDescription?: string;
+  familyId?: string;
+  scenario?: string;
+  scenarioLabel?: string;
+  basedOnWorkflowId?: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
+  sourceNotes: string;
+  review: ExtractionReview;
 };
 
 type StepNodeData = {
