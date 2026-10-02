@@ -17,17 +17,29 @@ import {
   SAMPLE_WORKFLOWS,
   createDemoGraph,
   getAssetUsages,
+  getDataFlowsForSystem,
+  getDepartments,
+  getNodeRelationships,
   getNodeWorkflowIds,
   getProcessAssetLinks,
+  getResponsiblePeople,
   getWorkflowProcesses,
+  processMatchesOwnership,
   type ExtractionReview,
   type LensGraph,
   type LensNode,
   type NodeKind,
+  type OwnershipFilter,
   type Relation,
+  type SystemDataFlow,
 } from "@/lib/graph";
 
-type Section = "interviews" | "workflow" | "assets" | "overview";
+type Section =
+  | "interviews"
+  | "workflow"
+  | "dataflow"
+  | "assets"
+  | "overview";
 type AssetFilter = "all" | "system" | "data";
 
 type PendingExtraction = {
@@ -86,9 +98,14 @@ function WorkflowStepCard({ data, selected }: NodeProps<WorkflowStepNode>) {
       <h3>{step.label}</h3>
       <p>{step.action ?? step.description}</p>
 
-      {step.actor ? (
-        <div className="step-actor">👤 {step.actor}</div>
-      ) : null}
+      <div className="step-ownership">
+        {step.department ? <span>🏢 {step.department}</span> : null}
+        {step.responsiblePerson ? (
+          <span>👤 {step.responsiblePerson}</span>
+        ) : step.actor ? (
+          <span>👤 {step.actor}</span>
+        ) : null}
+      </div>
 
       {systems.length > 0 ? (
         <div className="step-assets">
@@ -131,8 +148,11 @@ const nodeTypes = {
 function workflowFlow(
   graph: LensGraph,
   workflowId: string,
+  ownership: OwnershipFilter,
 ): { nodes: WorkflowStepNode[]; edges: Edge[] } {
-  const processes = getWorkflowProcesses(graph, workflowId);
+  const processes = getWorkflowProcesses(graph, workflowId).filter((process) =>
+    processMatchesOwnership(process, ownership),
+  );
   const processIds = new Set(processes.map((process) => process.id));
 
   const nodes: WorkflowStepNode[] = processes.map((step, index) => {
@@ -206,6 +226,7 @@ function ShellNav({
   const items: Array<{ id: Section; label: string; hint: string }> = [
     { id: "interviews", label: "ヒアリング", hint: "聞く・レビュー" },
     { id: "workflow", label: "業務フロー", hint: "1業務を読む" },
+    { id: "dataflow", label: "データフロー", hint: "System間の流れ" },
     { id: "assets", label: "システム・データ", hint: "影響範囲を見る" },
     { id: "overview", label: "横断ビュー", hint: "共通点を俯瞰" },
   ];
@@ -223,6 +244,202 @@ function ShellNav({
         </button>
       ))}
     </nav>
+  );
+}
+
+type OwnershipState = {
+  department: string;
+  responsiblePerson: string;
+};
+
+function ownershipFilter(state: OwnershipState): OwnershipFilter {
+  return {
+    department: state.department || null,
+    responsiblePerson: state.responsiblePerson || null,
+  };
+}
+
+function OwnershipFilters({
+  graph,
+  value,
+  onChange,
+}: {
+  graph: LensGraph;
+  value: OwnershipState;
+  onChange: (value: OwnershipState) => void;
+}) {
+  const departments = getDepartments(graph);
+  const people = getResponsiblePeople(graph);
+
+  return (
+    <div className="ownership-filters">
+      <label>
+        <span>部署</span>
+        <select
+          value={value.department}
+          onChange={(event) =>
+            onChange({ ...value, department: event.target.value })
+          }
+        >
+          <option value="">すべて</option>
+          {departments.map((department) => (
+            <option key={department} value={department}>
+              {department}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        <span>担当者</span>
+        <select
+          value={value.responsiblePerson}
+          onChange={(event) =>
+            onChange({
+              ...value,
+              responsiblePerson: event.target.value,
+            })
+          }
+        >
+          <option value="">すべて</option>
+          {people.map((person) => (
+            <option key={person} value={person}>
+              {person}
+            </option>
+          ))}
+        </select>
+      </label>
+      {value.department || value.responsiblePerson ? (
+        <button
+          className="filter-clear"
+          onClick={() =>
+            onChange({ department: "", responsiblePerson: "" })
+          }
+        >
+          クリア
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function RelationshipPanel({
+  graph,
+  node,
+  onClose,
+  onSelectNode,
+}: {
+  graph: LensGraph;
+  node: LensNode;
+  onClose: () => void;
+  onSelectNode?: (node: LensNode) => void;
+}) {
+  const relationships = getNodeRelationships(graph, node.id);
+  const workflows = new Map(
+    graph.workflows.map((workflow) => [workflow.id, workflow.name]),
+  );
+  const dataFlows =
+    node.kind === "system" ? getDataFlowsForSystem(graph, node.id) : [];
+
+  return (
+    <aside className="relationship-panel">
+      <button className="close-button" onClick={onClose}>
+        ×
+      </button>
+      <div className="eyebrow">RELATED TO THIS NODE</div>
+      <div className="relationship-title">
+        <span className={`asset-kind asset-kind--${node.kind}`}>
+          {node.kind === "process"
+            ? "STEP"
+            : node.kind === "system"
+              ? "SYS"
+              : "DATA"}
+        </span>
+        <h2>{node.label}</h2>
+      </div>
+
+      {node.kind === "process" ? (
+        <div className="relationship-owner">
+          <span>部署</span>
+          <strong>{node.department ?? "未確認"}</strong>
+          <span>担当者</span>
+          <strong>{node.responsiblePerson ?? node.actor ?? "未確認"}</strong>
+        </div>
+      ) : null}
+
+      <p>{node.description}</p>
+
+      <div className="relationship-section">
+        <header>
+          <strong>直接関連</strong>
+          <span>{relationships.length}</span>
+        </header>
+        <div className="relationship-list">
+          {relationships.map((item, index) => (
+            <button
+              key={`${item.node.id}-${item.relation}-${index}`}
+              onClick={() => onSelectNode?.(item.node)}
+            >
+              <span
+                className={`asset-kind asset-kind--${item.node.kind}`}
+              >
+                {item.node.kind === "process"
+                  ? "STEP"
+                  : item.node.kind === "system"
+                    ? "SYS"
+                    : "DATA"}
+              </span>
+              <span>
+                <strong>{item.node.label}</strong>
+                <small>
+                  {item.relation}
+                  {item.workflowIds.length > 0
+                    ? ` · ${item.workflowIds
+                        .map((id) => workflows.get(id) ?? id)
+                        .join(" / ")}`
+                    : ""}
+                </small>
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {dataFlows.length > 0 ? (
+        <div className="relationship-section">
+          <header>
+            <strong>System間データフロー</strong>
+            <span>{dataFlows.length}</span>
+          </header>
+          <div className="relationship-flows">
+            {dataFlows.map((flow) => {
+              const source = graph.nodes.find(
+                (item) => item.id === flow.sourceSystemId,
+              );
+              const target = graph.nodes.find(
+                (item) => item.id === flow.targetSystemId,
+              );
+              const data = flow.dataIds
+                .map((id) => graph.nodes.find((item) => item.id === id)?.label)
+                .filter(Boolean)
+                .join(" / ");
+
+              return (
+                <article key={flow.id}>
+                  <strong>
+                    {source?.label ?? "?"} → {target?.label ?? "?"}
+                  </strong>
+                  <span>{data || "データ未特定"}</span>
+                  <small>
+                    {flow.transferType} · {flow.automation}
+                    {flow.frequency ? ` · ${flow.frequency}` : ""}
+                  </small>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+    </aside>
   );
 }
 
