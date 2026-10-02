@@ -65,6 +65,11 @@ const WORKFLOW_DRAFT_SCHEMA = {
           actor: { type: ["string", "null"] },
           department: { type: ["string", "null"] },
           responsiblePerson: { type: ["string", "null"] },
+          executionMode: {
+            type: "string",
+            enum: ["manual", "automatic", "mixed", "unknown"],
+          },
+          executingSystem: { type: ["string", "null"] },
           action: { type: "string" },
           certainty: {
             type: "string",
@@ -119,6 +124,8 @@ const WORKFLOW_DRAFT_SCHEMA = {
           "actor",
           "department",
           "responsiblePerson",
+          "executionMode",
+          "executingSystem",
           "action",
           "certainty",
           "evidence",
@@ -444,10 +451,17 @@ Rules:
 12. If a critical fact is missing, ask a focused follow-up question rather than guessing.
 13. warnings should call out ambiguity, contradictions, suspicious duplicate entry, unclear system-of-record, or places where the transcript is insufficient.
 14. stepKey is local to this draft. Use short stable English slugs such as receive-order, check-content, register-order.
-15. Existing System/Data/Workflow context may be provided as reference candidates. Use it to understand aliases, shorthand, and handoffs, but NEVER treat a candidate as confirmed solely because it exists in the catalog.
-16. "ERP" may plausibly refer to an existing SAP system, and "いつもの出荷処理" may plausibly refer to an existing shipping workflow. Preserve the interview wording/evidence and surface uncertainty rather than inventing or silently canonicalizing.
-17. Follow-up answers are additional interview evidence. Incorporate them into steps, ownership, data flows, trigger/outcome, warnings, and questions. Remove questions that are answered.
-18. certainty=explicit unless the step itself requires a modest inference to make the workflow coherent.
+15. Process execution mode is separate from ownership and from System-to-System Data Flow:
+   - manual: a person performs the step
+   - automatic: a System performs the step internally
+   - mixed: human action/approval and System automation are both essential to the step
+   - unknown: execution mode is not clear
+16. Set executingSystem ONLY when the interview explicitly says or very clearly describes a named System performing the step automatically. Example: "SAPが自動で在庫を引き当てる" => executionMode=automatic, executingSystem=SAP. "SAPで在庫を確認する" does NOT imply SAP executes the business step; that is usually a manual step using SAP.
+17. Automatic internal System execution is NOT a dataFlow. "ERP automatically assigns an order number" is an automatic Process step. "ERP sends the order to WMS" is a dataFlow and may also cause a later automatic Process step in WMS if explicitly described.
+18. Existing System/Data/Workflow context may be provided as reference candidates. Use it to understand aliases, shorthand, and handoffs, but NEVER treat a candidate as confirmed solely because it exists in the catalog.
+19. "ERP" may plausibly refer to an existing SAP system, and "いつもの出荷処理" may plausibly refer to an existing shipping workflow. Preserve the interview wording/evidence and surface uncertainty rather than inventing or silently canonicalizing.
+20. Follow-up answers are additional interview evidence. Incorporate them into steps, ownership, execution mode, executing System, data flows, trigger/outcome, warnings, and questions. Remove questions that are answered.
+21. certainty=explicit unless the step itself requires a modest inference to make the workflow coherent.
 
 Write concise Japanese labels/descriptions when the interview is Japanese.`;
 }
@@ -617,6 +631,14 @@ function collectCandidates(draft: WorkflowDraft): AssetCandidate[] {
   for (const step of draft.steps) {
     for (const system of step.systems) {
       add("system", system.name, system.evidence, step.certainty);
+    }
+    if (step.executingSystem) {
+      add(
+        "system",
+        step.executingSystem,
+        step.evidence,
+        step.certainty,
+      );
     }
     for (const data of step.data) {
       add("data", data.name, data.evidence, step.certainty);
@@ -829,10 +851,25 @@ function buildGraphPatch(
       actor: step.actor,
       department: step.department,
       responsiblePerson: step.responsiblePerson,
+      executionMode: step.executionMode,
       evidence: step.evidence,
       stepOrder: step.order,
       action: step.action,
     });
+
+    if (step.executingSystem) {
+      const id = candidateId("system", step.executingSystem);
+      const executingSystemKey =
+        assetKeyByCandidate.get(id) ??
+        `system:unresolved:${normalizeName(step.executingSystem) || "unknown"}`;
+
+      edges.push({
+        sourceKey: executingSystemKey,
+        targetKey: processKey(step.stepKey),
+        relation: "executes",
+        label: step.executionMode,
+      });
+    }
 
     for (const system of step.systems) {
       const id = candidateId("system", system.name);
@@ -954,6 +991,8 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
         order: Number.isFinite(step.order) ? step.order : index + 1,
         department: step.department ?? null,
         responsiblePerson: step.responsiblePerson ?? null,
+        executionMode: step.executionMode ?? "unknown",
+        executingSystem: step.executingSystem ?? null,
         systems: step.systems ?? [],
         data: step.data ?? [],
       };
