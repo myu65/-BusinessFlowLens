@@ -3,6 +3,7 @@ import type {
   Confidence,
   ExtractionQuestion,
   ExtractionResult,
+  FollowUpAnswer,
   ExtractionReview,
   ExtractionReviewStep,
   GraphPatch,
@@ -62,6 +63,8 @@ const WORKFLOW_DRAFT_SCHEMA = {
           name: { type: "string" },
           order: { type: "integer" },
           actor: { type: ["string", "null"] },
+          department: { type: ["string", "null"] },
+          responsiblePerson: { type: ["string", "null"] },
           action: { type: "string" },
           certainty: {
             type: "string",
@@ -114,6 +117,8 @@ const WORKFLOW_DRAFT_SCHEMA = {
           "name",
           "order",
           "actor",
+          "department",
+          "responsiblePerson",
           "action",
           "certainty",
           "evidence",
@@ -138,6 +143,63 @@ const WORKFLOW_DRAFT_SCHEMA = {
           "toStepKey",
           "condition",
           "evidence",
+        ],
+      },
+    },
+    dataFlows: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          sourceSystem: { type: "string" },
+          targetSystem: { type: "string" },
+          data: {
+            type: "array",
+            items: { type: "string" },
+          },
+          transferType: {
+            type: "string",
+            enum: [
+              "api",
+              "file",
+              "database",
+              "message",
+              "email",
+              "manual",
+              "unknown",
+            ],
+          },
+          direction: {
+            type: "string",
+            enum: ["push", "pull", "bidirectional", "unknown"],
+          },
+          automation: {
+            type: "string",
+            enum: ["automatic", "manual", "mixed", "unknown"],
+          },
+          frequency: { type: ["string", "null"] },
+          evidence: { type: "string" },
+          certainty: {
+            type: "string",
+            enum: ["explicit", "inferred"],
+          },
+          relatedStepKeys: {
+            type: "array",
+            items: { type: "string" },
+          },
+        },
+        required: [
+          "sourceSystem",
+          "targetSystem",
+          "data",
+          "transferType",
+          "direction",
+          "automation",
+          "frequency",
+          "evidence",
+          "certainty",
+          "relatedStepKeys",
         ],
       },
     },
@@ -178,6 +240,7 @@ const WORKFLOW_DRAFT_SCHEMA = {
     "outcome",
     "steps",
     "transitions",
+    "dataFlows",
     "questions",
     "warnings",
   ],
@@ -373,26 +436,139 @@ Rules:
 4. Data may be explicit ("order data", "customer master", "Excel row") or strongly implied by an explicit read/write operation. Mark the containing step inferred when the business object itself is inferred.
 5. Do not invent integrations, APIs, databases, owners, approval rules, automation, or master-data sources.
 6. Evidence must be a short phrase grounded in the interview. Do not paraphrase invented detail into evidence.
-7. Separate actor from system. "Sales enters ERP" => actor Sales; system ERP; action register order.
+7. Separate actor, department/team, responsible person, and system. "営業部の田中さんがERPに入力" => department=営業部; responsiblePerson=田中さん; actor may be 営業担当; system=ERP. Do not infer department/person when not stated.
 8. Capture branches and conditions as transitions. Do not force a single linear flow when the interview describes alternatives.
-9. If a critical fact is missing, ask a focused follow-up question rather than guessing.
-10. warnings should call out ambiguity, contradictions, suspicious duplicate entry, or places where the transcript is insufficient.
-11. stepKey is local to this draft. Use short stable English slugs such as receive-order, check-content, register-order.
-12. certainty=explicit unless the step itself requires a modest inference to make the workflow coherent.
+9. Capture system-to-system dataFlows ONLY when the transcript explicitly describes information moving from one named system/tool to another, including human transcription. Examples: "ERPからWMSへCSVを送る", "Excelを見ながらERPへ手入力". Do NOT infer an API or integration merely because two systems appear in adjacent steps.
+10. For each dataFlow record source system, target system, transferred business data, transferType, direction, automation, frequency if stated, evidence, and relatedStepKeys. Use unknown rather than guessing a transfer method.
+11. Manual re-entry is a legitimate dataFlow: transferType=manual and automation=manual.
+12. If a critical fact is missing, ask a focused follow-up question rather than guessing.
+13. warnings should call out ambiguity, contradictions, suspicious duplicate entry, unclear system-of-record, or places where the transcript is insufficient.
+14. stepKey is local to this draft. Use short stable English slugs such as receive-order, check-content, register-order.
+15. Existing System/Data/Workflow context may be provided as reference candidates. Use it to understand aliases, shorthand, and handoffs, but NEVER treat a candidate as confirmed solely because it exists in the catalog.
+16. "ERP" may plausibly refer to an existing SAP system, and "いつもの出荷処理" may plausibly refer to an existing shipping workflow. Preserve the interview wording/evidence and surface uncertainty rather than inventing or silently canonicalizing.
+17. Follow-up answers are additional interview evidence. Incorporate them into steps, ownership, data flows, trigger/outcome, warnings, and questions. Remove questions that are answered.
+18. certainty=explicit unless the step itself requires a modest inference to make the workflow coherent.
 
 Write concise Japanese labels/descriptions when the interview is Japanese.`;
 }
 
-function extractionUserPrompt(interview: string, workflow: Workflow) {
+function compactExistingContext(
+  graph: LensGraph,
+  currentWorkflowId: string,
+) {
+  const workflowNames = new Map(
+    graph.workflows.map((workflow) => [workflow.id, workflow.name]),
+  );
+
+  const workflowIdsForNode = (nodeId: string) => {
+    const ids = new Set<string>();
+    for (const edge of graph.edges) {
+      if (edge.source === nodeId || edge.target === nodeId) {
+        for (const workflowId of edge.workflowIds) ids.add(workflowId);
+      }
+    }
+    for (const flow of graph.dataFlows ?? []) {
+      if (
+        flow.sourceSystemId === nodeId ||
+        flow.targetSystemId === nodeId ||
+        flow.dataIds.includes(nodeId)
+      ) {
+        for (const workflowId of flow.workflowIds) ids.add(workflowId);
+      }
+    }
+    return [...ids]
+      .map((id) => workflowNames.get(id) ?? id)
+      .slice(0, 8);
+  };
+
+  const systems = graph.nodes
+    .filter((node) => node.kind === "system")
+    .map((node) => ({
+      canonicalKey: node.canonicalKey,
+      name: node.label,
+      description: node.description,
+      usedBy: workflowIdsForNode(node.id),
+    }))
+    .slice(0, 30);
+
+  const data = graph.nodes
+    .filter((node) => node.kind === "data")
+    .map((node) => ({
+      canonicalKey: node.canonicalKey,
+      name: node.label,
+      description: node.description,
+      usedBy: workflowIdsForNode(node.id),
+    }))
+    .slice(0, 30);
+
+  const workflows = graph.workflows
+    .filter((workflow) => workflow.id !== currentWorkflowId)
+    .map((workflow) => ({
+      id: workflow.id,
+      name: workflow.name,
+      description: workflow.description ?? "",
+      steps: graph.nodes
+        .filter(
+          (node) =>
+            node.kind === "process" &&
+            node.workflowId === workflow.id,
+        )
+        .sort(
+          (a, b) =>
+            (a.stepOrder ?? Number.MAX_SAFE_INTEGER) -
+            (b.stepOrder ?? Number.MAX_SAFE_INTEGER),
+        )
+        .slice(0, 10)
+        .map((node) => node.label),
+    }))
+    .slice(0, 30);
+
+  return { systems, data, workflows };
+}
+
+function extractionUserPrompt(args: {
+  interview: string;
+  workflow: Workflow;
+  graph: LensGraph;
+  previousReview?: ExtractionReview | null;
+  followUpAnswers?: FollowUpAnswer[];
+}) {
+  const existingContext = compactExistingContext(
+    args.graph,
+    args.workflow.id,
+  );
+  const answered = (args.followUpAnswers ?? []).filter(
+    (item) => item.answer.trim().length > 0,
+  );
+
   return `Workflow being interviewed:
-${JSON.stringify(workflow, null, 2)}
+${JSON.stringify(args.workflow, null, 2)}
 
 Interview transcript:
 ---
-${interview}
+${args.interview}
 ---
 
-Extract a reviewable workflow draft. Do not consider existing systems or data in the project yet; entity resolution happens in a separate pass.`;
+Existing company context (REFERENCE CANDIDATES ONLY):
+${JSON.stringify(existingContext, null, 2)}
+
+${args.previousReview ? `Current review draft. It may include human edits; preserve those edits unless the new follow-up answers clearly contradict them:
+${JSON.stringify(args.previousReview, null, 2)}
+` : ""}
+
+${answered.length > 0 ? `Follow-up Q&A. Treat the answers as additional interview evidence:
+${JSON.stringify(answered, null, 2)}
+` : ""}
+
+Use existing company context to interpret shorthand and references such as "ERP", "SAP", "the core system", or "the usual shipping process". It is context, not authority:
+- Do not silently replace the interview wording with a canonical name.
+- Do not merge or assign canonical IDs here.
+- When an existing System/Data/Workflow is a plausible match, use that knowledge to make the draft more coherent and mention ambiguity in warnings/questions when identity is not clear.
+- If the interview says "after that we do the usual shipping process" and an existing shipping workflow is present, do not invent its internal steps; describe the handoff and ask only what is still needed.
+- If a follow-up answer resolves a question, update the draft and remove that question.
+- Ask new questions only for remaining material gaps.
+
+Return a revised, reviewable workflow draft.`;
 }
 
 function normalizeName(value: string) {
@@ -444,6 +620,14 @@ function collectCandidates(draft: WorkflowDraft): AssetCandidate[] {
     }
     for (const data of step.data) {
       add("data", data.name, data.evidence, step.certainty);
+    }
+  }
+
+  for (const flow of draft.dataFlows ?? []) {
+    add("system", flow.sourceSystem, flow.evidence, flow.certainty);
+    add("system", flow.targetSystem, flow.evidence, flow.certainty);
+    for (const dataName of flow.data) {
+      add("data", dataName, flow.evidence, flow.certainty);
     }
   }
 
@@ -589,6 +773,7 @@ function buildGraphPatch(
 ): GraphPatch {
   const nodes: GraphPatchNode[] = [];
   const edges: GraphPatchEdge[] = [];
+  const dataFlows: GraphPatch["dataFlows"] = [];
   const resolutionByCandidate = new Map(
     resolutions.map((resolution) => [resolution.candidateId, resolution]),
   );
@@ -642,6 +827,8 @@ function buildGraphPatch(
       description: step.action,
       status: step.certainty === "explicit" ? "confirmed" : "inferred",
       actor: step.actor,
+      department: step.department,
+      responsiblePerson: step.responsiblePerson,
       evidence: step.evidence,
       stepOrder: step.order,
       action: step.action,
@@ -711,9 +898,39 @@ function buildGraphPatch(
     }
   }
 
+  for (const flow of draft.dataFlows ?? []) {
+    const sourceKey = assetKeyByCandidate.get(
+      candidateId("system", flow.sourceSystem),
+    );
+    const targetKey = assetKeyByCandidate.get(
+      candidateId("system", flow.targetSystem),
+    );
+    if (!sourceKey || !targetKey) continue;
+
+    const dataKeys = flow.data
+      .map((name) =>
+        assetKeyByCandidate.get(candidateId("data", name)),
+      )
+      .filter((key): key is string => Boolean(key));
+
+    dataFlows.push({
+      sourceSystemKey: sourceKey,
+      targetSystemKey: targetKey,
+      dataKeys,
+      transferType: flow.transferType,
+      direction: flow.direction,
+      automation: flow.automation,
+      frequency: flow.frequency,
+      evidence: flow.evidence,
+      status: flow.certainty === "explicit" ? "confirmed" : "inferred",
+      relatedStepKeys: flow.relatedStepKeys,
+    });
+  }
+
   return {
     nodes,
     edges,
+    dataFlows,
     questions: draft.questions.map((item) => item.question),
   };
 }
@@ -735,6 +952,8 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
         ...step,
         stepKey: key,
         order: Number.isFinite(step.order) ? step.order : index + 1,
+        department: step.department ?? null,
+        responsiblePerson: step.responsiblePerson ?? null,
         systems: step.systems ?? [],
         data: step.data ?? [],
       };
@@ -758,6 +977,22 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
     outcome: raw.outcome ?? null,
     steps,
     transitions,
+    dataFlows: (raw.dataFlows ?? [])
+      .filter(
+        (flow) =>
+          Boolean(
+            flow.sourceSystem &&
+              flow.targetSystem &&
+              flow.sourceSystem !== flow.targetSystem &&
+              flow.evidence,
+          ),
+      )
+      .map((flow) => ({
+        ...flow,
+        relatedStepKeys: (flow.relatedStepKeys ?? [])
+          .map((key) => normalizeName(key))
+          .filter((key) => validKeys.has(key)),
+      })),
     questions: (raw.questions ?? []).filter(
       (item): item is ExtractionQuestion =>
         Boolean(item?.question && item?.reason && item?.target),
@@ -769,12 +1004,15 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
 export async function extractWorkflowReviewWithAI(args: {
   interview: string;
   workflow: Workflow;
+  graph: LensGraph;
+  previousReview?: ExtractionReview | null;
+  followUpAnswers?: FollowUpAnswer[];
 }): Promise<{ review: ExtractionReview; provider: string }> {
   const rawDraft = await structuredCall<WorkflowDraft>({
     schemaName: "workflow_draft",
     schema: WORKFLOW_DRAFT_SCHEMA,
     system: extractionSystemPrompt(),
-    user: extractionUserPrompt(args.interview, args.workflow),
+    user: extractionUserPrompt(args),
   });
 
   const draft = normalizeDraft(rawDraft);
@@ -786,6 +1024,7 @@ export async function extractWorkflowReviewWithAI(args: {
       outcome: draft.outcome,
       steps: draft.steps,
       transitions: draft.transitions,
+      dataFlows: draft.dataFlows,
       questions: draft.questions,
       warnings: draft.warnings,
     },

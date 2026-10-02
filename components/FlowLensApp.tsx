@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Background,
   Controls,
@@ -15,24 +15,67 @@ import {
 } from "@xyflow/react";
 import {
   SAMPLE_WORKFLOWS,
+  branchWorkflowScenario,
+  buildWorkflowReviewFromGraph,
   createDemoGraph,
   getAssetUsages,
+  getDataFlowsForSystem,
+  getDepartments,
+  getNodeRelationships,
   getNodeWorkflowIds,
   getProcessAssetLinks,
+  getResponsiblePeople,
   getWorkflowProcesses,
+  processMatchesOwnership,
   type ExtractionReview,
+  type FollowUpAnswer,
   type LensGraph,
   type LensNode,
   type NodeKind,
+  type OwnershipFilter,
   type Relation,
+  type SystemDataFlow,
+  type Workflow,
+  type WorkflowScenario,
 } from "@/lib/graph";
 
-type Section = "interviews" | "workflow" | "assets" | "overview";
+type Section =
+  | "interviews"
+  | "workflow"
+  | "dataflow"
+  | "assets"
+  | "overview";
 type AssetFilter = "all" | "system" | "data";
 
 type PendingExtraction = {
   review: ExtractionReview;
   provider: string;
+  answers: Record<string, string>;
+  answerHistory: FollowUpAnswer[];
+};
+
+type RevisionSummary = {
+  id: number;
+  projectId: string;
+  workflowId: string;
+  revisionNumber: number;
+  workflowName: string;
+  summary: string;
+  updatedBy: string;
+  createdAt: string;
+};
+
+type RevisionDetail = RevisionSummary & {
+  workflowDescription?: string;
+  familyId?: string;
+  scenario?: string;
+  scenarioLabel?: string;
+  basedOnWorkflowId?: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
+  sourceNotes: string;
+  followUpAnswers: FollowUpAnswer[];
+  review: ExtractionReview;
 };
 
 type StepNodeData = {
@@ -86,9 +129,14 @@ function WorkflowStepCard({ data, selected }: NodeProps<WorkflowStepNode>) {
       <h3>{step.label}</h3>
       <p>{step.action ?? step.description}</p>
 
-      {step.actor ? (
-        <div className="step-actor">👤 {step.actor}</div>
-      ) : null}
+      <div className="step-ownership">
+        {step.department ? <span>🏢 {step.department}</span> : null}
+        {step.responsiblePerson ? (
+          <span>👤 {step.responsiblePerson}</span>
+        ) : step.actor ? (
+          <span>👤 {step.actor}</span>
+        ) : null}
+      </div>
 
       {systems.length > 0 ? (
         <div className="step-assets">
@@ -131,8 +179,11 @@ const nodeTypes = {
 function workflowFlow(
   graph: LensGraph,
   workflowId: string,
+  ownership: OwnershipFilter,
 ): { nodes: WorkflowStepNode[]; edges: Edge[] } {
-  const processes = getWorkflowProcesses(graph, workflowId);
+  const processes = getWorkflowProcesses(graph, workflowId).filter((process) =>
+    processMatchesOwnership(process, ownership),
+  );
   const processIds = new Set(processes.map((process) => process.id));
 
   const nodes: WorkflowStepNode[] = processes.map((step, index) => {
@@ -204,8 +255,9 @@ function ShellNav({
   setSection: (section: Section) => void;
 }) {
   const items: Array<{ id: Section; label: string; hint: string }> = [
-    { id: "interviews", label: "ヒアリング", hint: "聞く・レビュー" },
+    { id: "interviews", label: "業務入力", hint: "新規・更新" },
     { id: "workflow", label: "業務フロー", hint: "1業務を読む" },
+    { id: "dataflow", label: "データフロー", hint: "System間の流れ" },
     { id: "assets", label: "システム・データ", hint: "影響範囲を見る" },
     { id: "overview", label: "横断ビュー", hint: "共通点を俯瞰" },
   ];
@@ -223,6 +275,202 @@ function ShellNav({
         </button>
       ))}
     </nav>
+  );
+}
+
+type OwnershipState = {
+  department: string;
+  responsiblePerson: string;
+};
+
+function ownershipFilter(state: OwnershipState): OwnershipFilter {
+  return {
+    department: state.department || null,
+    responsiblePerson: state.responsiblePerson || null,
+  };
+}
+
+function OwnershipFilters({
+  graph,
+  value,
+  onChange,
+}: {
+  graph: LensGraph;
+  value: OwnershipState;
+  onChange: (value: OwnershipState) => void;
+}) {
+  const departments = getDepartments(graph);
+  const people = getResponsiblePeople(graph);
+
+  return (
+    <div className="ownership-filters">
+      <label>
+        <span>部署</span>
+        <select
+          value={value.department}
+          onChange={(event) =>
+            onChange({ ...value, department: event.target.value })
+          }
+        >
+          <option value="">すべて</option>
+          {departments.map((department) => (
+            <option key={department} value={department}>
+              {department}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        <span>担当者</span>
+        <select
+          value={value.responsiblePerson}
+          onChange={(event) =>
+            onChange({
+              ...value,
+              responsiblePerson: event.target.value,
+            })
+          }
+        >
+          <option value="">すべて</option>
+          {people.map((person) => (
+            <option key={person} value={person}>
+              {person}
+            </option>
+          ))}
+        </select>
+      </label>
+      {value.department || value.responsiblePerson ? (
+        <button
+          className="filter-clear"
+          onClick={() =>
+            onChange({ department: "", responsiblePerson: "" })
+          }
+        >
+          クリア
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function RelationshipPanel({
+  graph,
+  node,
+  onClose,
+  onSelectNode,
+}: {
+  graph: LensGraph;
+  node: LensNode;
+  onClose: () => void;
+  onSelectNode?: (node: LensNode) => void;
+}) {
+  const relationships = getNodeRelationships(graph, node.id);
+  const workflows = new Map(
+    graph.workflows.map((workflow) => [workflow.id, workflow.name]),
+  );
+  const dataFlows =
+    node.kind === "system" ? getDataFlowsForSystem(graph, node.id) : [];
+
+  return (
+    <aside className="relationship-panel">
+      <button className="close-button" onClick={onClose}>
+        ×
+      </button>
+      <div className="eyebrow">RELATED TO THIS NODE</div>
+      <div className="relationship-title">
+        <span className={`asset-kind asset-kind--${node.kind}`}>
+          {node.kind === "process"
+            ? "STEP"
+            : node.kind === "system"
+              ? "SYS"
+              : "DATA"}
+        </span>
+        <h2>{node.label}</h2>
+      </div>
+
+      {node.kind === "process" ? (
+        <div className="relationship-owner">
+          <span>部署</span>
+          <strong>{node.department ?? "未確認"}</strong>
+          <span>担当者</span>
+          <strong>{node.responsiblePerson ?? node.actor ?? "未確認"}</strong>
+        </div>
+      ) : null}
+
+      <p>{node.description}</p>
+
+      <div className="relationship-section">
+        <header>
+          <strong>直接関連</strong>
+          <span>{relationships.length}</span>
+        </header>
+        <div className="relationship-list">
+          {relationships.map((item, index) => (
+            <button
+              key={`${item.node.id}-${item.relation}-${index}`}
+              onClick={() => onSelectNode?.(item.node)}
+            >
+              <span
+                className={`asset-kind asset-kind--${item.node.kind}`}
+              >
+                {item.node.kind === "process"
+                  ? "STEP"
+                  : item.node.kind === "system"
+                    ? "SYS"
+                    : "DATA"}
+              </span>
+              <span>
+                <strong>{item.node.label}</strong>
+                <small>
+                  {item.relation}
+                  {item.workflowIds.length > 0
+                    ? ` · ${item.workflowIds
+                        .map((id) => workflows.get(id) ?? id)
+                        .join(" / ")}`
+                    : ""}
+                </small>
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {dataFlows.length > 0 ? (
+        <div className="relationship-section">
+          <header>
+            <strong>System間データフロー</strong>
+            <span>{dataFlows.length}</span>
+          </header>
+          <div className="relationship-flows">
+            {dataFlows.map((flow) => {
+              const source = graph.nodes.find(
+                (item) => item.id === flow.sourceSystemId,
+              );
+              const target = graph.nodes.find(
+                (item) => item.id === flow.targetSystemId,
+              );
+              const data = flow.dataIds
+                .map((id) => graph.nodes.find((item) => item.id === id)?.label)
+                .filter(Boolean)
+                .join(" / ");
+
+              return (
+                <article key={flow.id}>
+                  <strong>
+                    {source?.label ?? "?"} → {target?.label ?? "?"}
+                  </strong>
+                  <span>{data || "データ未特定"}</span>
+                  <small>
+                    {flow.transferType} · {flow.automation}
+                    {flow.frequency ? ` · ${flow.frequency}` : ""}
+                  </small>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+    </aside>
   );
 }
 
@@ -251,40 +499,69 @@ function WorkflowPicker({
 }
 
 function ReviewPanel({
-  pending,
+  model,
+  dirty,
   onChange,
   onApply,
   onDiscard,
+  onRefine,
   applying,
+  refining,
+  revisions,
+  historyDetail,
+  historyLoading,
+  onOpenRevision,
+  onCloseHistory,
 }: {
-  pending: PendingExtraction | null;
+  model: PendingExtraction | null;
+  dirty: boolean;
   onChange: (pending: PendingExtraction) => void;
   onApply: () => void;
   onDiscard: () => void;
+  onRefine: () => void;
   applying: boolean;
+  refining: boolean;
+  revisions: RevisionSummary[];
+  historyDetail: RevisionDetail | null;
+  historyLoading: boolean;
+  onOpenRevision: (id: number) => void;
+  onCloseHistory: () => void;
 }) {
-  if (!pending) {
+  if (!model) {
     return (
       <aside className="review-panel review-panel--empty">
-        <div className="eyebrow">AI DRAFT</div>
-        <h2>まず下書きを作る</h2>
+        <div className="eyebrow">BUSINESS MODEL</div>
+        <h2>業務構造はまだありません</h2>
         <p>
-          AIは直接グラフを書き換えません。ヒアリングから業務ステップ、
-          System/Data、分岐、未確認事項を根拠付きで抽出します。
+          左の業務メモからAIで構造化すると、ここにステップ・担当・
+          System/Data・データフローが表示されます。
         </p>
         <div className="review-principles">
-          <span>01 事実を先に抽出</span>
-          <span>02 人が下書きを修正</span>
-          <span>03 修正後に共有資産を照合</span>
+          <span>01 業務メモから構造化</span>
+          <span>02 ここで直接修正</span>
+          <span>03 保存時に共有資産を照合</span>
         </div>
       </aside>
     );
   }
 
-  const { review } = pending;
+  const { review } = model;
 
   const changeReview = (nextReview: ExtractionReview) =>
-    onChange({ ...pending, review: nextReview });
+    onChange({ ...model, review: nextReview });
+
+  const changeAnswer = (question: string, answer: string) =>
+    onChange({
+      ...model,
+      answers: {
+        ...model.answers,
+        [question]: answer,
+      },
+    });
+
+  const hasFollowUpAnswers = review.questions.some(
+    (question) => (model.answers[question.question] ?? "").trim().length > 0,
+  );
 
   const updateStep = (
     stepKey: string,
@@ -309,6 +586,12 @@ function ReviewPanel({
           transition.fromStepKey !== stepKey &&
           transition.toStepKey !== stepKey,
       ),
+      dataFlows: review.dataFlows.map((flow) => ({
+        ...flow,
+        relatedStepKeys: flow.relatedStepKeys.filter(
+          (key) => key !== stepKey,
+        ),
+      })),
     });
   };
 
@@ -328,15 +611,111 @@ function ReviewPanel({
     });
   };
 
+  const updateDataFlow = (
+    index: number,
+    patch: Partial<ExtractionReview["dataFlows"][number]>,
+  ) => {
+    changeReview({
+      ...review,
+      dataFlows: review.dataFlows.map((flow, itemIndex) =>
+        itemIndex === index ? { ...flow, ...patch } : flow,
+      ),
+    });
+  };
+
+  const removeDataFlow = (index: number) => {
+    changeReview({
+      ...review,
+      dataFlows: review.dataFlows.filter(
+        (_, itemIndex) => itemIndex !== index,
+      ),
+    });
+  };
+
   return (
     <aside className="review-panel">
       <div className="review-header">
         <div>
-          <div className="eyebrow">AI DRAFT / EDIT BEFORE APPLY</div>
-          <h2>抽出結果を直してから反映</h2>
+          <div className="eyebrow">
+            {dirty ? "WORKING BUSINESS MODEL" : "CURRENT BUSINESS MODEL"}
+          </div>
+          <h2>{dirty ? "変更中の業務構造" : "現在の業務構造"}</h2>
         </div>
-        <span className="provider-badge">{pending.provider}</span>
+        <span className="provider-badge">
+          {dirty ? model.provider : "保存済み"}
+        </span>
       </div>
+
+      {historyDetail ? (
+        <section className="revision-preview">
+          <div className="revision-preview__header">
+            <div>
+              <div className="eyebrow">HISTORY SNAPSHOT</div>
+              <strong>
+                v{historyDetail.revisionNumber} ·{" "}
+                {historyDetail.workflowName}
+              </strong>
+              <small>
+                {new Date(historyDetail.createdAt).toLocaleString("ja-JP")} ·{" "}
+                {historyDetail.updatedBy}
+              </small>
+            </div>
+            <button className="close-button" onClick={onCloseHistory}>
+              ×
+            </button>
+          </div>
+          <p>{historyDetail.summary}</p>
+          <div className="revision-preview__meta">
+            <span>
+              {historyDetail.scenarioLabel ??
+                historyDetail.scenario ??
+                "current"}
+            </span>
+            <span>
+              {historyDetail.effectiveFrom ?? "開始未設定"} →{" "}
+              {historyDetail.effectiveTo ?? "終了未設定"}
+            </span>
+          </div>
+          <details>
+            <summary>当時のヒアリング / 業務メモ</summary>
+            <pre>{historyDetail.sourceNotes || "—"}</pre>
+          </details>
+          {historyDetail.followUpAnswers.length > 0 ? (
+            <details>
+              <summary>
+                当時の追加Q&A ({historyDetail.followUpAnswers.length})
+              </summary>
+              <div className="revision-qa-list">
+                {historyDetail.followUpAnswers.map((item, index) => (
+                  <article key={`${item.question}-${index}`}>
+                    <strong>{item.question}</strong>
+                    <p>{item.answer}</p>
+                  </article>
+                ))}
+              </div>
+            </details>
+          ) : null}
+          <details>
+            <summary>
+              当時の構造 ({historyDetail.review.steps.length} steps)
+            </summary>
+            <div className="revision-step-list">
+              {historyDetail.review.steps.map((step) => (
+                <article key={step.stepKey}>
+                  <b>{String(step.order).padStart(2, "0")}</b>
+                  <span>
+                    <strong>{step.name}</strong>
+                    <small>
+                      {step.department ?? "部署未確認"} ·{" "}
+                      {step.responsiblePerson ?? step.actor ?? "担当未確認"}
+                    </small>
+                  </span>
+                </article>
+              ))}
+            </div>
+          </details>
+        </section>
+      ) : null}
 
       <div className="review-summary review-summary--editable">
         <label>
@@ -380,13 +759,16 @@ function ReviewPanel({
 
       <div className="review-scroll">
         <div className="review-section-title">
-          <span>抽出ステップ — 誤りはここで直す</span>
+          <span>業務ステップ</span>
           <b>{review.steps.length}</b>
         </div>
 
         <div className="review-steps">
           {review.steps.map((step) => (
-            <article key={step.stepKey} className="review-step review-step--editable">
+            <article
+              key={step.stepKey}
+              className="review-step review-step--editable"
+            >
               <div className="review-step__top">
                 <span>{String(step.order).padStart(2, "0")}</span>
                 <input
@@ -413,20 +795,38 @@ function ReviewPanel({
                 }
               />
 
-              <div className="review-step-meta">
+              <div className="review-step-meta review-step-meta--ownership">
                 <input
                   value={step.actor ?? ""}
-                  placeholder="担当者・部署 未確認"
+                  placeholder="役割 例: 営業担当"
                   onChange={(event) =>
                     updateStep(step.stepKey, {
                       actor: event.target.value || null,
                     })
                   }
                 />
-                <span>
-                  {step.certainty === "explicit" ? "明示" : "AI推定"} · 根拠:{" "}
-                  {step.evidence || "—"}
-                </span>
+                <input
+                  value={step.department ?? ""}
+                  placeholder="部署 例: 営業部"
+                  onChange={(event) =>
+                    updateStep(step.stepKey, {
+                      department: event.target.value || null,
+                    })
+                  }
+                />
+                <input
+                  value={step.responsiblePerson ?? ""}
+                  placeholder="担当者 例: 田中さん"
+                  onChange={(event) =>
+                    updateStep(step.stepKey, {
+                      responsiblePerson: event.target.value || null,
+                    })
+                  }
+                />
+              </div>
+              <div className="review-evidence">
+                {step.certainty === "explicit" ? "明示" : "AI推定"} · 根拠:{" "}
+                {step.evidence || "—"}
               </div>
 
               {(step.systems.length > 0 || step.data.length > 0) && (
@@ -438,7 +838,7 @@ function ReviewPanel({
                     >
                       {system.name} · {system.interaction}
                       <button
-                        title="誤抽出なら除外"
+                        title="除外"
                         onClick={() => removeSystem(step.stepKey, index)}
                       >
                         ×
@@ -452,7 +852,7 @@ function ReviewPanel({
                     >
                       {data.name} · {data.operation}
                       <button
-                        title="誤抽出なら除外"
+                        title="除外"
                         onClick={() => removeData(step.stepKey, index)}
                       >
                         ×
@@ -465,10 +865,133 @@ function ReviewPanel({
           ))}
         </div>
 
+        {review.dataFlows.length > 0 ? (
+          <div className="review-dataflows">
+            <div className="review-section-title">
+              <span>System間データフロー</span>
+              <b>{review.dataFlows.length}</b>
+            </div>
+            {review.dataFlows.map((flow, index) => (
+              <article
+                key={`${flow.sourceSystem}-${flow.targetSystem}-${index}`}
+              >
+                <div className="review-dataflow-title">
+                  <input
+                    value={flow.sourceSystem}
+                    onChange={(event) =>
+                      updateDataFlow(index, {
+                        sourceSystem: event.target.value,
+                      })
+                    }
+                  />
+                  <span>→</span>
+                  <input
+                    value={flow.targetSystem}
+                    onChange={(event) =>
+                      updateDataFlow(index, {
+                        targetSystem: event.target.value,
+                      })
+                    }
+                  />
+                  <button
+                    className="review-delete"
+                    onClick={() => removeDataFlow(index)}
+                    title="このデータフローを除外"
+                  >
+                    ×
+                  </button>
+                </div>
+                <input
+                  className="review-dataflow-data"
+                  value={flow.data.join(", ")}
+                  placeholder="流れるデータ（カンマ区切り）"
+                  onChange={(event) =>
+                    updateDataFlow(index, {
+                      data: event.target.value
+                        .split(",")
+                        .map((item) => item.trim())
+                        .filter(Boolean),
+                    })
+                  }
+                />
+                <div className="review-dataflow-options">
+                  <select
+                    value={flow.transferType}
+                    onChange={(event) =>
+                      updateDataFlow(index, {
+                        transferType:
+                          event.target.value as typeof flow.transferType,
+                      })
+                    }
+                  >
+                    {[
+                      "api",
+                      "file",
+                      "database",
+                      "message",
+                      "email",
+                      "manual",
+                      "unknown",
+                    ].map((item) => (
+                      <option key={item} value={item}>
+                        {item}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={flow.direction}
+                    onChange={(event) =>
+                      updateDataFlow(index, {
+                        direction:
+                          event.target.value as typeof flow.direction,
+                      })
+                    }
+                  >
+                    {["push", "pull", "bidirectional", "unknown"].map(
+                      (item) => (
+                        <option key={item} value={item}>
+                          {item}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                  <select
+                    value={flow.automation}
+                    onChange={(event) =>
+                      updateDataFlow(index, {
+                        automation:
+                          event.target.value as typeof flow.automation,
+                      })
+                    }
+                  >
+                    {["automatic", "manual", "mixed", "unknown"].map(
+                      (item) => (
+                        <option key={item} value={item}>
+                          {item}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                  <input
+                    value={flow.frequency ?? ""}
+                    placeholder="頻度 例: 15分ごと"
+                    onChange={(event) =>
+                      updateDataFlow(index, {
+                        frequency: event.target.value || null,
+                      })
+                    }
+                  />
+                </div>
+                <small>根拠: {flow.evidence || "—"}</small>
+              </article>
+            ))}
+          </div>
+        ) : null}
+
         {review.warnings.length > 0 ? (
           <div className="review-warning">
             <div className="review-section-title">
-              <span>AIが迷っているところ</span>
+              <span>要確認</span>
               <b>{review.warnings.length}</b>
             </div>
             {review.warnings.map((warning) => (
@@ -477,39 +1000,110 @@ function ReviewPanel({
           </div>
         ) : null}
 
-        {review.questions.length > 0 ? (
-          <div className="review-questions">
+        {model.answerHistory.length > 0 ? (
+          <div className="answered-followups">
             <div className="review-section-title">
-              <span>次に聞くと精度が上がること</span>
-              <b>{review.questions.length}</b>
+              <span>反映済みの追加Q&A</span>
+              <b>{model.answerHistory.length}</b>
             </div>
-            {review.questions.map((question, index) => (
-              <article key={question.question}>
-                <span>{String(index + 1).padStart(2, "0")}</span>
-                <div>
-                  <strong>{question.question}</strong>
-                  <small>{question.reason}</small>
-                </div>
+            {model.answerHistory.map((item, index) => (
+              <article key={`${item.question}-${index}`}>
+                <strong>{item.question}</strong>
+                <p>{item.answer}</p>
               </article>
             ))}
           </div>
         ) : null}
+
+        {review.questions.length > 0 ? (
+          <div className="review-questions">
+            <div className="review-section-title">
+              <span>追加で確認したいこと</span>
+              <b>{review.questions.length}</b>
+            </div>
+            {review.questions.map((question, index) => (
+              <article key={question.question} className="followup-question">
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <div>
+                  <strong>{question.question}</strong>
+                  <small>{question.reason}</small>
+                  <textarea
+                    value={model.answers[question.question] ?? ""}
+                    placeholder="ここに回答・補足を入力"
+                    onChange={(event) =>
+                      changeAnswer(question.question, event.target.value)
+                    }
+                  />
+                </div>
+              </article>
+            ))}
+            <div className="followup-refine">
+              <p>
+                回答を追加情報としてAIへ戻し、現在の業務モデルを再整理します。
+              </p>
+              <button
+                className="button-secondary"
+                onClick={onRefine}
+                disabled={!hasFollowUpAnswers || refining || applying}
+              >
+                {refining ? "回答を反映中…" : "回答をAIに反映して再整理"}
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="revision-history">
+          <div className="review-section-title">
+            <span>更新履歴</span>
+            <b>{revisions.length}</b>
+          </div>
+          {historyLoading ? (
+            <p className="revision-history__empty">履歴を読み込み中…</p>
+          ) : revisions.length > 0 ? (
+            <div className="revision-history__list">
+              {revisions.map((revision) => (
+                <button
+                  key={revision.id}
+                  onClick={() => onOpenRevision(revision.id)}
+                >
+                  <b>v{revision.revisionNumber}</b>
+                  <span>
+                    <strong>{revision.summary || revision.workflowName}</strong>
+                    <small>
+                      {new Date(revision.createdAt).toLocaleString("ja-JP")} ·{" "}
+                      {revision.updatedBy}
+                    </small>
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="revision-history__empty">
+              まだ保存済みの更新履歴はありません。
+            </p>
+          )}
+        </div>
       </div>
 
       <div className="review-actions">
         <button
           className="button-secondary"
           onClick={onDiscard}
-          disabled={applying}
+          disabled={!dirty || applying || refining}
         >
-          破棄
+          変更を破棄
         </button>
         <button
           className="button-primary"
           onClick={onApply}
-          disabled={applying || review.steps.length === 0}
+          disabled={
+            !dirty ||
+            applying ||
+            refining ||
+            review.steps.length === 0
+          }
         >
-          {applying ? "共有資産を照合中…" : "修正内容を反映"}
+          {applying ? "保存中…" : "業務構造を保存"}
         </button>
       </div>
     </aside>
@@ -542,17 +1136,114 @@ function InterviewsView({
   onGraphApply: (graph: LensGraph) => void;
 }) {
   const [mapping, setMapping] = useState(false);
+  const [refining, setRefining] = useState(false);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [newDescription, setNewDescription] = useState("");
+  const [branching, setBranching] = useState(false);
+  const [branchName, setBranchName] = useState("");
+  const [branchLabel, setBranchLabel] = useState("将来案");
+  const [branchEffectiveFrom, setBranchEffectiveFrom] = useState("");
+  const [revisions, setRevisions] = useState<RevisionSummary[]>([]);
+  const [historyDetail, setHistoryDetail] =
+    useState<RevisionDetail | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const workflow = graph.workflows.find(
     (item) => item.id === selectedWorkflowId,
   );
+  const existingProcessCount = workflow
+    ? getWorkflowProcesses(graph, workflow.id).length
+    : 0;
+  const isStructured = existingProcessCount > 0;
 
-  function createInterview() {
+  const currentModel: PendingExtraction | null =
+    workflow && isStructured
+      ? {
+          review: buildWorkflowReviewFromGraph(graph, workflow.id),
+          provider: "current-state",
+          answers: {},
+          answerHistory: [],
+        }
+      : null;
+
+  const model = pending ?? currentModel;
+
+  async function refreshHistory(workflowId = selectedWorkflowId) {
+    if (!workflowId) {
+      setRevisions([]);
+      return;
+    }
+
+    setHistoryLoading(true);
+    try {
+      const response = await fetch(
+        `/api/workflow-revisions?projectId=default&workflowId=${encodeURIComponent(
+          workflowId,
+        )}`,
+        { cache: "no-store" },
+      );
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "更新履歴の読込に失敗しました。");
+      }
+
+      setRevisions(payload.revisions ?? []);
+    } catch (cause) {
+      console.error(cause);
+      setRevisions([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    setHistoryDetail(null);
+    void refreshHistory(selectedWorkflowId);
+  }, [selectedWorkflowId]);
+
+  async function openRevision(revisionId: number) {
+    try {
+      const response = await fetch(
+        `/api/workflow-revisions?projectId=default&revisionId=${revisionId}`,
+        { cache: "no-store" },
+      );
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "履歴の読込に失敗しました。");
+      }
+
+      setHistoryDetail(payload.revision ?? null);
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "履歴の読込に失敗しました。",
+      );
+    }
+  }
+
+  function updateWorkflowMeta(patch: Partial<Workflow>) {
+    if (!workflow) return;
+
+    onGraphApply({
+      ...graph,
+      workflows: graph.workflows.map((item) =>
+        item.id === workflow.id
+          ? {
+              ...item,
+              ...patch,
+              familyId:
+                patch.familyId ?? item.familyId ?? item.id,
+            }
+          : item,
+      ),
+    });
+  }
+
+  function createBusiness() {
     const name = newName.trim();
     if (!name) return;
 
@@ -568,6 +1259,8 @@ function InterviewsView({
         ...graph.workflows,
         {
           id,
+          familyId: id,
+          scenario: "current",
           name,
           description: newDescription.trim() || undefined,
         },
@@ -581,17 +1274,59 @@ function InterviewsView({
     setPending(null);
   }
 
+  function createScenarioBranch() {
+    if (!workflow) return;
+
+    const name =
+      branchName.trim() || `${workflow.name}（${branchLabel || "将来案"}）`;
+    const base = slugifyWorkflow(
+      `${workflow.id}-${branchLabel || "future"}`,
+    );
+    const ids = new Set(graph.workflows.map((item) => item.id));
+    let id = base;
+    let suffix = 2;
+    while (ids.has(id)) id = `${base}-${suffix++}`;
+
+    const nextWorkflow: Workflow = {
+      id,
+      name,
+      description: workflow.description,
+      familyId: workflow.familyId ?? workflow.id,
+      scenario: "future",
+      scenarioLabel: branchLabel.trim() || "将来案",
+      basedOnWorkflowId: workflow.id,
+      effectiveFrom: branchEffectiveFrom || undefined,
+    };
+
+    const nextGraph = branchWorkflowScenario(
+      graph,
+      workflow.id,
+      nextWorkflow,
+    );
+
+    onGraphApply(nextGraph);
+    setTranscripts((current) => ({
+      ...current,
+      [id]: current[workflow.id] ?? "",
+    }));
+    setSelectedWorkflowId(id);
+    setPending(null);
+    setBranching(false);
+    setBranchName("");
+    setBranchLabel("将来案");
+    setBranchEffectiveFrom("");
+  }
+
   async function extract() {
     if (!workflow) return;
     const interview = transcripts[workflow.id]?.trim();
     if (!interview) {
-      setError("ヒアリング内容を入力してください。");
+      setError("ヒアリング / 業務メモを入力してください。");
       return;
     }
 
     setMapping(true);
     setError(null);
-    setPending(null);
 
     try {
       const response = await fetch("/api/extract", {
@@ -600,25 +1335,89 @@ function InterviewsView({
         body: JSON.stringify({
           interview,
           workflow,
+          graph,
+          previousReview: model?.review ?? null,
+          followUpAnswers: model?.answerHistory ?? [],
         }),
       });
 
       const payload = await response.json();
       if (!response.ok) {
-        throw new Error(payload?.error ?? "抽出に失敗しました。");
+        throw new Error(payload?.error ?? "構造更新に失敗しました。");
       }
 
       setProvider(payload.provider ?? "unknown");
       setPending({
         review: payload.review,
         provider: payload.provider ?? "unknown",
+        answers: {},
+        answerHistory: model?.answerHistory ?? [],
       });
     } catch (cause) {
       setError(
-        cause instanceof Error ? cause.message : "抽出に失敗しました。",
+        cause instanceof Error ? cause.message : "構造更新に失敗しました。",
       );
     } finally {
       setMapping(false);
+    }
+  }
+
+  async function refineDraft() {
+    if (!workflow || !pending) return;
+
+    const interview = transcripts[workflow.id]?.trim();
+    if (!interview) return;
+
+    const newAnswers = pending.review.questions
+      .map((question) => ({
+        question: question.question,
+        answer: pending.answers[question.question] ?? "",
+      }))
+      .filter((item) => item.answer.trim().length > 0);
+
+    if (newAnswers.length === 0) return;
+
+    const followUpAnswers = [
+      ...pending.answerHistory,
+      ...newAnswers,
+    ];
+
+    setRefining(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          interview,
+          workflow,
+          graph,
+          previousReview: pending.review,
+          followUpAnswers,
+        }),
+      });
+
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "追加回答の反映に失敗しました。");
+      }
+
+      setProvider(payload.provider ?? pending.provider);
+      setPending({
+        review: payload.review,
+        provider: payload.provider ?? pending.provider,
+        answers: {},
+        answerHistory: followUpAnswers,
+      });
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "追加回答の反映に失敗しました。",
+      );
+    } finally {
+      setRefining(false);
     }
   }
 
@@ -633,41 +1432,66 @@ function InterviewsView({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          projectId: "default",
+          projectName: "BusinessFlowLens",
           review: pending.review,
           workflow,
           graph,
+          transcripts,
+          sourceNotes: transcripts[workflow.id] ?? "",
+          followUpAnswers: [
+            ...pending.answerHistory,
+            ...pending.review.questions
+              .map((question) => ({
+                question: question.question,
+                answer: pending.answers[question.question] ?? "",
+              }))
+              .filter((item) => item.answer.trim().length > 0),
+          ],
         }),
       });
 
       const payload = await response.json();
       if (!response.ok) {
-        throw new Error(payload?.error ?? "反映に失敗しました。");
+        throw new Error(payload?.error ?? "保存に失敗しました。");
       }
 
       onGraphApply(payload.graph);
+      if (payload.transcripts) {
+        setTranscripts(payload.transcripts);
+      }
       setProvider(payload.provider ?? pending.provider);
       setPending(null);
+      setHistoryDetail(null);
+      void refreshHistory(workflow.id);
     } catch (cause) {
       setError(
-        cause instanceof Error ? cause.message : "反映に失敗しました。",
+        cause instanceof Error ? cause.message : "保存に失敗しました。",
       );
     } finally {
       setApplying(false);
     }
   }
 
+  const scenarioLabel = (item: Workflow) => {
+    if (item.scenarioLabel) return item.scenarioLabel;
+    if (item.scenario === "future") return "将来";
+    if (item.scenario === "alternative") return "代替案";
+    return "現行";
+  };
+
   return (
     <section className="interview-layout">
       <aside className="interview-list">
         <div className="pane-title">
           <div>
-            <div className="eyebrow">INTERVIEWS</div>
-            <h2>業務を聞く</h2>
+            <div className="eyebrow">BUSINESS INPUT</div>
+            <h2>業務一覧</h2>
           </div>
           <button
             className="icon-button"
             onClick={() => setCreating((value) => !value)}
-            aria-label="新規ヒアリング"
+            aria-label="新規業務"
           >
             ＋
           </button>
@@ -677,7 +1501,7 @@ function InterviewsView({
           <div className="create-workflow">
             <input
               autoFocus
-              placeholder="業務名 例: 購買業務"
+              placeholder="新しい業務名 例: 購買業務"
               value={newName}
               onChange={(event) => setNewName(event.target.value)}
             />
@@ -686,7 +1510,7 @@ function InterviewsView({
               value={newDescription}
               onChange={(event) => setNewDescription(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === "Enter") createInterview();
+                if (event.key === "Enter") createBusiness();
               }}
             />
             <div>
@@ -699,7 +1523,7 @@ function InterviewsView({
               <button
                 className="button-primary"
                 disabled={!newName.trim()}
-                onClick={createInterview}
+                onClick={createBusiness}
               >
                 作成
               </button>
@@ -718,11 +1542,15 @@ function InterviewsView({
                   setSelectedWorkflowId(item.id);
                   setPending(null);
                   setError(null);
+                  setBranching(false);
                 }}
               >
                 <span>
                   <strong>{item.name}</strong>
-                  <small>{item.description ?? "説明なし"}</small>
+                  <small>
+                    {scenarioLabel(item)}
+                    {item.effectiveFrom ? ` · ${item.effectiveFrom}〜` : ""}
+                  </small>
                 </span>
                 <b>{processCount || "—"}</b>
               </button>
@@ -734,14 +1562,165 @@ function InterviewsView({
       <main className="interview-editor">
         <div className="editor-header">
           <div>
-            <div className="eyebrow">RAW INTERVIEW</div>
-            <h1>{workflow?.name ?? "ヒアリング"}</h1>
+            <div className="eyebrow">BUSINESS INPUT</div>
+            <h1>{isStructured ? "業務を更新" : "業務を入力"}</h1>
             <p>
-              {workflow?.description ??
-                "現状を話したまま、メモのまま入力します。整形はAI側で行います。"}
+              左に業務情報とメモ、右に現在の構造。AIは右側の現在構造を更新・補完します。
             </p>
           </div>
-          <span className="provider-badge">{provider}</span>
+          <div className="editor-status">
+            <span className="provider-badge">
+              {isStructured
+                ? `構造化済み · ${existingProcessCount} steps`
+                : "未構造化"}
+            </span>
+            <span className="provider-badge">{provider}</span>
+          </div>
+        </div>
+
+        {workflow ? (
+          <>
+            <div className="workflow-meta-editor workflow-meta-editor--scenario">
+              <label>
+                <span>業務名</span>
+                <input
+                  value={workflow.name}
+                  onChange={(event) =>
+                    updateWorkflowMeta({
+                      name: event.target.value,
+                    })
+                  }
+                  placeholder="例: 受注業務"
+                />
+              </label>
+              <label>
+                <span>概要</span>
+                <input
+                  value={workflow.description ?? ""}
+                  onChange={(event) =>
+                    updateWorkflowMeta({
+                      description: event.target.value,
+                    })
+                  }
+                  placeholder="例: 注文書受領から出荷手配まで"
+                />
+              </label>
+              <label>
+                <span>シナリオ</span>
+                <select
+                  value={workflow.scenario ?? "current"}
+                  onChange={(event) =>
+                    updateWorkflowMeta({
+                      scenario: event.target.value as WorkflowScenario,
+                    })
+                  }
+                >
+                  <option value="current">現行</option>
+                  <option value="future">将来案</option>
+                  <option value="alternative">代替案</option>
+                </select>
+              </label>
+              <label>
+                <span>シナリオ名</span>
+                <input
+                  value={workflow.scenarioLabel ?? ""}
+                  onChange={(event) =>
+                    updateWorkflowMeta({
+                      scenarioLabel: event.target.value || undefined,
+                    })
+                  }
+                  placeholder="例: SAP刷新後"
+                />
+              </label>
+              <label>
+                <span>有効開始日</span>
+                <input
+                  type="date"
+                  value={workflow.effectiveFrom ?? ""}
+                  onChange={(event) =>
+                    updateWorkflowMeta({
+                      effectiveFrom: event.target.value || undefined,
+                    })
+                  }
+                />
+              </label>
+              <label>
+                <span>有効終了日</span>
+                <input
+                  type="date"
+                  value={workflow.effectiveTo ?? ""}
+                  onChange={(event) =>
+                    updateWorkflowMeta({
+                      effectiveTo: event.target.value || undefined,
+                    })
+                  }
+                />
+              </label>
+              {isStructured ? (
+                <div className="scenario-branch-action">
+                  <button
+                    className="button-secondary"
+                    onClick={() => setBranching((value) => !value)}
+                  >
+                    将来案を分岐
+                  </button>
+                  {workflow.basedOnWorkflowId ? (
+                    <small>
+                      分岐元:{" "}
+                      {graph.workflows.find(
+                        (item) => item.id === workflow.basedOnWorkflowId,
+                      )?.name ?? workflow.basedOnWorkflowId}
+                    </small>
+                  ) : (
+                    <small>
+                      family: {workflow.familyId ?? workflow.id}
+                    </small>
+                  )}
+                </div>
+              ) : null}
+            </div>
+
+            {branching ? (
+              <div className="scenario-branch-form">
+                <div>
+                  <strong>現在の構造から将来案を作成</strong>
+                  <small>
+                    Process構造をコピーし、共有System/Dataはそのまま参照します。
+                  </small>
+                </div>
+                <input
+                  value={branchName}
+                  onChange={(event) => setBranchName(event.target.value)}
+                  placeholder={`${workflow.name}（将来案）`}
+                />
+                <input
+                  value={branchLabel}
+                  onChange={(event) => setBranchLabel(event.target.value)}
+                  placeholder="シナリオ名"
+                />
+                <input
+                  type="date"
+                  value={branchEffectiveFrom}
+                  onChange={(event) =>
+                    setBranchEffectiveFrom(event.target.value)
+                  }
+                />
+                <button
+                  className="button-primary"
+                  onClick={createScenarioBranch}
+                >
+                  分岐を作成
+                </button>
+              </div>
+            ) : null}
+          </>
+        ) : null}
+
+        <div className="business-notes-label">
+          <span>ヒアリング / 業務メモ</span>
+          <small>
+            会話メモ、手順、PDF転記などの補足をそのまま入力できます。
+          </small>
         </div>
 
         <textarea
@@ -751,37 +1730,52 @@ function InterviewsView({
               ...current,
               [selectedWorkflowId]: event.target.value,
             }));
-            setPending(null);
           }}
           placeholder="例:
-営業がメールで注文書を受け取ります。
-内容を確認してExcelに入力し、その後ERPにも登録しています…"
+営業がメールで注文書PDFを受け取ります。
+PDFを見ながらSAPに受注内容を入力します…"
         />
 
         {error ? <div className="error-message">{error}</div> : null}
 
         <div className="editor-footer">
           <p>
-            AIは既存グラフへ直接反映せず、まず右側にレビュー用の下書きを作成します。
+            {isStructured
+              ? "保存済み構造を右に表示しています。メモを更新してAIで再整理するか、右側を直接編集できます。"
+              : "業務メモからAIで構造化すると、右側に編集可能な業務モデルを作ります。"}
           </p>
           <button
             className="button-primary button-primary--large"
             disabled={
-              mapping || !(transcripts[selectedWorkflowId] ?? "").trim()
+              mapping ||
+              !workflow?.name.trim() ||
+              !(transcripts[selectedWorkflowId] ?? "").trim()
             }
             onClick={extract}
           >
-            {mapping ? "構造を読み取り中…" : "AIで構造化"}
+            {mapping
+              ? "構造を読み取り中…"
+              : isStructured
+                ? "AIで現在構造を更新"
+                : "AIで構造化"}
           </button>
         </div>
       </main>
 
       <ReviewPanel
-        pending={pending}
+        model={model}
+        dirty={Boolean(pending)}
         onChange={setPending}
         onDiscard={() => setPending(null)}
+        onRefine={refineDraft}
         onApply={applyDraft}
         applying={applying}
+        refining={refining}
+        revisions={revisions}
+        historyDetail={historyDetail}
+        historyLoading={historyLoading}
+        onOpenRevision={openRevision}
+        onCloseHistory={() => setHistoryDetail(null)}
       />
     </section>
   );
@@ -796,20 +1790,24 @@ function WorkflowView({
   workflowId: string;
   setWorkflowId: (id: string) => void;
 }) {
-  const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [ownership, setOwnership] = useState<OwnershipState>({
+    department: "",
+    responsiblePerson: "",
+  });
 
   const workflow = graph.workflows.find((item) => item.id === workflowId);
-  const processes = getWorkflowProcesses(graph, workflowId);
+  const filter = ownershipFilter(ownership);
+  const processes = getWorkflowProcesses(graph, workflowId).filter((process) =>
+    processMatchesOwnership(process, filter),
+  );
   const flow = useMemo(
-    () => workflowFlow(graph, workflowId),
-    [graph, workflowId],
+    () => workflowFlow(graph, workflowId, filter),
+    [graph, workflowId, ownership.department, ownership.responsiblePerson],
   );
 
-  const selectedStep =
-    processes.find((process) => process.id === selectedStepId) ?? null;
-  const selectedLinks = selectedStep
-    ? getProcessAssetLinks(graph, selectedStep.id)
-    : [];
+  const selectedNode =
+    graph.nodes.find((node) => node.id === selectedNodeId) ?? null;
 
   const systemIds = new Set<string>();
   const dataIds = new Set<string>();
@@ -822,22 +1820,32 @@ function WorkflowView({
 
   return (
     <section className="page-view">
-      <header className="page-header">
+      <header className="page-header page-header--stackable">
         <div>
           <div className="eyebrow">WORKFLOW DETAIL</div>
-          <h1>1業務を、読める形で見る</h1>
+          <h1>1業務を、担当の視点で読む</h1>
           <p>
-            System/Dataを別レーンに散らさず、各ステップが何を使い何を読む・書くかに寄せて表示します。
+            部署・担当者で絞りながら、ステップを押すと前後工程・利用System・Dataまで関連を辿れます。
           </p>
         </div>
-        <WorkflowPicker
-          graph={graph}
-          selectedWorkflowId={workflowId}
-          onSelect={(id) => {
-            setWorkflowId(id);
-            setSelectedStepId(null);
-          }}
-        />
+        <div className="page-header-controls">
+          <WorkflowPicker
+            graph={graph}
+            selectedWorkflowId={workflowId}
+            onSelect={(id) => {
+              setWorkflowId(id);
+              setSelectedNodeId(null);
+            }}
+          />
+          <OwnershipFilters
+            graph={graph}
+            value={ownership}
+            onChange={(value) => {
+              setOwnership(value);
+              setSelectedNodeId(null);
+            }}
+          />
+        </div>
       </header>
 
       <div className="workflow-summary">
@@ -846,7 +1854,7 @@ function WorkflowView({
           <strong>{workflow?.name ?? "—"}</strong>
         </div>
         <div>
-          <span>ステップ</span>
+          <span>表示ステップ</span>
           <strong>{processes.length}</strong>
         </div>
         <div>
@@ -861,8 +1869,8 @@ function WorkflowView({
 
       {processes.length === 0 ? (
         <div className="empty-state">
-          <strong>まだ構造化されていません</strong>
-          <p>ヒアリング画面で内容を入力し、AI下書きを確認して反映してください。</p>
+          <strong>条件に合うステップがありません</strong>
+          <p>部署・担当者フィルタを変更するか、ヒアリング内容を確認してください。</p>
         </div>
       ) : (
         <div className="workflow-canvas-wrap">
@@ -874,47 +1882,20 @@ function WorkflowView({
             fitViewOptions={{ padding: 0.15 }}
             minZoom={0.4}
             maxZoom={1.25}
-            onNodeClick={(_, node) => setSelectedStepId(node.id)}
+            onNodeClick={(_, node) => setSelectedNodeId(node.id)}
             proOptions={{ hideAttribution: true }}
           >
             <Background gap={28} size={1} />
             <Controls position="bottom-right" showInteractive={false} />
           </ReactFlow>
 
-          {selectedStep ? (
-            <aside className="step-inspector">
-              <button
-                className="close-button"
-                onClick={() => setSelectedStepId(null)}
-              >
-                ×
-              </button>
-              <div className="eyebrow">STEP DETAIL</div>
-              <h2>{selectedStep.label}</h2>
-              <p>{selectedStep.action ?? selectedStep.description}</p>
-              <dl>
-                <div>
-                  <dt>担当</dt>
-                  <dd>{selectedStep.actor ?? "未確認"}</dd>
-                </div>
-                <div>
-                  <dt>根拠</dt>
-                  <dd>{selectedStep.evidence ?? "—"}</dd>
-                </div>
-              </dl>
-              <div className="inspector-assets">
-                {selectedLinks.map((link) => (
-                  <article key={`${link.asset.id}-${link.relation}`}>
-                    <span>{kindLabel[link.asset.kind]}</span>
-                    <strong>{link.asset.label}</strong>
-                    <small>
-                      {relationLabel[link.relation]}
-                      {link.label ? ` · ${link.label}` : ""}
-                    </small>
-                  </article>
-                ))}
-              </div>
-            </aside>
+          {selectedNode ? (
+            <RelationshipPanel
+              graph={graph}
+              node={selectedNode}
+              onClose={() => setSelectedNodeId(null)}
+              onSelectNode={(node) => setSelectedNodeId(node.id)}
+            />
           ) : null}
         </div>
       )}
@@ -925,14 +1906,33 @@ function WorkflowView({
 function AssetsView({ graph }: { graph: LensGraph }) {
   const [filter, setFilter] = useState<AssetFilter>("all");
   const [search, setSearch] = useState("");
+  const [ownership, setOwnership] = useState<OwnershipState>({
+    department: "",
+    responsiblePerson: "",
+  });
+  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
+
+  const processById = new Map(
+    graph.nodes
+      .filter((node) => node.kind === "process")
+      .map((node) => [node.id, node]),
+  );
+  const ownerFilter = ownershipFilter(ownership);
+
   const assets = graph.nodes
     .filter((node) => node.kind === "system" || node.kind === "data")
     .map((node) => ({
       node,
-      usages: getAssetUsages(graph, node.id),
+      usages: getAssetUsages(graph, node.id).filter((usage) => {
+        const process = processById.get(usage.processId);
+        return process
+          ? processMatchesOwnership(process, ownerFilter)
+          : !ownership.department && !ownership.responsiblePerson;
+      }),
     }))
     .filter(
-      ({ node }) =>
+      ({ node, usages }) =>
+        usages.length > 0 &&
         (filter === "all" || node.kind === filter) &&
         (!search.trim() ||
           node.label.toLowerCase().includes(search.trim().toLowerCase()) ||
@@ -942,13 +1942,12 @@ function AssetsView({ graph }: { graph: LensGraph }) {
     )
     .sort((a, b) => b.usages.length - a.usages.length);
 
-  const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const selected =
     assets.find(({ node }) => node.id === selectedAssetId) ??
     assets[0] ??
     null;
 
-  const workflowGroups = new Map<string, typeof selected.usages>();
+  const workflowGroups = new Map<string, NonNullable<typeof selected>["usages"]>();
   if (selected) {
     for (const usage of selected.usages) {
       const list = workflowGroups.get(usage.workflowId) ?? [];
@@ -957,16 +1956,37 @@ function AssetsView({ graph }: { graph: LensGraph }) {
     }
   }
 
+  const selectedFlows =
+    selected?.node.kind === "system"
+      ? getDataFlowsForSystem(graph, selected.node.id).filter((flow) => {
+          if (!ownership.department && !ownership.responsiblePerson) return true;
+          return flow.processIds.some((processId) => {
+            const process = processById.get(processId);
+            return process
+              ? processMatchesOwnership(process, ownerFilter)
+              : false;
+          });
+        })
+      : [];
+
   return (
     <section className="page-view">
-      <header className="page-header">
+      <header className="page-header page-header--stackable">
         <div>
           <div className="eyebrow">ASSET IMPACT</div>
-          <h1>システム・データは「影響範囲」を見る</h1>
+          <h1>システム・データから、担当と影響範囲を辿る</h1>
           <p>
-            単独ノードを眺めるのではなく、その資産をどの業務・どのステップがどう触っているかを確認します。
+            資産を押すと、どの部署・担当者のどの業務ステップが、読む・書く・使うのかを確認できます。
           </p>
         </div>
+        <OwnershipFilters
+          graph={graph}
+          value={ownership}
+          onChange={(value) => {
+            setOwnership(value);
+            setSelectedAssetId(null);
+          }}
+        />
       </header>
 
       <div className="asset-layout">
@@ -1007,9 +2027,7 @@ function AssetsView({ graph }: { graph: LensGraph }) {
                   className={selected?.node.id === node.id ? "active" : ""}
                   onClick={() => setSelectedAssetId(node.id)}
                 >
-                  <span
-                    className={`asset-kind asset-kind--${node.kind}`}
-                  >
+                  <span className={`asset-kind asset-kind--${node.kind}`}>
                     {node.kind === "system" ? "SYS" : "DATA"}
                   </span>
                   <span>
@@ -1042,12 +2060,6 @@ function AssetsView({ graph }: { graph: LensGraph }) {
                 </div>
               </div>
 
-              {selected.node.status === "unknown" ? (
-                <div className="review-warning">
-                  △ この資産は同一性が未確認です。既存資産とのマージ候補を人が確認してください。
-                </div>
-              ) : null}
-
               <div className="impact-workflows">
                 {[...workflowGroups.entries()].map(
                   ([workflowId, usages]) => (
@@ -1056,22 +2068,71 @@ function AssetsView({ graph }: { graph: LensGraph }) {
                         <strong>{usages[0].workflowName}</strong>
                         <span>{usages.length} touchpoints</span>
                       </header>
-                      {usages.map((usage) => (
-                        <article
-                          key={`${usage.processId}-${usage.relation}`}
-                        >
-                          <strong>{usage.processName}</strong>
-                          <span>{relationLabel[usage.relation]}</span>
-                          <small>{usage.label ?? "—"}</small>
-                        </article>
-                      ))}
+                      {usages.map((usage) => {
+                        const process = processById.get(usage.processId);
+                        return (
+                          <article
+                            key={`${usage.processId}-${usage.relation}`}
+                          >
+                            <span className="impact-owner">
+                              {process?.department ?? "部署未確認"}
+                              {process?.responsiblePerson
+                                ? ` · ${process.responsiblePerson}`
+                                : ""}
+                            </span>
+                            <strong>{usage.processName}</strong>
+                            <span>{relationLabel[usage.relation]}</span>
+                            <small>{usage.label ?? "—"}</small>
+                          </article>
+                        );
+                      })}
                     </section>
                   ),
                 )}
               </div>
+
+              {selectedFlows.length > 0 ? (
+                <section className="impact-dataflows">
+                  <div className="section-heading">
+                    <div>
+                      <div className="eyebrow">SYSTEM DATA FLOWS</div>
+                      <h2>このSystemにつながるデータフロー</h2>
+                    </div>
+                  </div>
+                  {selectedFlows.map((flow) => {
+                    const source = graph.nodes.find(
+                      (node) => node.id === flow.sourceSystemId,
+                    );
+                    const target = graph.nodes.find(
+                      (node) => node.id === flow.targetSystemId,
+                    );
+                    const data = flow.dataIds
+                      .map(
+                        (id) =>
+                          graph.nodes.find((node) => node.id === id)?.label,
+                      )
+                      .filter(Boolean)
+                      .join(" / ");
+                    return (
+                      <article key={flow.id}>
+                        <strong>
+                          {source?.label ?? "?"} → {target?.label ?? "?"}
+                        </strong>
+                        <span>{data || "データ未特定"}</span>
+                        <small>
+                          {flow.transferType} · {flow.automation}
+                          {flow.frequency ? ` · ${flow.frequency}` : ""}
+                        </small>
+                      </article>
+                    );
+                  })}
+                </section>
+              ) : null}
             </>
           ) : (
-            <div className="empty-state">該当する資産がありません。</div>
+            <div className="empty-state">
+              条件に合うシステム・データがありません。
+            </div>
           )}
         </main>
       </div>
@@ -1079,14 +2140,303 @@ function AssetsView({ graph }: { graph: LensGraph }) {
   );
 }
 
+function DataFlowView({ graph }: { graph: LensGraph }) {
+  const [ownership, setOwnership] = useState<OwnershipState>({
+    department: "",
+    responsiblePerson: "",
+  });
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedFlowId, setSelectedFlowId] = useState<string | null>(null);
+
+  const ownerFilter = ownershipFilter(ownership);
+  const processById = new Map(
+    graph.nodes
+      .filter((node) => node.kind === "process")
+      .map((node) => [node.id, node]),
+  );
+
+  const flows = (graph.dataFlows ?? []).filter((flow) => {
+    if (!ownership.department && !ownership.responsiblePerson) return true;
+    return flow.processIds.some((processId) => {
+      const process = processById.get(processId);
+      return process
+        ? processMatchesOwnership(process, ownerFilter)
+        : false;
+    });
+  });
+
+  const systemIds = new Set(
+    flows.flatMap((flow) => [flow.sourceSystemId, flow.targetSystemId]),
+  );
+  const systems = graph.nodes.filter(
+    (node) => node.kind === "system" && systemIds.has(node.id),
+  );
+
+  const flowNodes: Node[] = systems.map((system, index) => ({
+    id: system.id,
+    position: {
+      x: (index % 4) * 310,
+      y: Math.floor(index / 4) * 220 + (index % 2) * 35,
+    },
+    data: {
+      label: system.label,
+    },
+    style: {
+      width: 220,
+      borderRadius: 12,
+      border: "1px solid #cfd5eb",
+      background: "#ffffff",
+      padding: 14,
+      fontSize: 12,
+      fontWeight: 800,
+      boxShadow: "0 8px 24px rgba(42, 47, 42, 0.08)",
+    },
+  }));
+
+  const flowEdges: Edge[] = flows.map((flow) => {
+    const dataLabels = flow.dataIds
+      .map((id) => graph.nodes.find((node) => node.id === id)?.label)
+      .filter(Boolean);
+    const manual = flow.automation === "manual" || flow.transferType === "manual";
+
+    return {
+      id: flow.id,
+      source: flow.sourceSystemId,
+      target: flow.targetSystemId,
+      label: [
+        dataLabels.join(" / ") || "データ未特定",
+        flow.transferType,
+        flow.frequency,
+      ]
+        .filter(Boolean)
+        .join(" · "),
+      type: "smoothstep",
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        width: 16,
+        height: 16,
+      },
+      style: {
+        strokeWidth: 2,
+        strokeDasharray: manual ? "7 5" : undefined,
+      },
+      labelStyle: { fontSize: 9, fontWeight: 750 },
+      labelBgPadding: [7, 5],
+      labelBgBorderRadius: 6,
+    };
+  });
+
+  const selectedNode =
+    graph.nodes.find((node) => node.id === selectedNodeId) ?? null;
+  const selectedFlow =
+    flows.find((flow) => flow.id === selectedFlowId) ?? null;
+
+  return (
+    <section className="page-view">
+      <header className="page-header page-header--stackable">
+        <div>
+          <div className="eyebrow">SYSTEM DATA FLOW</div>
+          <h1>System間で、何がどう動くかを見る</h1>
+          <p>
+            Systemを主役にして、転送されるData・API/ファイル/手入力・自動/手動・頻度をエッジに集約します。
+          </p>
+        </div>
+        <OwnershipFilters
+          graph={graph}
+          value={ownership}
+          onChange={(value) => {
+            setOwnership(value);
+            setSelectedNodeId(null);
+            setSelectedFlowId(null);
+          }}
+        />
+      </header>
+
+      <div className="dataflow-summary">
+        <article>
+          <span>表示System</span>
+          <strong>{systems.length}</strong>
+        </article>
+        <article>
+          <span>データフロー</span>
+          <strong>{flows.length}</strong>
+        </article>
+        <article>
+          <span>手動転記</span>
+          <strong>
+            {
+              flows.filter(
+                (flow) =>
+                  flow.automation === "manual" ||
+                  flow.transferType === "manual",
+              ).length
+            }
+          </strong>
+        </article>
+        <article>
+          <span>要確認</span>
+          <strong>
+            {flows.filter((flow) => flow.status !== "confirmed").length}
+          </strong>
+        </article>
+      </div>
+
+      {flows.length === 0 ? (
+        <div className="empty-state">
+          <strong>条件に合うSystem間データフローがありません</strong>
+          <p>
+            ヒアリングで「どのSystemからどのSystemへ、何をどう渡すか」を明示すると抽出されます。
+          </p>
+        </div>
+      ) : (
+        <div className="dataflow-canvas-wrap">
+          <ReactFlow
+            nodes={flowNodes}
+            edges={flowEdges}
+            fitView
+            fitViewOptions={{ padding: 0.2 }}
+            minZoom={0.35}
+            maxZoom={1.4}
+            onNodeClick={(_, node) => {
+              setSelectedNodeId(node.id);
+              setSelectedFlowId(null);
+            }}
+            onEdgeClick={(_, edge) => {
+              setSelectedFlowId(edge.id);
+              setSelectedNodeId(null);
+            }}
+            proOptions={{ hideAttribution: true }}
+          >
+            <Background gap={28} size={1} />
+            <Controls position="bottom-right" showInteractive={false} />
+          </ReactFlow>
+
+          {selectedNode ? (
+            <RelationshipPanel
+              graph={graph}
+              node={selectedNode}
+              onClose={() => setSelectedNodeId(null)}
+              onSelectNode={(node) => {
+                setSelectedNodeId(node.id);
+                setSelectedFlowId(null);
+              }}
+            />
+          ) : null}
+
+          {selectedFlow ? (
+            <aside className="relationship-panel dataflow-detail-panel">
+              <button
+                className="close-button"
+                onClick={() => setSelectedFlowId(null)}
+              >
+                ×
+              </button>
+              <div className="eyebrow">DATA FLOW DETAIL</div>
+              <h2>
+                {graph.nodes.find(
+                  (node) => node.id === selectedFlow.sourceSystemId,
+                )?.label ?? "?"}
+                {" → "}
+                {graph.nodes.find(
+                  (node) => node.id === selectedFlow.targetSystemId,
+                )?.label ?? "?"}
+              </h2>
+
+              <div className="dataflow-detail-grid">
+                <span>Data</span>
+                <strong>
+                  {selectedFlow.dataIds
+                    .map(
+                      (id) =>
+                        graph.nodes.find((node) => node.id === id)?.label,
+                    )
+                    .filter(Boolean)
+                    .join(" / ") || "未特定"}
+                </strong>
+                <span>方式</span>
+                <strong>{selectedFlow.transferType}</strong>
+                <span>自動化</span>
+                <strong>{selectedFlow.automation}</strong>
+                <span>方向</span>
+                <strong>{selectedFlow.direction}</strong>
+                <span>頻度</span>
+                <strong>{selectedFlow.frequency ?? "未確認"}</strong>
+              </div>
+
+              <div className="relationship-section">
+                <header>
+                  <strong>関連する担当・業務</strong>
+                  <span>{selectedFlow.processIds.length}</span>
+                </header>
+                <div className="flow-process-context">
+                  {selectedFlow.processIds.map((processId) => {
+                    const process = processById.get(processId);
+                    if (!process) return null;
+                    const workflow = graph.workflows.find(
+                      (item) => item.id === process.workflowId,
+                    );
+                    return (
+                      <article key={processId}>
+                        <strong>{process.label}</strong>
+                        <span>
+                          {process.department ?? "部署未確認"}
+                          {process.responsiblePerson
+                            ? ` · ${process.responsiblePerson}`
+                            : ""}
+                        </span>
+                        <small>{workflow?.name ?? "—"}</small>
+                      </article>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="flow-evidence">
+                <span>根拠</span>
+                <p>{selectedFlow.evidence ?? "—"}</p>
+              </div>
+            </aside>
+          ) : null}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function OverviewView({ graph }: { graph: LensGraph }) {
-  const workflows = graph.workflows;
+  const [ownership, setOwnership] = useState<OwnershipState>({
+    department: "",
+    responsiblePerson: "",
+  });
+  const ownerFilter = ownershipFilter(ownership);
+  const processById = new Map(
+    graph.nodes
+      .filter((node) => node.kind === "process")
+      .map((node) => [node.id, node]),
+  );
+
+  const filteredUsages = (assetId: string) =>
+    getAssetUsages(graph, assetId).filter((usage) => {
+      const process = processById.get(usage.processId);
+      return process
+        ? processMatchesOwnership(process, ownerFilter)
+        : false;
+    });
+
+  const workflows = graph.workflows.filter((workflow) => {
+    if (!ownership.department && !ownership.responsiblePerson) return true;
+    return getWorkflowProcesses(graph, workflow.id).some((process) =>
+      processMatchesOwnership(process, ownerFilter),
+    );
+  });
+
   const assets = graph.nodes
     .filter((node) => node.kind === "system" || node.kind === "data")
     .map((node) => ({
       node,
-      usages: getAssetUsages(graph, node.id),
-    }));
+      usages: filteredUsages(node.id),
+    }))
+    .filter(({ usages }) => usages.length > 0);
 
   const sharedAssets = assets
     .filter(
@@ -1100,30 +2450,34 @@ function OverviewView({ graph }: { graph: LensGraph }) {
   ).length;
 
   function matrixCell(assetId: string, workflowId: string) {
-    const usages = getAssetUsages(graph, assetId).filter(
+    const usages = filteredUsages(assetId).filter(
       (usage) => usage.workflowId === workflowId,
     );
-    const labels = [
+    return [
       ...new Set(usages.map((usage) => relationLabel[usage.relation])),
     ];
-    return labels;
   }
 
   return (
     <section className="page-view">
-      <header className="page-header">
+      <header className="page-header page-header--stackable">
         <div>
           <div className="eyebrow">CROSS-BUSINESS OVERVIEW</div>
-          <h1>横断はグラフではなく、比較と共有を見る</h1>
+          <h1>部署・担当者を軸に、共有と依存を見る</h1>
           <p>
-            業務が増えても破綻しないよう、共通資産と依存関係をマトリクスで俯瞰します。
+            全社グラフではなく、フィルタ後の業務・共有資産・利用関係をマトリクスで比較します。
           </p>
         </div>
+        <OwnershipFilters
+          graph={graph}
+          value={ownership}
+          onChange={setOwnership}
+        />
       </header>
 
       <div className="overview-stats">
         <article>
-          <span>業務</span>
+          <span>表示業務</span>
           <strong>{workflows.length}</strong>
         </article>
         <article>
@@ -1153,7 +2507,7 @@ function OverviewView({ graph }: { graph: LensGraph }) {
           <div className="section-heading">
             <div>
               <div className="eyebrow">SHARED ASSETS</div>
-              <h2>複数業務が依存するもの</h2>
+              <h2>フィルタ対象が共通利用するもの</h2>
             </div>
           </div>
           {sharedAssets.length > 0 ? (
@@ -1177,7 +2531,7 @@ function OverviewView({ graph }: { graph: LensGraph }) {
               })}
             </div>
           ) : (
-            <div className="empty-state">共有資産はまだありません。</div>
+            <div className="empty-state">共有資産はありません。</div>
           )}
         </section>
 
@@ -1185,12 +2539,14 @@ function OverviewView({ graph }: { graph: LensGraph }) {
           <div className="section-heading">
             <div>
               <div className="eyebrow">WORKFLOWS</div>
-              <h2>業務ごとの構造化状況</h2>
+              <h2>対象者が関わる業務</h2>
             </div>
           </div>
           <div className="workflow-health">
             {workflows.map((workflow) => {
-              const steps = getWorkflowProcesses(graph, workflow.id);
+              const steps = getWorkflowProcesses(graph, workflow.id).filter(
+                (step) => processMatchesOwnership(step, ownerFilter),
+              );
               const touched = new Set<string>();
               for (const step of steps) {
                 for (const link of getProcessAssetLinks(graph, step.id)) {
@@ -1230,7 +2586,7 @@ function OverviewView({ graph }: { graph: LensGraph }) {
         <div className="section-heading">
           <div>
             <div className="eyebrow">WORKFLOW × ASSET MATRIX</div>
-            <h2>どの業務が、何をどう触るか</h2>
+            <h2>誰の仕事が、何に依存しているか</h2>
           </div>
         </div>
 
@@ -1246,7 +2602,6 @@ function OverviewView({ graph }: { graph: LensGraph }) {
             </thead>
             <tbody>
               {assets
-                .filter(({ usages }) => usages.length > 0)
                 .sort((a, b) => b.usages.length - a.usages.length)
                 .map(({ node }) => (
                   <tr key={node.id}>
@@ -1293,6 +2648,103 @@ function Workspace() {
   );
   const [pending, setPending] = useState<PendingExtraction | null>(null);
   const [provider, setProvider] = useState("local-demo-extractor");
+  const [hydrated, setHydrated] = useState(false);
+  const [storageBackend, setStorageBackend] = useState("sqlite");
+  const [saveStatus, setSaveStatus] = useState<
+    "loading" | "saving" | "saved" | "error"
+  >("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadProject() {
+      try {
+        const response = await fetch("/api/project?projectId=default", {
+          cache: "no-store",
+        });
+        const payload = await response.json();
+
+        if (!response.ok) {
+          throw new Error(
+            payload?.error ?? "保存済みプロジェクトの読込に失敗しました。",
+          );
+        }
+
+        if (cancelled) return;
+
+        setStorageBackend(payload.storage ?? "sqlite");
+
+        if (payload.project) {
+          const loadedGraph = payload.project.graph as LensGraph;
+          const loadedTranscripts =
+            payload.project.transcripts as Record<string, string>;
+
+          setGraph(loadedGraph);
+          setTranscripts(loadedTranscripts);
+
+          const firstId = loadedGraph.workflows[0]?.id;
+          if (firstId) setSelectedWorkflowId(firstId);
+        }
+
+        setSaveStatus("saved");
+      } catch (error) {
+        console.error(error);
+        if (!cancelled) setSaveStatus("error");
+      } finally {
+        if (!cancelled) setHydrated(true);
+      }
+    }
+
+    void loadProject();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+
+    const timer = window.setTimeout(async () => {
+      setSaveStatus("saving");
+
+      try {
+        const response = await fetch("/api/project", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            projectId: "default",
+            projectName: "BusinessFlowLens",
+            graph,
+            transcripts,
+            updatedAt: new Date().toISOString(),
+          }),
+        });
+        const payload = await response.json();
+
+        if (!response.ok) {
+          throw new Error(payload?.error ?? "保存に失敗しました。");
+        }
+
+        setStorageBackend(payload.storage ?? storageBackend);
+        setSaveStatus("saved");
+      } catch (error) {
+        console.error(error);
+        setSaveStatus("error");
+      }
+    }, 700);
+
+    return () => window.clearTimeout(timer);
+  }, [graph, transcripts, hydrated]);
+
+  const saveLabel =
+    saveStatus === "loading"
+      ? "読込中"
+      : saveStatus === "saving"
+        ? "保存中"
+        : saveStatus === "error"
+          ? "保存エラー"
+          : "保存済み";
 
   return (
     <main className="app-shell">
@@ -1301,7 +2753,7 @@ function Workspace() {
           <div className="brand-mark">FL</div>
           <div>
             <strong>BusinessFlowLens</strong>
-            <span>Interviews → workflows → shared business architecture</span>
+            <span>Business input → workflows → shared architecture</span>
           </div>
         </div>
 
@@ -1309,6 +2761,14 @@ function Workspace() {
 
         <div className="header-meta">
           <span>{graph.workflows.length} workflows</span>
+          <span
+            className={[
+              "storage-status",
+              `storage-status--${saveStatus}`,
+            ].join(" ")}
+          >
+            {storageBackend} · {saveLabel}
+          </span>
           <span className="prototype-badge">PROTOTYPE</span>
         </div>
       </header>
@@ -1335,6 +2795,8 @@ function Workspace() {
           setWorkflowId={setSelectedWorkflowId}
         />
       ) : null}
+
+      {section === "dataflow" ? <DataFlowView graph={graph} /> : null}
 
       {section === "assets" ? <AssetsView graph={graph} /> : null}
       {section === "overview" ? <OverviewView graph={graph} /> : null}
