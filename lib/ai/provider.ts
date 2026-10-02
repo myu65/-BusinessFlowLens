@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import type {
   GraphPatch,
   GraphPatchEdge,
@@ -72,8 +73,40 @@ function env(name: string) {
   return value ? value : undefined;
 }
 
+const SNOWFLAKE_SESSION_TOKEN = "/snowflake/session/token";
+
+function runtimeTokenAvailable() {
+  return existsSync(SNOWFLAKE_SESSION_TOKEN);
+}
+
+function resolveBaseURL() {
+  const configured = env("AI_BASE_URL");
+  if (configured) return configured;
+
+  const host = env("SNOWFLAKE_HOST");
+  if (!host) return undefined;
+
+  const target = env("AI_TARGET") === "gateway" ? "gateway" : "cortex";
+  return target === "gateway"
+    ? `https://${host}/api/v2/aigateways/SNOWFLAKE/v1`
+    : `https://${host}/api/v2/cortex/v1`;
+}
+
+function resolveToken() {
+  if (runtimeTokenAvailable()) {
+    // Snowflake rotates this token. Read it on every request.
+    return readFileSync(SNOWFLAKE_SESSION_TOKEN, "utf8").trim();
+  }
+
+  return env("AI_API_KEY");
+}
+
 export function hasAIConfig() {
-  return Boolean(env("AI_BASE_URL") && env("AI_MODEL") && env("AI_API_KEY"));
+  return Boolean(
+    resolveBaseURL() &&
+      env("AI_MODEL") &&
+      (runtimeTokenAvailable() || env("AI_API_KEY")),
+  );
 }
 
 function protocol(): AIProtocol {
@@ -202,12 +235,14 @@ export async function extractGraphWithAI(args: {
   workflow: Workflow;
   graph: LensGraph;
 }): Promise<{ patch: GraphPatch; provider: string }> {
-  const baseURL = env("AI_BASE_URL");
+  const baseURL = resolveBaseURL();
   const model = env("AI_MODEL");
-  const apiKey = env("AI_API_KEY");
+  const apiKey = resolveToken();
 
   if (!baseURL || !model || !apiKey) {
-    throw new Error("AI provider is not configured.");
+    throw new Error(
+      "AI provider is not configured. Set AI_MODEL and either run in Snowflake App Runtime or provide AI_BASE_URL/AI_API_KEY.",
+    );
   }
 
   const mode = protocol();
