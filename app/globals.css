@@ -1957,7 +1957,7 @@ button:disabled {
 
 .review-dataflow-options {
   display: grid;
-  grid-template-columns: 90px 90px minmax(0, 1fr);
+  grid-template-columns: 82px 82px 92px minmax(0, 1fr);
   gap: 5px;
 }
 
