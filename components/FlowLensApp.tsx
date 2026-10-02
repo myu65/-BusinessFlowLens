@@ -34,6 +34,7 @@ import {
   type OwnershipFilter,
   type Relation,
   type SystemDataFlow,
+  type Workflow,
   type WorkflowScenario,
 } from "@/lib/graph";
 
