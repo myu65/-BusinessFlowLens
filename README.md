@@ -5,9 +5,10 @@ Turn business interviews into a reviewable map of **workflows, systems, and data
 BusinessFlowLens is not intended to be a "put every node on one giant canvas" diagramming tool. The prototype is organized around four concrete jobs:
 
 1. **Interview** — capture what people say and review the AI extraction before it changes the model.
-2. **Workflow** — understand one business workflow step-by-step, including actor, systems, and data touched at each step.
-3. **System / Data impact** — select a shared asset and see which workflows and steps depend on it.
-4. **Cross-business overview** — compare workflows through shared assets and a workflow × asset usage matrix instead of a spaghetti graph.
+2. **Workflow** — understand one business workflow step-by-step, including department, responsible person, systems, and data touched at each step.
+3. **Data flow** — understand what business data moves between systems, how it moves, and whether the transfer is automatic or manual.
+4. **System / Data impact** — select a shared asset and see which workflows, departments, people, and steps depend on it.
+5. **Cross-business overview** — compare workflows through shared assets and a workflow × asset usage matrix instead of a spaghetti graph.
 
 ## Why this model
 
@@ -27,6 +28,7 @@ workflow-scoped process steps
 
 Canonical graph
    ├── Workflow detail projection
+   ├── System-to-system data-flow projection
    ├── Asset impact projection
    └── Cross-business matrix projection
 ```
@@ -42,12 +44,14 @@ The AI pipeline is deliberately two-stage.
 The first call does **not** see the existing canonical asset catalog. It extracts:
 
 - meaningful business steps
-- actor and action
+- actor/role, department/team, responsible person, and action
 - explicit/inferred certainty
 - short evidence from the interview
 - named systems/tools
 - business data read/created/updated/sent
 - branches/conditions
+- explicit System → System data transfers (including manual transcription)
+- transfer method, automation, frequency, and evidence when stated
 - focused follow-up questions
 - ambiguity and duplicate-entry warnings
 
@@ -82,6 +86,19 @@ Create/select a workflow, paste rough interview notes, run structured extraction
 ### 業務フロー
 
 Only the selected workflow is diagrammed. Process steps remain the primary visual structure. System/Data are displayed inside the relevant step card instead of occupying global lanes.
+
+### データフロー
+
+System-to-System flows are a first-class model rather than generic graph edges. The dedicated view shows:
+
+- source and target System
+- transferred Data
+- API / file / database / message / email / manual / unknown method
+- automatic / manual / mixed / unknown automation
+- frequency and evidence
+- related workflow steps, departments, and people
+
+Manual re-entry such as Excel → ERP is intentionally shown alongside automated integration.
 
 ### システム・データ
 
@@ -178,3 +195,10 @@ Process nodes are workflow-scoped. System/Data identities are project-wide.
 ## Status
 
 Prototype work is on the `prototype` branch / PR #1.
+
+
+## Ownership and related-node navigation
+
+Process steps can carry a department/team and responsible person separately from the generic actor/role. Workflow, Data Flow, Asset Impact, and Cross-business views can be filtered by those fields.
+
+Clicking a Process/System/Data node opens a node-centered relationship explorer instead of expanding the entire company graph. The panel shows the immediate relevant neighborhood and lets users continue navigating through related nodes and data flows.
