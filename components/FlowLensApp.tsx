@@ -545,6 +545,27 @@ function ReviewPanel({
     });
   };
 
+  const updateDataFlow = (
+    index: number,
+    patch: Partial<ExtractionReview["dataFlows"][number]>,
+  ) => {
+    changeReview({
+      ...review,
+      dataFlows: review.dataFlows.map((flow, itemIndex) =>
+        itemIndex === index ? { ...flow, ...patch } : flow,
+      ),
+    });
+  };
+
+  const removeDataFlow = (index: number) => {
+    changeReview({
+      ...review,
+      dataFlows: review.dataFlows.filter(
+        (_, itemIndex) => itemIndex !== index,
+      ),
+    });
+  };
+
   return (
     <aside className="review-panel">
       <div className="review-header">
@@ -630,20 +651,38 @@ function ReviewPanel({
                 }
               />
 
-              <div className="review-step-meta">
+              <div className="review-step-meta review-step-meta--ownership">
                 <input
                   value={step.actor ?? ""}
-                  placeholder="担当者・部署 未確認"
+                  placeholder="役割 例: 営業担当"
                   onChange={(event) =>
                     updateStep(step.stepKey, {
                       actor: event.target.value || null,
                     })
                   }
                 />
-                <span>
-                  {step.certainty === "explicit" ? "明示" : "AI推定"} · 根拠:{" "}
-                  {step.evidence || "—"}
-                </span>
+                <input
+                  value={step.department ?? ""}
+                  placeholder="部署 例: 営業部"
+                  onChange={(event) =>
+                    updateStep(step.stepKey, {
+                      department: event.target.value || null,
+                    })
+                  }
+                />
+                <input
+                  value={step.responsiblePerson ?? ""}
+                  placeholder="担当者 例: 田中さん"
+                  onChange={(event) =>
+                    updateStep(step.stepKey, {
+                      responsiblePerson: event.target.value || null,
+                    })
+                  }
+                />
+              </div>
+              <div className="review-evidence">
+                {step.certainty === "explicit" ? "明示" : "AI推定"} · 根拠:{" "}
+                {step.evidence || "—"}
               </div>
 
               {(step.systems.length > 0 || step.data.length > 0) && (
@@ -681,6 +720,102 @@ function ReviewPanel({
             </article>
           ))}
         </div>
+
+        {review.dataFlows.length > 0 ? (
+          <div className="review-dataflows">
+            <div className="review-section-title">
+              <span>System間データフロー</span>
+              <b>{review.dataFlows.length}</b>
+            </div>
+            {review.dataFlows.map((flow, index) => (
+              <article key={`${flow.sourceSystem}-${flow.targetSystem}-${index}`}>
+                <div className="review-dataflow-title">
+                  <input
+                    value={flow.sourceSystem}
+                    onChange={(event) =>
+                      updateDataFlow(index, {
+                        sourceSystem: event.target.value,
+                      })
+                    }
+                  />
+                  <span>→</span>
+                  <input
+                    value={flow.targetSystem}
+                    onChange={(event) =>
+                      updateDataFlow(index, {
+                        targetSystem: event.target.value,
+                      })
+                    }
+                  />
+                  <button
+                    className="review-delete"
+                    onClick={() => removeDataFlow(index)}
+                    title="このデータフローを除外"
+                  >
+                    ×
+                  </button>
+                </div>
+                <input
+                  className="review-dataflow-data"
+                  value={flow.data.join(", ")}
+                  placeholder="流れるデータ（カンマ区切り）"
+                  onChange={(event) =>
+                    updateDataFlow(index, {
+                      data: event.target.value
+                        .split(",")
+                        .map((item) => item.trim())
+                        .filter(Boolean),
+                    })
+                  }
+                />
+                <div className="review-dataflow-options">
+                  <select
+                    value={flow.transferType}
+                    onChange={(event) =>
+                      updateDataFlow(index, {
+                        transferType: event.target.value as typeof flow.transferType,
+                      })
+                    }
+                  >
+                    {["api", "file", "database", "message", "email", "manual", "unknown"].map(
+                      (item) => (
+                        <option key={item} value={item}>
+                          {item}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                  <select
+                    value={flow.automation}
+                    onChange={(event) =>
+                      updateDataFlow(index, {
+                        automation: event.target.value as typeof flow.automation,
+                      })
+                    }
+                  >
+                    {["automatic", "manual", "mixed", "unknown"].map(
+                      (item) => (
+                        <option key={item} value={item}>
+                          {item}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                  <input
+                    value={flow.frequency ?? ""}
+                    placeholder="頻度 例: 15分ごと"
+                    onChange={(event) =>
+                      updateDataFlow(index, {
+                        frequency: event.target.value || null,
+                      })
+                    }
+                  />
+                </div>
+                <small>根拠: {flow.evidence || "—"}</small>
+              </article>
+            ))}
+          </div>
+        ) : null}
 
         {review.warnings.length > 0 ? (
           <div className="review-warning">
