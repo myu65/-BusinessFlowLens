@@ -278,7 +278,7 @@ Clicking a Process/System/Data node opens a node-centered relationship explorer 
 
 ## Progressive understanding (Issue #6)
 
-The Workflow screen opens at **鳥瞰**: business cards show shared systems, review status and recorded data transfers. Select **手順を読む** to open **業務通常**, then switch to **詳細** to inspect the selected step's child operations, conditions and technical information. All three views read the same saved graph; changing the view does not edit it.
+The Workflow screen opens at **鳥瞰**: select the scope and topic to inspect business classifications, product perspectives, common processes/site variants, material/data continuity, or business data usage. Select **手順を読む** to open **業務通常**, then switch to **詳細** to inspect the selected step's child operations, conditions and technical information. All three views read the same saved graph; changing the view does not edit it.
 
 In Business Input, expand **詳細を補足する** on a step to record ordered child operations and optional SAP module, transaction/app, HANA area/schema, physical table/view and evidence. Multiple technical records can be attached to a step. Unknown fields remain empty; existing graphs migrate automatically through the SQLite `details_json` column. Revisions retain these details.
 
@@ -297,3 +297,42 @@ npm run build
 `tests/refinement.test.ts` covers ambiguous input, separate SAP environments, merge references and aliases, preservation of manual refinements, SQLite migration/revisions, and both supported AI protocol adapters using mock servers. CI runs these tests.
 
 `tests/live-openrouter.ts` is an opt-in live check using synthetic notes. Set `AI_PROTOCOL=openai`, `AI_BASE_URL=https://openrouter.ai/api/v1`, `AI_MODEL=openai/gpt-6-luna` and `AI_API_KEY` in the process environment, then run `npx tsx tests/live-openrouter.ts`. Credentials are never logged or written to the results. Synthetic results are saved under the ignored `.data/qa-issue6/` directory.
+
+## System-internal automation
+
+Workflow Process steps distinguish *who/what executes the work* from who owns it.
+
+```text
+executionMode = manual | automatic | mixed | unknown
+executingSystem = optional System mention
+```
+
+Examples:
+
+- "営業がSAPへ入力" → manual Process using SAP.
+- "SAPが自動で在庫を引き当てる" → automatic Process executed by SAP.
+- "担当者が承認するとERPが自動計上する" → mixed or separate manual/automatic steps depending on the described business meaning.
+
+System-internal automatic execution is intentionally different from System-to-System Data Flow. A System performing work internally is a Process execution concern; information moving between Systems is a Data Flow concern.
+
+## Business Input UX
+
+The working-model editor supports direct editing without requiring another AI pass:
+
+- add/delete/reorder Process steps
+- edit execution mode and executing System
+- edit role, department, and responsible person
+- add/edit/remove System references and interactions
+- add/edit/remove Data references and operations
+- edit step-to-step transitions and branch conditions
+- add/edit/remove System-to-System Data Flows
+- collapsible model sections and a wider editor layout
+- confirmation for destructive edits
+- execution-mode filtering in Workflow view
+
+
+## Scoped business landscapes (Issue #7)
+
+Register multiple business domains, site, product identity/perspective, common process identity, implementation differences and material handoffs in the overview editor. Filter the scope, follow direct relationships, and pin workflows of interest. Preferences are retained in the current browser. Material handoffs distinguish verified data correspondence, verified breaks, and unknown correspondence; missing records do not prove a break. Site implementations keep separate process steps linked by an explicit common-process ID.
+
+See [overview design](docs/overview-design.md) and [landscape design](docs/landscape-design.md) for research, interpretation boundaries, persistence and examples. Run `npm test`, `npm run typecheck`, `npm run build`, and `npm run test:regression` for local validation.

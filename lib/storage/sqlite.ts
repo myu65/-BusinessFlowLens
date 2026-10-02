@@ -117,9 +117,13 @@ function normalizeSnapshotGraph(graph: LensGraph): LensGraph {
 
   for (const edge of graph.edges) {
     const sourceKind: NodeKind | undefined =
-      edge.relation === "next" ? "process" : undefined;
-    const targetKind: NodeKind | undefined =
       edge.relation === "next"
+        ? "process"
+        : edge.relation === "executes"
+          ? "system"
+          : undefined;
+    const targetKind: NodeKind | undefined =
+      edge.relation === "next" || edge.relation === "executes"
         ? "process"
         : edge.relation === "uses"
           ? "system"
@@ -362,11 +366,15 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
     );
     this.ensureColumn("workflows", "family_id", "TEXT");
     this.ensureColumn("workflows", "landscape_json", "TEXT NOT NULL DEFAULT 'null'");
+    this.ensureColumn("workflows", "summary", "TEXT");
+    this.ensureColumn("workflows", "trigger", "TEXT");
+    this.ensureColumn("workflows", "outcome", "TEXT");
     this.ensureColumn("workflows", "scenario", "TEXT");
     this.ensureColumn("workflows", "scenario_label", "TEXT");
     this.ensureColumn("workflows", "based_on_workflow_id", "TEXT");
     this.ensureColumn("workflows", "effective_from", "TEXT");
     this.ensureColumn("workflows", "effective_to", "TEXT");
+    this.ensureColumn("graph_nodes", "execution_mode", "TEXT");
 
     this.ensureColumn("workflow_revisions", "family_id", "TEXT");
     this.ensureColumn("workflow_revisions", "scenario", "TEXT");
@@ -418,6 +426,9 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
     const workflows: Workflow[] = workflowRows.map((row) => ({
       id: String(row.id),
       name: String(row.name),
+      summary: row.summary == null ? undefined : String(row.summary),
+      trigger: row.trigger == null ? null : String(row.trigger),
+      outcome: row.outcome == null ? null : String(row.outcome),
       description:
         row.description == null ? undefined : String(row.description),
       familyId: row.family_id == null ? undefined : String(row.family_id),
@@ -460,6 +471,10 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
         row.responsible_person == null
           ? undefined
           : String(row.responsible_person),
+      executionMode:
+        row.execution_mode == null
+          ? undefined
+          : (String(row.execution_mode) as LensNode["executionMode"]),
       evidence: row.evidence == null ? undefined : String(row.evidence),
       stepOrder: row.step_order == null ? undefined : Number(row.step_order),
       action: row.action == null ? undefined : String(row.action),
@@ -677,8 +692,8 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
       [
         "INSERT INTO workflows (",
         "  project_id, id, name, description, family_id, scenario, scenario_label,",
-        "  based_on_workflow_id, effective_from, effective_to, source_notes, review_context_json, landscape_json",
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "  based_on_workflow_id, effective_from, effective_to, source_notes, review_context_json, landscape_json, summary, trigger, outcome",
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       ].join("\n"),
     );
 
@@ -686,8 +701,8 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
       [
         "INSERT INTO graph_nodes (",
         "  project_id, id, canonical_key, kind, label, description, status,",
-        "  workflow_id, actor, department, responsible_person, evidence, step_order, action, details_json",
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "  workflow_id, actor, department, responsible_person, execution_mode, evidence, step_order, action, details_json",
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       ].join("\n"),
     );
 
@@ -741,6 +756,9 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
           snapshot.transcripts[workflow.id] ?? "",
           JSON.stringify(workflow.reviewContext ?? {}),
           JSON.stringify(workflow.landscape ?? null),
+          workflow.summary ?? null,
+          workflow.trigger ?? null,
+          workflow.outcome ?? null,
         );
       }
 
@@ -757,6 +775,7 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
           node.actor ?? null,
           node.department ?? null,
           node.responsiblePerson ?? null,
+          node.executionMode ?? null,
           node.evidence ?? null,
           node.stepOrder ?? null,
           node.action ?? null,

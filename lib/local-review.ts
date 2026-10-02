@@ -44,6 +44,11 @@ export function extractGroundedLocal(
         text,
         systems.find((name) => /SAP|ERP/i.test(name)) ?? systems[0] ?? "未確認",
       );
+      const executingSystem =
+        systems.find(
+          (name) =>
+            text.includes(`${name}が自動`) || text.includes(`${name}は自動`),
+        ) ?? null;
       return {
         stepKey: `note-${index + 1}`,
         name: text.length > 30 ? `${text.slice(0, 30)}…` : text,
@@ -51,6 +56,12 @@ export function extractGroundedLocal(
         actor: null,
         department: null,
         responsiblePerson: null,
+        executionMode: executingSystem
+          ? ("automatic" as const)
+          : /手動|人手/.test(text)
+            ? ("manual" as const)
+            : ("unknown" as const),
+        executingSystem,
         action: text,
         certainty: "inferred" as const,
         evidence: text,

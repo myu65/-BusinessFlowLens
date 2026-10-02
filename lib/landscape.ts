@@ -224,6 +224,9 @@ export function duplicateSiteWorkflow(
     id,
     name: name.trim(),
     description: source.description,
+    summary: source.summary,
+    trigger: source.trigger,
+    outcome: source.outcome,
     scenario: source.scenario ?? "current",
     familyId: id,
     reviewContext: source.reviewContext

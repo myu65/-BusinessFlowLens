@@ -63,6 +63,9 @@ export async function POST(request: Request) {
 
     const reviewedWorkflow: Workflow = {
       ...body.workflow,
+      summary: result.review.summary,
+      trigger: result.review.trigger,
+      outcome: result.review.outcome,
       reviewContext: {
         summary: result.review.summary,
         trigger: result.review.trigger,

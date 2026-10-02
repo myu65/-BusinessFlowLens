@@ -36,10 +36,11 @@ export async function POST(request: Request) {
           followUpAnswers: body.followUpAnswers ?? [],
         })
       : (() => {
-          const baseReview = extractGroundedLocal(
-            body.interview!,
-            body.previousReview,
-          );
+          const baseReview =
+            body.followUpAnswers?.some((answer) => answer.answer.trim()) &&
+            body.previousReview?.steps.length
+              ? body.previousReview
+              : extractGroundedLocal(body.interview!, body.previousReview);
           const answered = new Set(
             (body.followUpAnswers ?? [])
               .filter((item) => item.answer.trim())
@@ -49,7 +50,9 @@ export async function POST(request: Request) {
           return {
             review: {
               ...baseReview,
-              questions: baseReview.questions,
+              questions: baseReview.questions.filter(
+                (question) => !answered.has(question.question),
+              ),
               warnings:
                 answered.size > 0
                   ? [

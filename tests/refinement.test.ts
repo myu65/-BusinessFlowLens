@@ -33,6 +33,15 @@ const detail = {
   objects: "ORDER_VIEW",
   evidence: "利用者の確認メモ",
 };
+
+test("grounded fallback distinguishes explicit internal automation from vague system use", () => {
+  const review = extractGroundedLocal("SAPが自動で在庫を引き当てる。SAPで受注を確認する。");
+  assert.equal(review.steps[0].executionMode, "automatic");
+  assert.equal(review.steps[0].executingSystem, "SAP");
+  assert.equal(review.steps[1].executionMode, "unknown");
+  assert.equal(review.steps[1].executingSystem, null);
+  assert.deepEqual(review.dataFlows, []);
+});
 function fixture() {
   const graph = createDemoGraph();
   graph.nodes.push({

@@ -13,6 +13,7 @@ import { LandscapeEditor } from "./LandscapeEditor";
 
 const roles: Record<Relation, string> = {
   next: "順序",
+  executes: "自動実行",
   uses: "利用",
   reads: "参照",
   writes: "登録・更新",
@@ -323,13 +324,24 @@ export function BusinessOverview({
                   </small>
                   <h3>{w.name}</h3>
                   <p>
-                    {w.reviewContext?.summary || w.description || "概要未登録"}
+                    {w.summary ||
+                      w.reviewContext?.summary ||
+                      w.description ||
+                      "概要未登録"}
                   </p>
                   <dl className="overview-purpose">
                     <dt>開始</dt>
-                    <dd>{w.reviewContext?.trigger || "開始条件は未確認"}</dd>
+                    <dd>
+                      {w.trigger ||
+                        w.reviewContext?.trigger ||
+                        "開始条件は未確認"}
+                    </dd>
                     <dt>成果</dt>
-                    <dd>{w.reviewContext?.outcome || "完了・成果は未確認"}</dd>
+                    <dd>
+                      {w.outcome ||
+                        w.reviewContext?.outcome ||
+                        "完了・成果は未確認"}
+                    </dd>
                     <dt>担当</dt>
                     <dd>{departments.join(" / ") || "担当未確認"}</dd>
                   </dl>

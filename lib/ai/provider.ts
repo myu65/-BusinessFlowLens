@@ -66,6 +66,11 @@ const WORKFLOW_DRAFT_SCHEMA = {
           actor: { type: ["string", "null"] },
           department: { type: ["string", "null"] },
           responsiblePerson: { type: ["string", "null"] },
+          executionMode: {
+            type: "string",
+            enum: ["manual", "automatic", "mixed", "unknown"],
+          },
+          executingSystem: { type: ["string", "null"] },
           action: { type: "string" },
           certainty: {
             type: "string",
@@ -157,6 +162,8 @@ const WORKFLOW_DRAFT_SCHEMA = {
           "actor",
           "department",
           "responsiblePerson",
+          "executionMode",
+          "executingSystem",
           "action",
           "certainty",
           "evidence",
@@ -478,12 +485,19 @@ Rules:
 12. If a critical fact is missing, ask a focused follow-up question rather than guessing.
 13. warnings should call out ambiguity, contradictions, suspicious duplicate entry, unclear system-of-record, or places where the transcript is insufficient.
 14. stepKey is local to this draft. Use short stable English slugs such as receive-order, check-content, register-order.
-15. Existing System/Data/Workflow context may be provided as reference candidates. Use it to understand aliases, shorthand, and handoffs, but NEVER treat a candidate as confirmed solely because it exists in the catalog.
-16. "ERP" may plausibly refer to an existing SAP system, and "いつもの出荷処理" may plausibly refer to an existing shipping workflow. Preserve the interview wording/evidence and surface uncertainty rather than inventing or silently canonicalizing.
-17. Follow-up answers are additional interview evidence. Incorporate them into steps, ownership, data flows, trigger/outcome, warnings, and questions. Remove questions that are answered.
-19. technicalDetails records ONLY explicitly stated system, SAP module, transaction/app, HANA area/schema and physical objects. Never derive transaction codes or tables from a business action. Use null for unknown fields. Physical objects belong here, not in business data unless explicitly described as business data too.
-20. detailSteps are ordered child operations of this business step, with a condition when explicitly stated. Use [] if no detailed operations are stated. Preserve current human edits and stable child IDs. Never expand vague notes into invented detail.
-18. certainty=explicit unless the step itself requires a modest inference to make the workflow coherent.
+15. Process execution mode is separate from ownership and from System-to-System Data Flow:
+   - manual: a person performs the step
+   - automatic: a System performs the step internally
+   - mixed: human action/approval and System automation are both essential to the step
+   - unknown: execution mode is not clear
+16. Set executingSystem ONLY when the interview explicitly says or very clearly describes a named System performing the step automatically. Example: "SAPが自動で在庫を引き当てる" => executionMode=automatic, executingSystem=SAP. "SAPで在庫を確認する" does NOT imply SAP executes the business step; that is usually a manual step using SAP.
+17. Automatic internal System execution is NOT a dataFlow. "ERP automatically assigns an order number" is an automatic Process step. "ERP sends the order to WMS" is a dataFlow and may also cause a later automatic Process step in WMS if explicitly described.
+18. Existing System/Data/Workflow context may be provided as reference candidates. Use it to understand aliases, shorthand, and handoffs, but NEVER treat a candidate as confirmed solely because it exists in the catalog.
+19. "ERP" may plausibly refer to an existing SAP system, and "いつもの出荷処理" may plausibly refer to an existing shipping workflow. Preserve the interview wording/evidence and surface uncertainty rather than inventing or silently canonicalizing.
+20. Follow-up answers are additional interview evidence. Incorporate them into steps, ownership, execution mode, executing System, data flows, trigger/outcome, warnings, and questions. Remove questions that are answered.
+21. certainty=explicit unless the step itself requires a modest inference to make the workflow coherent.
+22. technicalDetails records ONLY explicitly stated system, SAP module, transaction/app, HANA area/schema and physical objects. Never derive transaction codes or tables from a business action. Use null for unknown fields. Physical objects belong here, not in business data unless explicitly described as business data too.
+23. detailSteps are ordered child operations of this business step, with a condition when explicitly stated. Use [] if no detailed operations are stated. Preserve current human edits and stable child IDs. Never expand vague notes into invented detail.
 
 Write concise Japanese labels/descriptions when the interview is Japanese.`;
 }
@@ -631,7 +645,10 @@ function collectCandidates(draft: WorkflowDraft): AssetCandidate[] {
     evidence: string,
     certainty: "explicit" | "inferred",
   ) => {
-    const id = candidateId(kind, name);
+    const cleanName = name.trim();
+    if (!cleanName) return;
+
+    const id = candidateId(kind, cleanName);
     const existing = map.get(id);
     if (existing) {
       if (evidence && !existing.evidence.includes(evidence)) {
@@ -644,7 +661,7 @@ function collectCandidates(draft: WorkflowDraft): AssetCandidate[] {
     map.set(id, {
       candidateId: id,
       kind,
-      name,
+      name: cleanName,
       evidence: evidence ? [evidence] : [],
       certainty,
     });
@@ -653,6 +670,17 @@ function collectCandidates(draft: WorkflowDraft): AssetCandidate[] {
   for (const step of draft.steps) {
     for (const system of step.systems) {
       add("system", system.name, system.evidence, step.certainty);
+    }
+    if (
+      step.executingSystem?.trim() &&
+      step.executionMode !== "manual"
+    ) {
+      add(
+        "system",
+        step.executingSystem,
+        step.evidence,
+        step.certainty,
+      );
     }
     for (const data of step.data) {
       add("data", data.name, data.evidence, step.certainty);
@@ -884,12 +912,30 @@ function buildGraphPatch(
       actor: step.actor,
       department: step.department,
       responsiblePerson: step.responsiblePerson,
+      executionMode: step.executionMode,
       evidence: step.evidence,
       stepOrder: step.order,
       action: step.action,
       technicalDetails: step.technicalDetails ?? [],
       detailSteps: step.detailSteps ?? [],
     });
+
+    if (
+      step.executingSystem?.trim() &&
+      step.executionMode !== "manual"
+    ) {
+      const id = candidateId("system", step.executingSystem);
+      const executingSystemKey =
+        assetKeyByCandidate.get(id) ??
+        `system:unresolved:${normalizeName(step.executingSystem) || "unknown"}`;
+
+      edges.push({
+        sourceKey: executingSystemKey,
+        targetKey: processKey(step.stepKey),
+        relation: "executes",
+        label: step.executionMode,
+      });
+    }
 
     for (const system of step.systems) {
       const id = candidateId("system", system.name);
@@ -935,24 +981,13 @@ function buildGraphPatch(
     }
   }
 
-  if (draft.transitions.length > 0) {
-    for (const transition of draft.transitions) {
-      edges.push({
-        sourceKey: processKey(transition.fromStepKey),
-        targetKey: processKey(transition.toStepKey),
-        relation: "next",
-        label: transition.condition ?? undefined,
-      });
-    }
-  } else {
-    for (let index = 0; index < sortedSteps.length - 1; index += 1) {
-      edges.push({
-        sourceKey: processKey(sortedSteps[index].stepKey),
-        targetKey: processKey(sortedSteps[index + 1].stepKey),
-        relation: "next",
-        label: undefined,
-      });
-    }
+  for (const transition of draft.transitions) {
+    edges.push({
+      sourceKey: processKey(transition.fromStepKey),
+      targetKey: processKey(transition.toStepKey),
+      relation: "next",
+      label: transition.condition ?? undefined,
+    });
   }
 
   for (const flow of draft.dataFlows ?? []) {
@@ -993,7 +1028,6 @@ function buildGraphPatch(
 function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
   const seen = new Set<string>();
   const steps = raw.steps
-    .filter((step) => step.stepKey && step.name && step.action)
     .map((step, index) => {
       let key = normalizeName(step.stepKey) || `step-${index + 1}`;
       let suffix = 2;
@@ -1006,6 +1040,8 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
       return {
         ...step,
         stepKey: key,
+        name: step.name ?? "",
+        action: step.action ?? "",
         order: Number.isFinite(step.order) ? step.order : index + 1,
         department: step.department ?? null,
         responsiblePerson: step.responsiblePerson ?? null,
@@ -1019,8 +1055,14 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
         detailSteps: (step.detailSteps ?? []).filter((detail) =>
           detail.action.trim(),
         ),
-        systems: step.systems ?? [],
-        data: step.data ?? [],
+        executionMode: step.executionMode ?? "unknown",
+        executingSystem: step.executingSystem ?? null,
+        systems: (step.systems ?? []).filter(
+          (system) => Boolean(system.name?.trim()),
+        ),
+        data: (step.data ?? []).filter(
+          (data) => Boolean(data.name?.trim()),
+        ),
       };
     })
     .sort((a, b) => a.order - b.order);
@@ -1055,6 +1097,7 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
       )
       .map((flow) => ({
         ...flow,
+        data: (flow.data ?? []).map((item) => item.trim()).filter(Boolean),
         relatedStepKeys: (flow.relatedStepKeys ?? [])
           .map((key) => normalizeName(key))
           .filter((key) => validKeys.has(key)),
