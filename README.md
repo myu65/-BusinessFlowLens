@@ -57,9 +57,21 @@ The first call does **not** see the existing canonical asset catalog. It extract
 
 The prompt explicitly avoids inventing a system just because an activity such as "check inventory" exists.
 
+### Context-aware extraction
+
+The extraction call also receives a compact read-only view of existing Systems, Data, and Workflows. This helps interpret shorthand such as `ERP`, `SAP`, `基幹`, or references such as "いつもの出荷処理".
+
+Existing catalog entries are **reference candidates only** at this stage:
+- extraction does not assign canonical IDs
+- extraction does not merge entities
+- ambiguous aliases remain warnings/questions
+- canonical identity is still resolved only when the reviewed draft is applied
+
 ### Human review and correction
 
-The first call returns only a draft. Before any canonical resolution happens, the user can edit the summary, start/end conditions, step name, actor, and action, and remove incorrectly extracted steps or System/Data mentions.
+The first call returns only a draft. Before any canonical resolution happens, the user can edit the summary, start/end conditions, step name, actor, department, responsible person, action, and extracted System/Data/data-flow mentions.
+
+AI-generated follow-up questions are interactive. Users can answer them in the review panel and ask AI to refine the draft again. The refinement call receives the original interview, the current human-edited draft, the follow-up Q&A, and existing company context. Answered questions should disappear while remaining material gaps can produce new questions.
 
 ### 2. Precision-first entity resolution
 
