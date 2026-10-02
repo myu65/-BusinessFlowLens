@@ -284,6 +284,7 @@ export class SqliteBusinessFlowRepository
       "  actor TEXT,",
       "  department TEXT,",
       "  responsible_person TEXT,",
+      "  execution_mode TEXT,",
       "  evidence TEXT,",
       "  step_order INTEGER,",
       "  action TEXT,",
@@ -357,6 +358,7 @@ export class SqliteBusinessFlowRepository
     this.ensureColumn("workflows", "based_on_workflow_id", "TEXT");
     this.ensureColumn("workflows", "effective_from", "TEXT");
     this.ensureColumn("workflows", "effective_to", "TEXT");
+    this.ensureColumn("graph_nodes", "execution_mode", "TEXT");
 
     this.ensureColumn("workflow_revisions", "family_id", "TEXT");
     this.ensureColumn("workflow_revisions", "scenario", "TEXT");
@@ -469,6 +471,10 @@ export class SqliteBusinessFlowRepository
         row.responsible_person == null
           ? undefined
           : String(row.responsible_person),
+      executionMode:
+        row.execution_mode == null
+          ? undefined
+          : (String(row.execution_mode) as LensNode["executionMode"]),
       evidence: row.evidence == null ? undefined : String(row.evidence),
       stepOrder:
         row.step_order == null ? undefined : Number(row.step_order),
@@ -704,8 +710,8 @@ export class SqliteBusinessFlowRepository
     const insertNode = this.db.prepare([
       "INSERT INTO graph_nodes (",
       "  project_id, id, canonical_key, kind, label, description, status,",
-      "  workflow_id, actor, department, responsible_person, evidence, step_order, action",
-      ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "  workflow_id, actor, department, responsible_person, execution_mode, evidence, step_order, action",
+      ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     ].join("\n"));
 
     const insertEdge = this.db.prepare([
@@ -768,6 +774,7 @@ export class SqliteBusinessFlowRepository
           node.actor ?? null,
           node.department ?? null,
           node.responsiblePerson ?? null,
+          node.executionMode ?? null,
           node.evidence ?? null,
           node.stepOrder ?? null,
           node.action ?? null,
