@@ -11,8 +11,9 @@ for (const name of ['graph','ai/provider']) {
 const graphLib = await import('../.data/review-graph.mjs');
 const cases=[];
 function check(name,ok,detail) { cases.push({name,ok,detail}); }
+const regressionPort=process.env.REGRESSION_PORT ?? '3105';
 async function api(route,method='GET',body) {
- const r=await fetch(`http://localhost:3105${route}`,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+ const r=await fetch(`http://127.0.0.1:${regressionPort}${route}`,{method,headers:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
  return {status:r.status,body:await r.json()};
 }
 const workflow={id:'review-api-operations',name:'API総合確認',familyId:'review-api-operations',scenario:'current',effectiveFrom:'2026-10-01',effectiveTo:'2026-12-31'};
