@@ -3,6 +3,7 @@ import type {
   Confidence,
   ExtractionQuestion,
   ExtractionResult,
+  FollowUpAnswer,
   ExtractionReview,
   ExtractionReviewStep,
   GraphPatch,
@@ -443,21 +444,131 @@ Rules:
 12. If a critical fact is missing, ask a focused follow-up question rather than guessing.
 13. warnings should call out ambiguity, contradictions, suspicious duplicate entry, unclear system-of-record, or places where the transcript is insufficient.
 14. stepKey is local to this draft. Use short stable English slugs such as receive-order, check-content, register-order.
-15. certainty=explicit unless the step itself requires a modest inference to make the workflow coherent.
+15. Existing System/Data/Workflow context may be provided as reference candidates. Use it to understand aliases, shorthand, and handoffs, but NEVER treat a candidate as confirmed solely because it exists in the catalog.
+16. "ERP" may plausibly refer to an existing SAP system, and "いつもの出荷処理" may plausibly refer to an existing shipping workflow. Preserve the interview wording/evidence and surface uncertainty rather than inventing or silently canonicalizing.
+17. Follow-up answers are additional interview evidence. Incorporate them into steps, ownership, data flows, trigger/outcome, warnings, and questions. Remove questions that are answered.
+18. certainty=explicit unless the step itself requires a modest inference to make the workflow coherent.
 
 Write concise Japanese labels/descriptions when the interview is Japanese.`;
 }
 
-function extractionUserPrompt(interview: string, workflow: Workflow) {
+function compactExistingContext(
+  graph: LensGraph,
+  currentWorkflowId: string,
+) {
+  const workflowNames = new Map(
+    graph.workflows.map((workflow) => [workflow.id, workflow.name]),
+  );
+
+  const workflowIdsForNode = (nodeId: string) => {
+    const ids = new Set<string>();
+    for (const edge of graph.edges) {
+      if (edge.source === nodeId || edge.target === nodeId) {
+        for (const workflowId of edge.workflowIds) ids.add(workflowId);
+      }
+    }
+    for (const flow of graph.dataFlows ?? []) {
+      if (
+        flow.sourceSystemId === nodeId ||
+        flow.targetSystemId === nodeId ||
+        flow.dataIds.includes(nodeId)
+      ) {
+        for (const workflowId of flow.workflowIds) ids.add(workflowId);
+      }
+    }
+    return [...ids]
+      .map((id) => workflowNames.get(id) ?? id)
+      .slice(0, 8);
+  };
+
+  const systems = graph.nodes
+    .filter((node) => node.kind === "system")
+    .map((node) => ({
+      canonicalKey: node.canonicalKey,
+      name: node.label,
+      description: node.description,
+      usedBy: workflowIdsForNode(node.id),
+    }))
+    .slice(0, 30);
+
+  const data = graph.nodes
+    .filter((node) => node.kind === "data")
+    .map((node) => ({
+      canonicalKey: node.canonicalKey,
+      name: node.label,
+      description: node.description,
+      usedBy: workflowIdsForNode(node.id),
+    }))
+    .slice(0, 30);
+
+  const workflows = graph.workflows
+    .filter((workflow) => workflow.id !== currentWorkflowId)
+    .map((workflow) => ({
+      id: workflow.id,
+      name: workflow.name,
+      description: workflow.description ?? "",
+      steps: graph.nodes
+        .filter(
+          (node) =>
+            node.kind === "process" &&
+            node.workflowId === workflow.id,
+        )
+        .sort(
+          (a, b) =>
+            (a.stepOrder ?? Number.MAX_SAFE_INTEGER) -
+            (b.stepOrder ?? Number.MAX_SAFE_INTEGER),
+        )
+        .slice(0, 10)
+        .map((node) => node.label),
+    }))
+    .slice(0, 30);
+
+  return { systems, data, workflows };
+}
+
+function extractionUserPrompt(args: {
+  interview: string;
+  workflow: Workflow;
+  graph: LensGraph;
+  previousReview?: ExtractionReview | null;
+  followUpAnswers?: FollowUpAnswer[];
+}) {
+  const existingContext = compactExistingContext(
+    args.graph,
+    args.workflow.id,
+  );
+  const answered = (args.followUpAnswers ?? []).filter(
+    (item) => item.answer.trim().length > 0,
+  );
+
   return `Workflow being interviewed:
-${JSON.stringify(workflow, null, 2)}
+${JSON.stringify(args.workflow, null, 2)}
 
 Interview transcript:
 ---
-${interview}
+${args.interview}
 ---
 
-Extract a reviewable workflow draft. Do not consider existing systems or data in the project yet; entity resolution happens in a separate pass.`;
+Existing company context (REFERENCE CANDIDATES ONLY):
+${JSON.stringify(existingContext, null, 2)}
+
+${args.previousReview ? `Current review draft. It may include human edits; preserve those edits unless the new follow-up answers clearly contradict them:
+${JSON.stringify(args.previousReview, null, 2)}
+` : ""}
+
+${answered.length > 0 ? `Follow-up Q&A. Treat the answers as additional interview evidence:
+${JSON.stringify(answered, null, 2)}
+` : ""}
+
+Use existing company context to interpret shorthand and references such as "ERP", "SAP", "the core system", or "the usual shipping process". It is context, not authority:
+- Do not silently replace the interview wording with a canonical name.
+- Do not merge or assign canonical IDs here.
+- When an existing System/Data/Workflow is a plausible match, use that knowledge to make the draft more coherent and mention ambiguity in warnings/questions when identity is not clear.
+- If the interview says "after that we do the usual shipping process" and an existing shipping workflow is present, do not invent its internal steps; describe the handoff and ask only what is still needed.
+- If a follow-up answer resolves a question, update the draft and remove that question.
+- Ask new questions only for remaining material gaps.
+
+Return a revised, reviewable workflow draft.`;
 }
 
 function normalizeName(value: string) {
@@ -893,12 +1004,15 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
 export async function extractWorkflowReviewWithAI(args: {
   interview: string;
   workflow: Workflow;
+  graph: LensGraph;
+  previousReview?: ExtractionReview | null;
+  followUpAnswers?: FollowUpAnswer[];
 }): Promise<{ review: ExtractionReview; provider: string }> {
   const rawDraft = await structuredCall<WorkflowDraft>({
     schemaName: "workflow_draft",
     schema: WORKFLOW_DRAFT_SCHEMA,
     system: extractionSystemPrompt(),
-    user: extractionUserPrompt(args.interview, args.workflow),
+    user: extractionUserPrompt(args),
   });
 
   const draft = normalizeDraft(rawDraft);
