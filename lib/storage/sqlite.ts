@@ -144,6 +144,7 @@ export class SqliteBusinessFlowRepository
       "  effective_from TEXT,",
       "  effective_to TEXT,",
       "  source_notes TEXT NOT NULL,",
+      "  follow_up_answers_json TEXT NOT NULL DEFAULT '[]',",
       "  summary TEXT NOT NULL,",
       "  review_json TEXT NOT NULL,",
       "  updated_by TEXT NOT NULL,",
@@ -178,6 +179,11 @@ export class SqliteBusinessFlowRepository
     );
     this.ensureColumn("workflow_revisions", "effective_from", "TEXT");
     this.ensureColumn("workflow_revisions", "effective_to", "TEXT");
+    this.ensureColumn(
+      "workflow_revisions",
+      "follow_up_answers_json",
+      "TEXT NOT NULL DEFAULT '[]'",
+    );
   }
 
   private ensureColumn(
@@ -337,8 +343,8 @@ export class SqliteBusinessFlowRepository
           "INSERT INTO workflow_revisions (",
           "  project_id, workflow_id, revision_number, workflow_name, workflow_description,",
           "  family_id, scenario, scenario_label, based_on_workflow_id, effective_from, effective_to,",
-          "  source_notes, summary, review_json, updated_by, created_at",
-          ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          "  source_notes, follow_up_answers_json, summary, review_json, updated_by, created_at",
+          ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         ].join("\n"),
       )
       .run(
@@ -354,6 +360,7 @@ export class SqliteBusinessFlowRepository
         revision.effectiveFrom ?? null,
         revision.effectiveTo ?? null,
         revision.sourceNotes,
+        JSON.stringify(revision.followUpAnswers ?? []),
         revision.review.summary,
         JSON.stringify(revision.review),
         revision.updatedBy,
@@ -410,7 +417,7 @@ export class SqliteBusinessFlowRepository
           "SELECT id, project_id, workflow_id, revision_number, workflow_name,",
           "       workflow_description, family_id, scenario, scenario_label,",
           "       based_on_workflow_id, effective_from, effective_to,",
-          "       source_notes, summary, review_json, updated_by, created_at",
+          "       source_notes, follow_up_answers_json, summary, review_json, updated_by, created_at",
           "  FROM workflow_revisions",
           " WHERE project_id = ? AND id = ?",
         ].join("\n"),
@@ -459,6 +466,16 @@ export class SqliteBusinessFlowRepository
           ? undefined
           : String(row.effective_to),
       sourceNotes: String(row.source_notes ?? ""),
+      followUpAnswers: (() => {
+        try {
+          const parsed = JSON.parse(
+            String(row.follow_up_answers_json ?? "[]"),
+          );
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      })(),
       summary: String(row.summary ?? ""),
       review,
       updatedBy: String(row.updated_by),
