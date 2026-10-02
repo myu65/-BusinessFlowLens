@@ -1148,20 +1148,24 @@ function WorkflowView({
   workflowId: string;
   setWorkflowId: (id: string) => void;
 }) {
-  const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [ownership, setOwnership] = useState<OwnershipState>({
+    department: "",
+    responsiblePerson: "",
+  });
 
   const workflow = graph.workflows.find((item) => item.id === workflowId);
-  const processes = getWorkflowProcesses(graph, workflowId);
+  const filter = ownershipFilter(ownership);
+  const processes = getWorkflowProcesses(graph, workflowId).filter((process) =>
+    processMatchesOwnership(process, filter),
+  );
   const flow = useMemo(
-    () => workflowFlow(graph, workflowId),
-    [graph, workflowId],
+    () => workflowFlow(graph, workflowId, filter),
+    [graph, workflowId, ownership.department, ownership.responsiblePerson],
   );
 
-  const selectedStep =
-    processes.find((process) => process.id === selectedStepId) ?? null;
-  const selectedLinks = selectedStep
-    ? getProcessAssetLinks(graph, selectedStep.id)
-    : [];
+  const selectedNode =
+    graph.nodes.find((node) => node.id === selectedNodeId) ?? null;
 
   const systemIds = new Set<string>();
   const dataIds = new Set<string>();
@@ -1174,22 +1178,32 @@ function WorkflowView({
 
   return (
     <section className="page-view">
-      <header className="page-header">
+      <header className="page-header page-header--stackable">
         <div>
           <div className="eyebrow">WORKFLOW DETAIL</div>
-          <h1>1業務を、読める形で見る</h1>
+          <h1>1業務を、担当の視点で読む</h1>
           <p>
-            System/Dataを別レーンに散らさず、各ステップが何を使い何を読む・書くかに寄せて表示します。
+            部署・担当者で絞りながら、ステップを押すと前後工程・利用System・Dataまで関連を辿れます。
           </p>
         </div>
-        <WorkflowPicker
-          graph={graph}
-          selectedWorkflowId={workflowId}
-          onSelect={(id) => {
-            setWorkflowId(id);
-            setSelectedStepId(null);
-          }}
-        />
+        <div className="page-header-controls">
+          <WorkflowPicker
+            graph={graph}
+            selectedWorkflowId={workflowId}
+            onSelect={(id) => {
+              setWorkflowId(id);
+              setSelectedNodeId(null);
+            }}
+          />
+          <OwnershipFilters
+            graph={graph}
+            value={ownership}
+            onChange={(value) => {
+              setOwnership(value);
+              setSelectedNodeId(null);
+            }}
+          />
+        </div>
       </header>
 
       <div className="workflow-summary">
@@ -1198,7 +1212,7 @@ function WorkflowView({
           <strong>{workflow?.name ?? "—"}</strong>
         </div>
         <div>
-          <span>ステップ</span>
+          <span>表示ステップ</span>
           <strong>{processes.length}</strong>
         </div>
         <div>
@@ -1213,8 +1227,8 @@ function WorkflowView({
 
       {processes.length === 0 ? (
         <div className="empty-state">
-          <strong>まだ構造化されていません</strong>
-          <p>ヒアリング画面で内容を入力し、AI下書きを確認して反映してください。</p>
+          <strong>条件に合うステップがありません</strong>
+          <p>部署・担当者フィルタを変更するか、ヒアリング内容を確認してください。</p>
         </div>
       ) : (
         <div className="workflow-canvas-wrap">
@@ -1226,47 +1240,20 @@ function WorkflowView({
             fitViewOptions={{ padding: 0.15 }}
             minZoom={0.4}
             maxZoom={1.25}
-            onNodeClick={(_, node) => setSelectedStepId(node.id)}
+            onNodeClick={(_, node) => setSelectedNodeId(node.id)}
             proOptions={{ hideAttribution: true }}
           >
             <Background gap={28} size={1} />
             <Controls position="bottom-right" showInteractive={false} />
           </ReactFlow>
 
-          {selectedStep ? (
-            <aside className="step-inspector">
-              <button
-                className="close-button"
-                onClick={() => setSelectedStepId(null)}
-              >
-                ×
-              </button>
-              <div className="eyebrow">STEP DETAIL</div>
-              <h2>{selectedStep.label}</h2>
-              <p>{selectedStep.action ?? selectedStep.description}</p>
-              <dl>
-                <div>
-                  <dt>担当</dt>
-                  <dd>{selectedStep.actor ?? "未確認"}</dd>
-                </div>
-                <div>
-                  <dt>根拠</dt>
-                  <dd>{selectedStep.evidence ?? "—"}</dd>
-                </div>
-              </dl>
-              <div className="inspector-assets">
-                {selectedLinks.map((link) => (
-                  <article key={`${link.asset.id}-${link.relation}`}>
-                    <span>{kindLabel[link.asset.kind]}</span>
-                    <strong>{link.asset.label}</strong>
-                    <small>
-                      {relationLabel[link.relation]}
-                      {link.label ? ` · ${link.label}` : ""}
-                    </small>
-                  </article>
-                ))}
-              </div>
-            </aside>
+          {selectedNode ? (
+            <RelationshipPanel
+              graph={graph}
+              node={selectedNode}
+              onClose={() => setSelectedNodeId(null)}
+              onSelectNode={(node) => setSelectedNodeId(node.id)}
+            />
           ) : null}
         </div>
       )}
