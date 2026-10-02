@@ -766,11 +766,10 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
   };
 }
 
-export async function extractGraphWithAI(args: {
+export async function extractWorkflowReviewWithAI(args: {
   interview: string;
   workflow: Workflow;
-  graph: LensGraph;
-}): Promise<ExtractionResult & { provider: string }> {
+}): Promise<{ review: ExtractionReview; provider: string }> {
   const rawDraft = await structuredCall<WorkflowDraft>({
     schemaName: "workflow_draft",
     schema: WORKFLOW_DRAFT_SCHEMA,
@@ -779,6 +778,35 @@ export async function extractGraphWithAI(args: {
   });
 
   const draft = normalizeDraft(rawDraft);
+
+  return {
+    review: {
+      summary: draft.summary,
+      trigger: draft.trigger,
+      outcome: draft.outcome,
+      steps: draft.steps,
+      transitions: draft.transitions,
+      questions: draft.questions,
+      warnings: draft.warnings,
+    },
+    provider: `${protocol()}-compatible:${env("AI_MODEL")}`,
+  };
+}
+
+export async function resolveWorkflowReviewWithAI(args: {
+  review: ExtractionReview;
+  workflow: Workflow;
+  graph: LensGraph;
+}): Promise<{
+  patch: GraphPatch;
+  review: ExtractionReview;
+  provider: string;
+}> {
+  const draft = normalizeDraft({
+    ...args.review,
+    transitions: args.review.transitions ?? [],
+  });
+
   const candidates = collectCandidates(draft);
   const resolutions = await resolveAssets(candidates, args.graph);
   const patch = buildGraphPatch(
@@ -795,18 +823,61 @@ export async function extractGraphWithAI(args: {
         `共有資産の同一性を要確認: ${resolution.canonicalLabel} — ${resolution.reason}`,
     );
 
-  const review: ExtractionReview = {
-    summary: draft.summary,
-    trigger: draft.trigger,
-    outcome: draft.outcome,
-    steps: draft.steps,
-    questions: draft.questions,
-    warnings: [...draft.warnings, ...resolutionWarnings],
-  };
-
   return {
     patch,
-    review,
+    review: {
+      ...draft,
+      warnings: [...draft.warnings, ...resolutionWarnings],
+    },
     provider: `${protocol()}-compatible:${env("AI_MODEL")}`,
+  };
+}
+
+export function resolveWorkflowReviewLocally(args: {
+  review: ExtractionReview;
+  workflow: Workflow;
+  graph: LensGraph;
+}): { patch: GraphPatch; review: ExtractionReview } {
+  const draft = normalizeDraft({
+    ...args.review,
+    transitions: args.review.transitions ?? [],
+  });
+  const candidates = collectCandidates(draft);
+  const catalog = existingAssets(args.graph);
+
+  const resolutions: AssetResolution[] = candidates.map((candidate) => {
+    const exact = catalog.find(
+      (asset) =>
+        asset.kind === candidate.kind &&
+        normalizeName(asset.label) === normalizeName(candidate.name),
+    );
+
+    if (exact) {
+      return {
+        candidateId: candidate.candidateId,
+        decision: "reuse",
+        existingCanonicalKey: exact.canonicalKey,
+        canonicalLabel: exact.label,
+        reason: "Exact normalized label match in local demo resolver.",
+      };
+    }
+
+    return {
+      candidateId: candidate.candidateId,
+      decision: "create",
+      existingCanonicalKey: null,
+      canonicalLabel: candidate.name,
+      reason: "No exact local match.",
+    };
+  });
+
+  return {
+    patch: buildGraphPatch(
+      draft,
+      args.workflow,
+      candidates,
+      resolutions,
+    ),
+    review: draft,
   };
 }
