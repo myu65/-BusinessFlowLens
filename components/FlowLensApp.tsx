@@ -680,6 +680,21 @@ function ReviewPanel({
             <summary>当時のヒアリング / 業務メモ</summary>
             <pre>{historyDetail.sourceNotes || "—"}</pre>
           </details>
+          {historyDetail.followUpAnswers.length > 0 ? (
+            <details>
+              <summary>
+                当時の追加Q&A ({historyDetail.followUpAnswers.length})
+              </summary>
+              <div className="revision-qa-list">
+                {historyDetail.followUpAnswers.map((item, index) => (
+                  <article key={`${item.question}-${index}`}>
+                    <strong>{item.question}</strong>
+                    <p>{item.answer}</p>
+                  </article>
+                ))}
+              </div>
+            </details>
+          ) : null}
           <details>
             <summary>
               当時の構造 ({historyDetail.review.steps.length} steps)
@@ -981,6 +996,21 @@ function ReviewPanel({
             </div>
             {review.warnings.map((warning) => (
               <p key={warning}>△ {warning}</p>
+            ))}
+          </div>
+        ) : null}
+
+        {model.answerHistory.length > 0 ? (
+          <div className="answered-followups">
+            <div className="review-section-title">
+              <span>反映済みの追加Q&A</span>
+              <b>{model.answerHistory.length}</b>
+            </div>
+            {model.answerHistory.map((item, index) => (
+              <article key={`${item.question}-${index}`}>
+                <strong>{item.question}</strong>
+                <p>{item.answer}</p>
+              </article>
             ))}
           </div>
         ) : null}
@@ -1307,6 +1337,7 @@ function InterviewsView({
           workflow,
           graph,
           previousReview: model?.review ?? null,
+          followUpAnswers: model?.answerHistory ?? [],
         }),
       });
 
@@ -1320,6 +1351,7 @@ function InterviewsView({
         review: payload.review,
         provider: payload.provider ?? "unknown",
         answers: {},
+        answerHistory: model?.answerHistory ?? [],
       });
     } catch (cause) {
       setError(
