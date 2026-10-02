@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
+  canonicalNodeId,
   Confidence,
   DataFlowAutomation,
   ExtractionReview,
@@ -55,36 +56,97 @@ function normalizeSnapshotGraph(graph: LensGraph): LensGraph {
   }
 
   const canonicalNodeByKey = new Map<string, LensNode>();
-  const idRemap = new Map<string, string>();
+  const oldIdCandidates = new Map<string, LensNode[]>();
 
   for (const node of graph.nodes) {
-    const existing = canonicalNodeByKey.get(node.canonicalKey);
-    if (!existing) {
-      canonicalNodeByKey.set(node.canonicalKey, node);
-      idRemap.set(node.id, node.id);
-      continue;
+    const normalized: LensNode = {
+      ...node,
+      id: canonicalNodeId(node.canonicalKey),
+    };
+
+    if (!canonicalNodeByKey.has(node.canonicalKey)) {
+      canonicalNodeByKey.set(node.canonicalKey, normalized);
     }
 
-    // A canonical entity must have exactly one persisted node ID.
-    // Keep the first node and remap every later reference to it.
-    idRemap.set(node.id, existing.id);
+    const candidates = oldIdCandidates.get(node.id) ?? [];
+    candidates.push(normalized);
+    oldIdCandidates.set(node.id, candidates);
   }
 
   const nodes = [...canonicalNodeByKey.values()];
-  const validNodeIds = new Set(nodes.map((node) => node.id));
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const validNodeIds = new Set(nodeById.keys());
+
+  const resolveLegacyId = (
+    oldId: string,
+    expectedKind?: NodeKind,
+    workflowIds: string[] = [],
+  ) => {
+    const candidates = oldIdCandidates.get(oldId) ?? [];
+
+    if (candidates.length === 0) {
+      return validNodeIds.has(oldId) ? oldId : undefined;
+    }
+
+    if (candidates.length === 1) return candidates[0].id;
+
+    let narrowed = candidates;
+
+    if (expectedKind) {
+      const kindMatches = narrowed.filter(
+        (node) => node.kind === expectedKind,
+      );
+      if (kindMatches.length > 0) narrowed = kindMatches;
+    }
+
+    const workflowMatches = narrowed.filter(
+      (node) =>
+        node.kind !== "process" ||
+        (node.workflowId && workflowIds.includes(node.workflowId)),
+    );
+    if (workflowMatches.length > 0) narrowed = workflowMatches;
+
+    // Old versions ASCII-sanitized node IDs, so multiple Japanese
+    // canonical keys could share one ID. At this point that original
+    // endpoint is fundamentally ambiguous. Pick deterministically so
+    // persistence can heal IDs; the edited workflow is rebuilt from its
+    // review on apply, restoring its exact relationships.
+    return [...narrowed].sort((a, b) =>
+      a.canonicalKey.localeCompare(b.canonicalKey),
+    )[0]?.id;
+  };
 
   const edgeById = new Map<string, LensEdge>();
+
   for (const edge of graph.edges) {
-    const source = idRemap.get(edge.source) ?? edge.source;
-    const target = idRemap.get(edge.target) ?? edge.target;
+    const sourceKind: NodeKind | undefined =
+      edge.relation === "next" ? "process" : undefined;
+    const targetKind: NodeKind | undefined =
+      edge.relation === "next"
+        ? "process"
+        : edge.relation === "uses"
+          ? "system"
+          : edge.relation === "reads" || edge.relation === "writes"
+            ? "data"
+            : undefined;
+
+    const source = resolveLegacyId(
+      edge.source,
+      sourceKind,
+      edge.workflowIds,
+    );
+    const target = resolveLegacyId(
+      edge.target,
+      targetKind,
+      edge.workflowIds,
+    );
+
+    if (!source || !target) continue;
     if (!validNodeIds.has(source) || !validNodeIds.has(target)) continue;
 
-    const id =
-      source === edge.source && target === edge.target
-        ? edge.id
-        : `${source}--${edge.relation}--${target}`;
-
+    const id = `${source}--${edge.relation}--${target}`;
     const existing = edgeById.get(id);
+
     if (existing) {
       existing.workflowIds = [
         ...new Set([...existing.workflowIds, ...edge.workflowIds]),
@@ -103,30 +165,38 @@ function normalizeSnapshotGraph(graph: LensGraph): LensGraph {
   }
 
   const flowById = new Map<string, SystemDataFlow>();
+
   for (const flow of graph.dataFlows ?? []) {
-    const sourceSystemId =
-      idRemap.get(flow.sourceSystemId) ?? flow.sourceSystemId;
-    const targetSystemId =
-      idRemap.get(flow.targetSystemId) ?? flow.targetSystemId;
-    if (
-      !validNodeIds.has(sourceSystemId) ||
-      !validNodeIds.has(targetSystemId)
-    ) {
-      continue;
-    }
+    const sourceSystemId = resolveLegacyId(
+      flow.sourceSystemId,
+      "system",
+      flow.workflowIds,
+    );
+    const targetSystemId = resolveLegacyId(
+      flow.targetSystemId,
+      "system",
+      flow.workflowIds,
+    );
+
+    if (!sourceSystemId || !targetSystemId) continue;
 
     const dataIds = [
       ...new Set(
         flow.dataIds
-          .map((id) => idRemap.get(id) ?? id)
-          .filter((id) => validNodeIds.has(id)),
+          .map((id) =>
+            resolveLegacyId(id, "data", flow.workflowIds),
+          )
+          .filter((id): id is string => Boolean(id)),
       ),
     ];
+
     const processIds = [
       ...new Set(
         flow.processIds
-          .map((id) => idRemap.get(id) ?? id)
-          .filter((id) => validNodeIds.has(id)),
+          .map((id) =>
+            resolveLegacyId(id, "process", flow.workflowIds),
+          )
+          .filter((id): id is string => Boolean(id)),
       ),
     ];
 
