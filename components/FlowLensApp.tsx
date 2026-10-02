@@ -605,16 +605,95 @@ function ReviewPanel({
     });
   };
 
-  const removeStep = (stepKey: string) => {
+  const linearTransitions = (
+    steps: ExtractionReview["steps"],
+    transitions: ExtractionReview["transitions"],
+  ) => {
+    if (transitions.some((transition) => transition.condition)) {
+      return transitions;
+    }
+
+    return steps.slice(0, -1).map((step, index) => ({
+      fromStepKey: step.stepKey,
+      toStepKey: steps[index + 1].stepKey,
+      condition: null,
+      evidence: "",
+    }));
+  };
+
+  const addStep = () => {
+    const used = new Set(review.steps.map((step) => step.stepKey));
+    let index = review.steps.length + 1;
+    let stepKey = `manual-step-${index}`;
+    while (used.has(stepKey)) {
+      index += 1;
+      stepKey = `manual-step-${index}`;
+    }
+
+    const steps = [
+      ...review.steps,
+      {
+        stepKey,
+        name: "新しいステップ",
+        order: review.steps.length + 1,
+        actor: null,
+        department: null,
+        responsiblePerson: null,
+        executionMode: "unknown" as const,
+        executingSystem: null,
+        action: "",
+        certainty: "explicit" as const,
+        evidence: "手動追加",
+        systems: [],
+        data: [],
+      },
+    ];
+
     changeReview({
       ...review,
-      steps: review.steps
-        .filter((step) => step.stepKey !== stepKey)
-        .map((step, index) => ({ ...step, order: index + 1 })),
-      transitions: review.transitions.filter(
-        (transition) =>
-          transition.fromStepKey !== stepKey &&
-          transition.toStepKey !== stepKey,
+      steps,
+      transitions: linearTransitions(steps, review.transitions),
+    });
+  };
+
+  const moveStep = (stepKey: string, direction: -1 | 1) => {
+    const index = review.steps.findIndex(
+      (step) => step.stepKey === stepKey,
+    );
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= review.steps.length) return;
+
+    const steps = [...review.steps];
+    [steps[index], steps[target]] = [steps[target], steps[index]];
+    const reordered = steps.map((step, itemIndex) => ({
+      ...step,
+      order: itemIndex + 1,
+    }));
+
+    changeReview({
+      ...review,
+      steps: reordered,
+      transitions: linearTransitions(reordered, review.transitions),
+    });
+  };
+
+  const removeStep = (stepKey: string) => {
+    if (!window.confirm("この業務ステップを削除しますか？")) return;
+
+    const steps = review.steps
+      .filter((step) => step.stepKey !== stepKey)
+      .map((step, index) => ({ ...step, order: index + 1 }));
+
+    changeReview({
+      ...review,
+      steps,
+      transitions: linearTransitions(
+        steps,
+        review.transitions.filter(
+          (transition) =>
+            transition.fromStepKey !== stepKey &&
+            transition.toStepKey !== stepKey,
+        ),
       ),
       dataFlows: review.dataFlows.map((flow) => ({
         ...flow,
@@ -623,6 +702,75 @@ function ReviewPanel({
         ),
       })),
     });
+  };
+
+  const updateSystem = (
+    stepKey: string,
+    index: number,
+    patch: Partial<ExtractionReview["steps"][number]["systems"][number]>,
+  ) => {
+    const step = review.steps.find((item) => item.stepKey === stepKey);
+    if (!step) return;
+    updateStep(stepKey, {
+      systems: step.systems.map((system, itemIndex) =>
+        itemIndex === index ? { ...system, ...patch } : system,
+      ),
+    });
+  };
+
+  const addSystem = (stepKey: string) => {
+    const step = review.steps.find((item) => item.stepKey === stepKey);
+    if (!step) return;
+    updateStep(stepKey, {
+      systems: [
+        ...step.systems,
+        {
+          name: "",
+          interaction: "other",
+          evidence: "手動追加",
+        },
+      ],
+    });
+  };
+
+  const updateData = (
+    stepKey: string,
+    index: number,
+    patch: Partial<ExtractionReview["steps"][number]["data"][number]>,
+  ) => {
+    const step = review.steps.find((item) => item.stepKey === stepKey);
+    if (!step) return;
+    updateStep(stepKey, {
+      data: step.data.map((data, itemIndex) =>
+        itemIndex === index ? { ...data, ...patch } : data,
+      ),
+    });
+  };
+
+  const addData = (stepKey: string) => {
+    const step = review.steps.find((item) => item.stepKey === stepKey);
+    if (!step) return;
+    updateStep(stepKey, {
+      data: [
+        ...step.data,
+        {
+          name: "",
+          operation: "read",
+          evidence: "手動追加",
+        },
+      ],
+    });
+  };
+
+  const removeStepAsset = (
+    type: "system" | "data",
+    stepKey: string,
+    index: number,
+  ) => {
+    const label = type === "system" ? "System" : "Data";
+    if (!window.confirm(`この${label}参照を削除しますか？`)) return;
+    if (type === "system") removeSystem(stepKey, index);
+    else removeData(stepKey, index);
   };
 
   const removeSystem = (stepKey: string, index: number) => {
@@ -653,7 +801,29 @@ function ReviewPanel({
     });
   };
 
+  const addDataFlow = () => {
+    changeReview({
+      ...review,
+      dataFlows: [
+        ...review.dataFlows,
+        {
+          sourceSystem: "",
+          targetSystem: "",
+          data: [],
+          transferType: "unknown",
+          direction: "unknown",
+          automation: "unknown",
+          frequency: null,
+          evidence: "手動追加",
+          certainty: "explicit",
+          relatedStepKeys: [],
+        },
+      ],
+    });
+  };
+
   const removeDataFlow = (index: number) => {
+    if (!window.confirm("このSystem間データフローを削除しますか？")) return;
     changeReview({
       ...review,
       dataFlows: review.dataFlows.filter(
