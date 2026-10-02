@@ -45,6 +45,7 @@ type AssetFilter = "all" | "system" | "data";
 type PendingExtraction = {
   review: ExtractionReview;
   provider: string;
+  answers: Record<string, string>;
 };
 
 type StepNodeData = {
@@ -472,13 +473,17 @@ function ReviewPanel({
   onChange,
   onApply,
   onDiscard,
+  onRefine,
   applying,
+  refining,
 }: {
   pending: PendingExtraction | null;
   onChange: (pending: PendingExtraction) => void;
   onApply: () => void;
   onDiscard: () => void;
+  onRefine: () => void;
   applying: boolean;
+  refining: boolean;
 }) {
   if (!pending) {
     return (
@@ -502,6 +507,19 @@ function ReviewPanel({
 
   const changeReview = (nextReview: ExtractionReview) =>
     onChange({ ...pending, review: nextReview });
+
+  const changeAnswer = (question: string, answer: string) =>
+    onChange({
+      ...pending,
+      answers: {
+        ...pending.answers,
+        [question]: answer,
+      },
+    });
+
+  const hasFollowUpAnswers = review.questions.some(
+    (question) => (pending.answers[question.question] ?? "").trim().length > 0,
+  );
 
   const updateStep = (
     stepKey: string,
@@ -852,14 +870,33 @@ function ReviewPanel({
               <b>{review.questions.length}</b>
             </div>
             {review.questions.map((question, index) => (
-              <article key={question.question}>
+              <article key={question.question} className="followup-question">
                 <span>{String(index + 1).padStart(2, "0")}</span>
                 <div>
                   <strong>{question.question}</strong>
                   <small>{question.reason}</small>
+                  <textarea
+                    value={pending.answers[question.question] ?? ""}
+                    placeholder="ここに回答・補足を入力"
+                    onChange={(event) =>
+                      changeAnswer(question.question, event.target.value)
+                    }
+                  />
                 </div>
               </article>
             ))}
+            <div className="followup-refine">
+              <p>
+                回答は元のヒアリングへの追加情報としてAIに戻し、現在の手修正もできるだけ保持して下書きを更新します。
+              </p>
+              <button
+                className="button-secondary"
+                onClick={onRefine}
+                disabled={!hasFollowUpAnswers || refining || applying}
+              >
+                {refining ? "回答を反映中…" : "回答をAIに反映して再整理"}
+              </button>
+            </div>
           </div>
         ) : null}
       </div>
@@ -868,14 +905,14 @@ function ReviewPanel({
         <button
           className="button-secondary"
           onClick={onDiscard}
-          disabled={applying}
+          disabled={applying || refining}
         >
           破棄
         </button>
         <button
           className="button-primary"
           onClick={onApply}
-          disabled={applying || review.steps.length === 0}
+          disabled={applying || refining || review.steps.length === 0}
         >
           {applying ? "共有資産を照合中…" : "修正内容を反映"}
         </button>
@@ -910,6 +947,7 @@ function InterviewsView({
   onGraphApply: (graph: LensGraph) => void;
 }) {
   const [mapping, setMapping] = useState(false);
+  const [refining, setRefining] = useState(false);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -968,6 +1006,7 @@ function InterviewsView({
         body: JSON.stringify({
           interview,
           workflow,
+          graph,
         }),
       });
 
@@ -980,6 +1019,7 @@ function InterviewsView({
       setPending({
         review: payload.review,
         provider: payload.provider ?? "unknown",
+        answers: {},
       });
     } catch (cause) {
       setError(
@@ -987,6 +1027,59 @@ function InterviewsView({
       );
     } finally {
       setMapping(false);
+    }
+  }
+
+  async function refineDraft() {
+    if (!workflow || !pending) return;
+
+    const interview = transcripts[workflow.id]?.trim();
+    if (!interview) return;
+
+    const followUpAnswers = pending.review.questions
+      .map((question) => ({
+        question: question.question,
+        answer: pending.answers[question.question] ?? "",
+      }))
+      .filter((item) => item.answer.trim().length > 0);
+
+    if (followUpAnswers.length === 0) return;
+
+    setRefining(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/extract", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          interview,
+          workflow,
+          graph,
+          previousReview: pending.review,
+          followUpAnswers,
+        }),
+      });
+
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "追加回答の反映に失敗しました。");
+      }
+
+      setProvider(payload.provider ?? pending.provider);
+      setPending({
+        review: payload.review,
+        provider: payload.provider ?? pending.provider,
+        answers: {},
+      });
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "追加回答の反映に失敗しました。",
+      );
+    } finally {
+      setRefining(false);
     }
   }
 
@@ -1148,8 +1241,10 @@ function InterviewsView({
         pending={pending}
         onChange={setPending}
         onDiscard={() => setPending(null)}
+        onRefine={refineDraft}
         onApply={applyDraft}
         applying={applying}
+        refining={refining}
       />
     </section>
   );
