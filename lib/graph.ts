@@ -96,11 +96,19 @@ export type ExtractionReviewStep = {
   }>;
 };
 
+export type ExtractionTransition = {
+  fromStepKey: string;
+  toStepKey: string;
+  condition: string | null;
+  evidence: string;
+};
+
 export type ExtractionReview = {
   summary: string;
   trigger: string | null;
   outcome: string | null;
   steps: ExtractionReviewStep[];
+  transitions: ExtractionTransition[];
   questions: ExtractionQuestion[];
   warnings: string[];
 };
