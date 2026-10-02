@@ -33,6 +33,7 @@ import {
   type LensNode,
   type NodeKind,
   type OwnershipFilter,
+  type ProcessExecutionMode,
   type Relation,
   type SystemDataFlow,
   type Workflow,
@@ -81,6 +82,7 @@ type RevisionDetail = RevisionSummary & {
 type StepNodeData = {
   step: LensNode;
   systems: string[];
+  executingSystem?: string;
   data: Array<{ label: string; relation: Relation }>;
 };
 
@@ -92,6 +94,7 @@ const relationLabel: Record<Relation, string> = {
   reads: "参照",
   writes: "更新",
   sends: "送信",
+  executes: "自動実行",
 };
 
 const kindLabel: Record<NodeKind, string> = {
@@ -101,7 +104,20 @@ const kindLabel: Record<NodeKind, string> = {
 };
 
 function WorkflowStepCard({ data, selected }: NodeProps<WorkflowStepNode>) {
-  const { step, systems, data: dataAssets } = data;
+  const {
+    step,
+    systems,
+    executingSystem,
+    data: dataAssets,
+  } = data;
+
+  const executionMode = step.executionMode ?? "unknown";
+  const executionLabel: Record<ProcessExecutionMode, string> = {
+    manual: "👤 手作業",
+    automatic: "⚙ 自動",
+    mixed: "👤⚙ 人＋自動",
+    unknown: "? 実行不明",
+  };
 
   return (
     <div
@@ -109,6 +125,7 @@ function WorkflowStepCard({ data, selected }: NodeProps<WorkflowStepNode>) {
         "step-node",
         selected ? "step-node--selected" : "",
         step.status === "inferred" ? "step-node--inferred" : "",
+        `step-node--execution-${executionMode}`,
       ].join(" ")}
     >
       <Handle type="target" position={Position.Left} className="step-handle" />
@@ -130,6 +147,10 @@ function WorkflowStepCard({ data, selected }: NodeProps<WorkflowStepNode>) {
       <p>{step.action ?? step.description}</p>
 
       <div className="step-ownership">
+        <span className={`execution-badge execution-badge--${executionMode}`}>
+          {executionLabel[executionMode]}
+        </span>
+        {executingSystem ? <span>⚙ {executingSystem}</span> : null}
         {step.department ? <span>🏢 {step.department}</span> : null}
         {step.responsiblePerson ? (
           <span>👤 {step.responsiblePerson}</span>
@@ -188,8 +209,17 @@ function workflowFlow(
 
   const nodes: WorkflowStepNode[] = processes.map((step, index) => {
     const links = getProcessAssetLinks(graph, step.id);
+    const executingSystem = links.find(
+      (link) =>
+        link.asset.kind === "system" &&
+        link.relation === "executes",
+    )?.asset.label;
     const systems = links
-      .filter((link) => link.asset.kind === "system")
+      .filter(
+        (link) =>
+          link.asset.kind === "system" &&
+          link.relation !== "executes",
+      )
       .map((link) => link.asset.label);
     const data = links
       .filter((link) => link.asset.kind === "data")
@@ -205,7 +235,7 @@ function workflowFlow(
         x: index * 330,
         y: index % 2 === 0 ? 80 : 118,
       },
-      data: { step, systems, data },
+      data: { step, systems, executingSystem, data },
     };
   });
 
