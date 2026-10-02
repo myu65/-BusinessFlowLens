@@ -2,13 +2,13 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import {
-  getAssetUsages,
   getProcessAssetLinks,
   getWorkflowProcesses,
   type ExtractionReviewStep,
   type LensGraph,
   type LensNode,
 } from "@/lib/graph";
+import { BusinessOverview } from "./BusinessOverview";
 import { mergeAssets } from "@/lib/refinement";
 
 export function StepDetailEditor({
@@ -258,8 +258,6 @@ export function WorkflowExplorer({
   const workflow = graph.workflows.find((item) => item.id === workflowId);
   const steps = getWorkflowProcesses(graph, workflowId);
   const selected = steps.find((node) => node.id === stepId) ?? steps[0];
-  const systemLabel = (id: string) =>
-    graph.nodes.find((node) => node.id === id)?.label ?? "未確認";
   return (
     <div className="workflow-explorer">
       <div className="level-toolbar">
@@ -307,118 +305,11 @@ export function WorkflowExplorer({
         </>
       ) : null}
       {level === "overview" ? (
-        <section className="page-view bird-view">
-          <div className="eyebrow">まず、全体をつかむ</div>
-          <h1>業務はどこでつながっている？</h1>
-          <p>
-            共有システムは共通の接点です。実際の受け渡しは、記録済みのデータフローとして分けて表示します。
-          </p>
-          <div className="bird-grid">
-            {graph.workflows.map((item) => {
-              const processes = getWorkflowProcesses(graph, item.id);
-              const assets = new Map(
-                processes
-                  .flatMap((node) => getProcessAssetLinks(graph, node.id))
-                  .map((link) => [link.asset.id, link.asset]),
-              );
-              const shared = [...assets.values()].filter(
-                (node) =>
-                  new Set(
-                    getAssetUsages(graph, node.id).map(
-                      (usage) => usage.workflowId,
-                    ),
-                  ).size > 1,
-              );
-              return (
-                <article className="bird-card" key={item.id}>
-                  <small>
-                    {item.scenario === "future" ? "将来案" : "業務"} ·{" "}
-                    {processes.length}ステップ
-                  </small>
-                  <h2>{item.name}</h2>
-                  <p>{item.description || "概要はまだ未登録です"}</p>
-                  <div className="bird-journey">
-                    {processes.length
-                      ? `${processes[0].label} → ${processes.at(-1)!.label}`
-                      : "手順は未登録。メモから始められます。"}
-                  </div>
-                  <div className="bird-assets">
-                    {[...assets.values()]
-                      .filter((node) => node.kind === "system")
-                      .map((node) => (
-                        <span key={node.id}>
-                          {node.label}
-                          {shared.some((asset) => asset.id === node.id)
-                            ? " · 共有"
-                            : ""}
-                        </span>
-                      ))}
-                  </div>
-                  <p className="uncertainty-note">
-                    {
-                      processes.filter((node) => node.status !== "confirmed")
-                        .length
-                    }
-                    ステップが要確認 · 詳細あり{" "}
-                    {
-                      processes.filter(
-                        (node) =>
-                          node.technicalDetails?.length ||
-                          node.detailSteps?.length,
-                      ).length
-                    }
-                    件
-                  </p>
-                  <button
-                    onClick={() => {
-                      onSelectWorkflow(item.id);
-                      setStepId(null);
-                      setLevel("business");
-                    }}
-                  >
-                    手順を読む →
-                  </button>
-                </article>
-              );
-            })}
-          </div>
-          <section className="bird-transfers">
-            <h2>記録済みの受け渡し</h2>
-            {graph.dataFlows.length ? (
-              graph.dataFlows.map((flow) => (
-                <article key={flow.id}>
-                  <strong>
-                    {systemLabel(flow.sourceSystemId)} →{" "}
-                    {systemLabel(flow.targetSystemId)}
-                  </strong>
-                  <span>
-                    {flow.dataIds.map(systemLabel).join(" / ") ||
-                      "データ未確認"}{" "}
-                    ·{" "}
-                    {flow.automation === "manual"
-                      ? "手動"
-                      : flow.automation === "automatic"
-                        ? "自動"
-                        : "方式要確認"}
-                  </span>
-                  <small>
-                    {flow.workflowIds
-                      .map(
-                        (id) =>
-                          graph.workflows.find((item) => item.id === id)?.name,
-                      )
-                      .join(" / ")}{" "}
-                    · {flow.evidence || "根拠未確認"}
-                  </small>
-                </article>
-              ))
-            ) : (
-              <p>
-                受け渡しは未登録です。システムを共有しているだけでは、連携があるとは決めません。
-              </p>
-            )}
-          </section>
-        </section>
+        <BusinessOverview graph={graph} onEdit={onEdit} onOpen={(id) => {
+          onSelectWorkflow(id);
+          setStepId(null);
+          setLevel("business");
+        }} />
       ) : null}
       {level === "detail" ? (
         <section className="page-view">
