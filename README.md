@@ -274,3 +274,36 @@ Current feature work is tracked in issue #2 / PR #3.
 Process steps can carry a department/team and responsible person separately from the generic actor/role. Workflow, Data Flow, Asset Impact, and Cross-business views can be filtered by those fields.
 
 Clicking a Process/System/Data node opens a node-centered relationship explorer instead of expanding the entire company graph. The panel shows the immediate relevant neighborhood and lets users continue navigating through related nodes and data flows.
+
+
+## System-internal automation
+
+Workflow Process steps distinguish *who/what executes the work* from who owns it.
+
+```text
+executionMode = manual | automatic | mixed | unknown
+executingSystem = optional System mention
+```
+
+Examples:
+
+- "営業がSAPへ入力" → manual Process using SAP.
+- "SAPが自動で在庫を引き当てる" → automatic Process executed by SAP.
+- "担当者が承認するとERPが自動計上する" → mixed or separate manual/automatic steps depending on the described business meaning.
+
+System-internal automatic execution is intentionally different from System-to-System Data Flow. A System performing work internally is a Process execution concern; information moving between Systems is a Data Flow concern.
+
+## Business Input UX
+
+The working-model editor supports direct editing without requiring another AI pass:
+
+- add/delete/reorder Process steps
+- edit execution mode and executing System
+- edit role, department, and responsible person
+- add/edit/remove System references and interactions
+- add/edit/remove Data references and operations
+- edit step-to-step transitions and branch conditions
+- add/edit/remove System-to-System Data Flows
+- collapsible model sections and a wider editor layout
+- confirmation for destructive edits
+- execution-mode filtering in Workflow view
