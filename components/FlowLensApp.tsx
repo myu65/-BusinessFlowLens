@@ -31,7 +31,6 @@ type Section = "interviews" | "workflow" | "assets" | "overview";
 type AssetFilter = "all" | "system" | "data";
 
 type PendingExtraction = {
-  previewGraph: LensGraph;
   review: ExtractionReview;
   provider: string;
 };
@@ -253,12 +252,16 @@ function WorkflowPicker({
 
 function ReviewPanel({
   pending,
+  onChange,
   onApply,
   onDiscard,
+  applying,
 }: {
   pending: PendingExtraction | null;
+  onChange: (pending: PendingExtraction) => void;
   onApply: () => void;
   onDiscard: () => void;
+  applying: boolean;
 }) {
   if (!pending) {
     return (
@@ -267,12 +270,12 @@ function ReviewPanel({
         <h2>まず下書きを作る</h2>
         <p>
           AIは直接グラフを書き換えません。ヒアリングから業務ステップ、
-          System/Data、分岐、未確認事項を根拠付きで抽出し、ここで確認してから反映します。
+          System/Data、分岐、未確認事項を根拠付きで抽出します。
         </p>
         <div className="review-principles">
           <span>01 事実を先に抽出</span>
-          <span>02 共有資産の同一性は別判定</span>
-          <span>03 不明点は推測せず質問</span>
+          <span>02 人が下書きを修正</span>
+          <span>03 修正後に共有資産を照合</span>
         </div>
       </aside>
     );
@@ -280,65 +283,180 @@ function ReviewPanel({
 
   const { review } = pending;
 
+  const changeReview = (nextReview: ExtractionReview) =>
+    onChange({ ...pending, review: nextReview });
+
+  const updateStep = (
+    stepKey: string,
+    patch: Partial<ExtractionReview["steps"][number]>,
+  ) => {
+    changeReview({
+      ...review,
+      steps: review.steps.map((step) =>
+        step.stepKey === stepKey ? { ...step, ...patch } : step,
+      ),
+    });
+  };
+
+  const removeStep = (stepKey: string) => {
+    changeReview({
+      ...review,
+      steps: review.steps
+        .filter((step) => step.stepKey !== stepKey)
+        .map((step, index) => ({ ...step, order: index + 1 })),
+      transitions: review.transitions.filter(
+        (transition) =>
+          transition.fromStepKey !== stepKey &&
+          transition.toStepKey !== stepKey,
+      ),
+    });
+  };
+
+  const removeSystem = (stepKey: string, index: number) => {
+    const step = review.steps.find((item) => item.stepKey === stepKey);
+    if (!step) return;
+    updateStep(stepKey, {
+      systems: step.systems.filter((_, itemIndex) => itemIndex !== index),
+    });
+  };
+
+  const removeData = (stepKey: string, index: number) => {
+    const step = review.steps.find((item) => item.stepKey === stepKey);
+    if (!step) return;
+    updateStep(stepKey, {
+      data: step.data.filter((_, itemIndex) => itemIndex !== index),
+    });
+  };
+
   return (
     <aside className="review-panel">
       <div className="review-header">
         <div>
-          <div className="eyebrow">AI DRAFT / REVIEW BEFORE APPLY</div>
-          <h2>抽出結果を確認</h2>
+          <div className="eyebrow">AI DRAFT / EDIT BEFORE APPLY</div>
+          <h2>抽出結果を直してから反映</h2>
         </div>
         <span className="provider-badge">{pending.provider}</span>
       </div>
 
-      <div className="review-summary">
-        <strong>{review.summary}</strong>
-        <dl>
-          <div>
-            <dt>開始</dt>
-            <dd>{review.trigger ?? "未確認"}</dd>
-          </div>
-          <div>
-            <dt>完了</dt>
-            <dd>{review.outcome ?? "未確認"}</dd>
-          </div>
-        </dl>
+      <div className="review-summary review-summary--editable">
+        <label>
+          <span>業務の要約</span>
+          <textarea
+            value={review.summary}
+            onChange={(event) =>
+              changeReview({ ...review, summary: event.target.value })
+            }
+          />
+        </label>
+        <div className="review-summary-fields">
+          <label>
+            <span>開始条件</span>
+            <input
+              value={review.trigger ?? ""}
+              placeholder="未確認"
+              onChange={(event) =>
+                changeReview({
+                  ...review,
+                  trigger: event.target.value || null,
+                })
+              }
+            />
+          </label>
+          <label>
+            <span>完了状態</span>
+            <input
+              value={review.outcome ?? ""}
+              placeholder="未確認"
+              onChange={(event) =>
+                changeReview({
+                  ...review,
+                  outcome: event.target.value || null,
+                })
+              }
+            />
+          </label>
+        </div>
       </div>
 
       <div className="review-scroll">
         <div className="review-section-title">
-          <span>抽出ステップ</span>
+          <span>抽出ステップ — 誤りはここで直す</span>
           <b>{review.steps.length}</b>
         </div>
 
         <div className="review-steps">
           {review.steps.map((step) => (
-            <article key={step.stepKey} className="review-step">
+            <article key={step.stepKey} className="review-step review-step--editable">
               <div className="review-step__top">
                 <span>{String(step.order).padStart(2, "0")}</span>
-                <b>{step.name}</b>
-                <i>{step.certainty === "explicit" ? "明示" : "推定"}</i>
+                <input
+                  className="review-step-name"
+                  value={step.name}
+                  onChange={(event) =>
+                    updateStep(step.stepKey, { name: event.target.value })
+                  }
+                />
+                <button
+                  className="review-delete"
+                  title="このステップを除外"
+                  onClick={() => removeStep(step.stepKey)}
+                >
+                  ×
+                </button>
               </div>
-              <p>{step.action}</p>
-              <small>
-                {step.actor ? `担当: ${step.actor} · ` : ""}
-                根拠: {step.evidence || "—"}
-              </small>
+
+              <textarea
+                className="review-step-action"
+                value={step.action}
+                onChange={(event) =>
+                  updateStep(step.stepKey, { action: event.target.value })
+                }
+              />
+
+              <div className="review-step-meta">
+                <input
+                  value={step.actor ?? ""}
+                  placeholder="担当者・部署 未確認"
+                  onChange={(event) =>
+                    updateStep(step.stepKey, {
+                      actor: event.target.value || null,
+                    })
+                  }
+                />
+                <span>
+                  {step.certainty === "explicit" ? "明示" : "AI推定"} · 根拠:{" "}
+                  {step.evidence || "—"}
+                </span>
+              </div>
+
               {(step.systems.length > 0 || step.data.length > 0) && (
-                <div className="review-assets">
-                  {step.systems.map((system) => (
+                <div className="review-assets review-assets--editable">
+                  {step.systems.map((system, index) => (
                     <span
-                      key={`s-${system.name}`}
+                      key={`s-${system.name}-${index}`}
                       className="asset-chip asset-chip--system"
                     >
                       {system.name} · {system.interaction}
+                      <button
+                        title="誤抽出なら除外"
+                        onClick={() => removeSystem(step.stepKey, index)}
+                      >
+                        ×
+                      </button>
                     </span>
                   ))}
-                  {step.data.map((data) => (
+                  {step.data.map((data, index) => (
                     <span
-                      key={`d-${data.name}-${data.operation}`}
+                      key={`d-${data.name}-${data.operation}-${index}`}
                       className="asset-chip asset-chip--data"
                     >
                       {data.name} · {data.operation}
+                      <button
+                        title="誤抽出なら除外"
+                        onClick={() => removeData(step.stepKey, index)}
+                      >
+                        ×
+                      </button>
                     </span>
                   ))}
                 </div>
@@ -350,7 +468,7 @@ function ReviewPanel({
         {review.warnings.length > 0 ? (
           <div className="review-warning">
             <div className="review-section-title">
-              <span>要確認</span>
+              <span>AIが迷っているところ</span>
               <b>{review.warnings.length}</b>
             </div>
             {review.warnings.map((warning) => (
@@ -362,7 +480,7 @@ function ReviewPanel({
         {review.questions.length > 0 ? (
           <div className="review-questions">
             <div className="review-section-title">
-              <span>次に聞くこと</span>
+              <span>次に聞くと精度が上がること</span>
               <b>{review.questions.length}</b>
             </div>
             {review.questions.map((question, index) => (
@@ -379,11 +497,19 @@ function ReviewPanel({
       </div>
 
       <div className="review-actions">
-        <button className="button-secondary" onClick={onDiscard}>
+        <button
+          className="button-secondary"
+          onClick={onDiscard}
+          disabled={applying}
+        >
           破棄
         </button>
-        <button className="button-primary" onClick={onApply}>
-          この内容で反映
+        <button
+          className="button-primary"
+          onClick={onApply}
+          disabled={applying || review.steps.length === 0}
+        >
+          {applying ? "共有資産を照合中…" : "修正内容を反映"}
         </button>
       </div>
     </aside>
