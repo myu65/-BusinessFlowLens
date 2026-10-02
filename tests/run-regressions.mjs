@@ -23,10 +23,9 @@ const env = {
   NEXT_TELEMETRY_DISABLED: "1",
 };
 
-const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const server = spawn(
-  npmCommand,
-  ["run", "start", "--", "-p", port],
+  process.execPath,
+  [path.resolve("node_modules/next/dist/bin/next"), "start", "-p", port],
   {
     env,
     stdio: ["ignore", "pipe", "pipe"],

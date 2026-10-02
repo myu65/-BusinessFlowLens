@@ -276,6 +276,28 @@ Process steps can carry a department/team and responsible person separately from
 Clicking a Process/System/Data node opens a node-centered relationship explorer instead of expanding the entire company graph. The panel shows the immediate relevant neighborhood and lets users continue navigating through related nodes and data flows.
 
 
+## Progressive understanding (Issue #6)
+
+The Workflow screen opens at **鳥瞰**: select the scope and topic to inspect business classifications, product perspectives, common processes/site variants, material/data continuity, or business data usage. Select **手順を読む** to open **業務通常**, then switch to **詳細** to inspect the selected step's child operations, conditions and technical information. All three views read the same saved graph; changing the view does not edit it.
+
+In Business Input, expand **詳細を補足する** on a step to record ordered child operations and optional SAP module, transaction/app, HANA area/schema, physical table/view and evidence. Multiple technical records can be attached to a step. Unknown fields remain empty; existing graphs migrate automatically through the SQLite `details_json` column. Revisions retain these details.
+
+In System / Data, expand **同じシステム・データの表記を統合する**, choose a destination and inspect the affected workflows, steps and transfers. Confirm that the assets represent the same environment before applying. The original name is retained as a confirmed alias; subsequent extraction/application and search can reuse it. Different environments remain separate unless the user explicitly merges them. Individual workflows and recorded transfers are retained.
+
+Without an AI endpoint, extraction segments the original notes and labels the result as a candidate requiring review. It does not invent domain-specific transactions, owners or integrations. Explicit technical labels such as `トランザクション: Z_ORDER、スキーマ: BUSINESS、ビュー: ORDER_VIEW` can be recorded locally. Local follow-up answers are retained as evidence; semantic refinement requires the AI connection. Human detail records are protected during AI refinement, with conflicts surfaced for review.
+
+### Validation
+
+```bash
+npm test
+npm run typecheck
+npm run build
+```
+
+`tests/refinement.test.ts` covers ambiguous input, separate SAP environments, merge references and aliases, preservation of manual refinements, SQLite migration/revisions, and both supported AI protocol adapters using mock servers. CI runs these tests.
+
+`tests/live-openrouter.ts` is an opt-in live check using synthetic notes. Set `AI_PROTOCOL=openai`, `AI_BASE_URL=https://openrouter.ai/api/v1`, `AI_MODEL=openai/gpt-6-luna` and `AI_API_KEY` in the process environment, then run `npx tsx tests/live-openrouter.ts`. Credentials are never logged or written to the results. Synthetic results are saved under the ignored `.data/qa-issue6/` directory.
+
 ## System-internal automation
 
 Workflow Process steps distinguish *who/what executes the work* from who owns it.
@@ -307,3 +329,10 @@ The working-model editor supports direct editing without requiring another AI pa
 - collapsible model sections and a wider editor layout
 - confirmation for destructive edits
 - execution-mode filtering in Workflow view
+
+
+## Scoped business landscapes (Issue #7)
+
+Register multiple business domains, site, product identity/perspective, common process identity, implementation differences and material handoffs in the overview editor. Filter the scope, follow direct relationships, and pin workflows of interest. Preferences are retained in the current browser. Material handoffs distinguish verified data correspondence, verified breaks, and unknown correspondence; missing records do not prove a break. Site implementations keep separate process steps linked by an explicit common-process ID.
+
+See [overview design](docs/overview-design.md) and [landscape design](docs/landscape-design.md) for research, interpretation boundaries, persistence and examples. Run `npm test`, `npm run typecheck`, `npm run build`, and `npm run test:regression` for local validation.

@@ -1,5 +1,7 @@
 "use client";
 
+import { AssetMergePanel, StepDetailEditor, TechnicalDetails, WorkflowExplorer } from "./ProgressiveWorkflow";
+
 import { useEffect, useMemo, useState } from "react";
 import {
   Background,
@@ -247,7 +249,7 @@ function workflowFlow(
         x: index * 330,
         y: index % 2 === 0 ? 80 : 118,
       },
-      data: { step, systems, executingSystem, data },
+      data: { step: { ...step, stepOrder: step.stepOrder ?? index + 1 }, systems, executingSystem, data },
     };
   });
 
@@ -450,6 +452,7 @@ function RelationshipPanel({
       ) : null}
 
       <p>{node.description}</p>
+      {node.kind === "process" ? <TechnicalDetails node={node} /> : null}
 
       <div className="relationship-section">
         <header>
@@ -987,6 +990,29 @@ function ReviewPanel({
                   <span>
                     <strong>{step.name}</strong>
                     <small>
+                      {(step.detailSteps ?? [])
+                        .map(
+                          (detail) =>
+                            `${detail.action}${detail.condition ? `（${detail.condition}）` : ""}`,
+                        )
+                        .join(" → ")}
+                    </small>
+                    {(step.technicalDetails ?? []).map((detail, index) => (
+                      <small key={index}>
+                        {[
+                          detail.system,
+                          detail.module,
+                          detail.transaction,
+                          detail.hanaArea,
+                          detail.objects,
+                        ]
+                          .filter(Boolean)
+                          .join(" / ")}{" "}
+                        · 根拠：{detail.evidence || "未確認"}
+                      </small>
+                    ))}
+
+                    <small>
                       {step.department ?? "部署未確認"} ·{" "}
                       {step.responsiblePerson ?? step.actor ?? "担当未確認"}
                     </small>
@@ -1165,6 +1191,7 @@ function ReviewPanel({
                   />
                 </div>
 
+                <StepDetailEditor step={step} onChange={patch => updateStep(step.stepKey, patch)} />
                 <div className="review-evidence">
                   {step.certainty === "explicit" ? "明示" : "AI推定"} · 根拠:{" "}
                   {step.evidence || "—"}
@@ -1736,7 +1763,7 @@ function InterviewsView({
           review: buildWorkflowReviewFromGraph(graph, workflow.id),
           provider: "current-state",
           answers: {},
-          answerHistory: [],
+          answerHistory: workflow.reviewContext?.followUpAnswers ?? [],
         }
       : null;
 
@@ -2321,7 +2348,7 @@ function InterviewsView({
         <div className="business-notes-label">
           <span>ヒアリング / 業務メモ</span>
           <small>
-            会話メモ、手順、PDF転記などの補足をそのまま入力できます。
+            ざっくりしたメモで大丈夫です。不明な項目はあとから補足できます。SAPやHANAの詳細も追記できます。
           </small>
         </div>
 
@@ -2388,10 +2415,14 @@ function WorkflowView({
   graph,
   workflowId,
   setWorkflowId,
+  onEdit,
+  onGraphApply,
 }: {
   graph: LensGraph;
   workflowId: string;
   setWorkflowId: (id: string) => void;
+  onEdit: () => void;
+  onGraphApply: (graph: LensGraph) => void;
 }) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [ownership, setOwnership] = useState<OwnershipState>({
@@ -2434,6 +2465,7 @@ function WorkflowView({
   }
 
   return (
+    <WorkflowExplorer graph={graph} workflowId={workflowId} selectedStepId={selectedNode?.kind === "process" ? selectedNode.id : undefined} onSelectWorkflow={setWorkflowId} onEdit={onEdit} onGraphApply={onGraphApply}>
     <section className="page-view">
       <header className="page-header page-header--stackable">
         <div>
@@ -2547,10 +2579,11 @@ function WorkflowView({
         </div>
       )}
     </section>
+    </WorkflowExplorer>
   );
 }
 
-function AssetsView({ graph }: { graph: LensGraph }) {
+function AssetsView({ graph, onGraphApply }: { graph: LensGraph; onGraphApply: (graph: LensGraph) => void }) {
   const [filter, setFilter] = useState<AssetFilter>("all");
   const [search, setSearch] = useState("");
   const [ownership, setOwnership] = useState<OwnershipState>({
@@ -2583,6 +2616,7 @@ function AssetsView({ graph }: { graph: LensGraph }) {
         (filter === "all" || node.kind === filter) &&
         (!search.trim() ||
           node.label.toLowerCase().includes(search.trim().toLowerCase()) ||
+          (node.aliases ?? []).some(alias => alias.toLowerCase().includes(search.trim().toLowerCase())) ||
           node.description
             .toLowerCase()
             .includes(search.trim().toLowerCase())),
@@ -2707,6 +2741,8 @@ function AssetsView({ graph }: { graph: LensGraph }) {
                 </div>
               </div>
 
+              {selected.node.aliases?.length ? <p className="asset-aliases">確認済みの別名：{selected.node.aliases.join(" / ")}</p> : null}
+              <AssetMergePanel key={selected.node.id} graph={graph} source={selected.node} onApply={onGraphApply} />
               <div className="impact-workflows">
                 {[...workflowGroups.entries()].map(
                   ([workflowId, usages]) => (
@@ -3440,12 +3476,14 @@ function Workspace() {
           graph={graph}
           workflowId={selectedWorkflowId}
           setWorkflowId={setSelectedWorkflowId}
+          onEdit={() => setSection("interviews")}
+          onGraphApply={setGraph}
         />
       ) : null}
 
       {section === "dataflow" ? <DataFlowView graph={graph} /> : null}
 
-      {section === "assets" ? <AssetsView graph={graph} /> : null}
+      {section === "assets" ? <AssetsView graph={graph} onGraphApply={setGraph} /> : null}
       {section === "overview" ? <OverviewView graph={graph} /> : null}
     </main>
   );
