@@ -1109,6 +1109,14 @@ function InterviewsView({
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [newDescription, setNewDescription] = useState("");
+  const [branching, setBranching] = useState(false);
+  const [branchName, setBranchName] = useState("");
+  const [branchLabel, setBranchLabel] = useState("将来案");
+  const [branchEffectiveFrom, setBranchEffectiveFrom] = useState("");
+  const [revisions, setRevisions] = useState<RevisionSummary[]>([]);
+  const [historyDetail, setHistoryDetail] =
+    useState<RevisionDetail | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   const workflow = graph.workflows.find(
     (item) => item.id === selectedWorkflowId,
@@ -1118,10 +1126,72 @@ function InterviewsView({
     : 0;
   const isStructured = existingProcessCount > 0;
 
-  function updateWorkflowMeta(patch: {
-    name?: string;
-    description?: string;
-  }) {
+  const currentModel: PendingExtraction | null =
+    workflow && isStructured
+      ? {
+          review: buildWorkflowReviewFromGraph(graph, workflow.id),
+          provider: "current-state",
+          answers: {},
+        }
+      : null;
+
+  const model = pending ?? currentModel;
+
+  async function refreshHistory(workflowId = selectedWorkflowId) {
+    if (!workflowId) {
+      setRevisions([]);
+      return;
+    }
+
+    setHistoryLoading(true);
+    try {
+      const response = await fetch(
+        `/api/workflow-revisions?projectId=default&workflowId=${encodeURIComponent(
+          workflowId,
+        )}`,
+        { cache: "no-store" },
+      );
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "更新履歴の読込に失敗しました。");
+      }
+
+      setRevisions(payload.revisions ?? []);
+    } catch (cause) {
+      console.error(cause);
+      setRevisions([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    setHistoryDetail(null);
+    void refreshHistory(selectedWorkflowId);
+  }, [selectedWorkflowId]);
+
+  async function openRevision(revisionId: number) {
+    try {
+      const response = await fetch(
+        `/api/workflow-revisions?projectId=default&revisionId=${revisionId}`,
+        { cache: "no-store" },
+      );
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "履歴の読込に失敗しました。");
+      }
+
+      setHistoryDetail(payload.revision ?? null);
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : "履歴の読込に失敗しました。",
+      );
+    }
+  }
+
+  function updateWorkflowMeta(patch: Partial<Workflow>) {
     if (!workflow) return;
 
     onGraphApply({
@@ -1131,13 +1201,15 @@ function InterviewsView({
           ? {
               ...item,
               ...patch,
+              familyId:
+                patch.familyId ?? item.familyId ?? item.id,
             }
           : item,
       ),
     });
   }
 
-  function createInterview() {
+  function createBusiness() {
     const name = newName.trim();
     if (!name) return;
 
@@ -1153,6 +1225,8 @@ function InterviewsView({
         ...graph.workflows,
         {
           id,
+          familyId: id,
+          scenario: "current",
           name,
           description: newDescription.trim() || undefined,
         },
@@ -1166,17 +1240,59 @@ function InterviewsView({
     setPending(null);
   }
 
+  function createScenarioBranch() {
+    if (!workflow) return;
+
+    const name =
+      branchName.trim() || `${workflow.name}（${branchLabel || "将来案"}）`;
+    const base = slugifyWorkflow(
+      `${workflow.id}-${branchLabel || "future"}`,
+    );
+    const ids = new Set(graph.workflows.map((item) => item.id));
+    let id = base;
+    let suffix = 2;
+    while (ids.has(id)) id = `${base}-${suffix++}`;
+
+    const nextWorkflow: Workflow = {
+      id,
+      name,
+      description: workflow.description,
+      familyId: workflow.familyId ?? workflow.id,
+      scenario: "future",
+      scenarioLabel: branchLabel.trim() || "将来案",
+      basedOnWorkflowId: workflow.id,
+      effectiveFrom: branchEffectiveFrom || undefined,
+    };
+
+    const nextGraph = branchWorkflowScenario(
+      graph,
+      workflow.id,
+      nextWorkflow,
+    );
+
+    onGraphApply(nextGraph);
+    setTranscripts((current) => ({
+      ...current,
+      [id]: current[workflow.id] ?? "",
+    }));
+    setSelectedWorkflowId(id);
+    setPending(null);
+    setBranching(false);
+    setBranchName("");
+    setBranchLabel("将来案");
+    setBranchEffectiveFrom("");
+  }
+
   async function extract() {
     if (!workflow) return;
     const interview = transcripts[workflow.id]?.trim();
     if (!interview) {
-      setError("ヒアリング内容を入力してください。");
+      setError("ヒアリング / 業務メモを入力してください。");
       return;
     }
 
     setMapping(true);
     setError(null);
-    setPending(null);
 
     try {
       const response = await fetch("/api/extract", {
@@ -1186,12 +1302,13 @@ function InterviewsView({
           interview,
           workflow,
           graph,
+          previousReview: model?.review ?? null,
         }),
       });
 
       const payload = await response.json();
       if (!response.ok) {
-        throw new Error(payload?.error ?? "抽出に失敗しました。");
+        throw new Error(payload?.error ?? "構造更新に失敗しました。");
       }
 
       setProvider(payload.provider ?? "unknown");
@@ -1202,7 +1319,7 @@ function InterviewsView({
       });
     } catch (cause) {
       setError(
-        cause instanceof Error ? cause.message : "抽出に失敗しました。",
+        cause instanceof Error ? cause.message : "構造更新に失敗しました。",
       );
     } finally {
       setMapping(false);
@@ -1273,28 +1390,41 @@ function InterviewsView({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          projectId: "default",
+          projectName: "BusinessFlowLens",
           review: pending.review,
           workflow,
           graph,
+          transcripts,
+          sourceNotes: transcripts[workflow.id] ?? "",
         }),
       });
 
       const payload = await response.json();
       if (!response.ok) {
-        throw new Error(payload?.error ?? "反映に失敗しました。");
+        throw new Error(payload?.error ?? "保存に失敗しました。");
       }
 
       onGraphApply(payload.graph);
       setProvider(payload.provider ?? pending.provider);
       setPending(null);
+      setHistoryDetail(null);
+      void refreshHistory(workflow.id);
     } catch (cause) {
       setError(
-        cause instanceof Error ? cause.message : "反映に失敗しました。",
+        cause instanceof Error ? cause.message : "保存に失敗しました。",
       );
     } finally {
       setApplying(false);
     }
   }
+
+  const scenarioLabel = (item: Workflow) => {
+    if (item.scenarioLabel) return item.scenarioLabel;
+    if (item.scenario === "future") return "将来";
+    if (item.scenario === "alternative") return "代替案";
+    return "現行";
+  };
 
   return (
     <section className="interview-layout">
@@ -1326,7 +1456,7 @@ function InterviewsView({
               value={newDescription}
               onChange={(event) => setNewDescription(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === "Enter") createInterview();
+                if (event.key === "Enter") createBusiness();
               }}
             />
             <div>
@@ -1339,7 +1469,7 @@ function InterviewsView({
               <button
                 className="button-primary"
                 disabled={!newName.trim()}
-                onClick={createInterview}
+                onClick={createBusiness}
               >
                 作成
               </button>
@@ -1358,11 +1488,15 @@ function InterviewsView({
                   setSelectedWorkflowId(item.id);
                   setPending(null);
                   setError(null);
+                  setBranching(false);
                 }}
               >
                 <span>
                   <strong>{item.name}</strong>
-                  <small>{item.description ?? "説明なし"}</small>
+                  <small>
+                    {scenarioLabel(item)}
+                    {item.effectiveFrom ? ` · ${item.effectiveFrom}〜` : ""}
+                  </small>
                 </span>
                 <b>{processCount || "—"}</b>
               </button>
@@ -1375,9 +1509,9 @@ function InterviewsView({
         <div className="editor-header">
           <div>
             <div className="eyebrow">BUSINESS INPUT</div>
-            <h1>{isStructured ? "既存業務を更新" : "業務を入力"}</h1>
+            <h1>{isStructured ? "業務を更新" : "業務を入力"}</h1>
             <p>
-              業務情報とヒアリングメモを更新し、AI下書きを確認して同じ業務モデルへ反映します。
+              左に業務情報とメモ、右に現在の構造。AIは右側の現在構造を更新・補完します。
             </p>
           </div>
           <div className="editor-status">
@@ -1391,38 +1525,147 @@ function InterviewsView({
         </div>
 
         {workflow ? (
-          <div className="workflow-meta-editor">
-            <label>
-              <span>業務名</span>
-              <input
-                value={workflow.name}
-                onChange={(event) =>
-                  updateWorkflowMeta({
-                    name: event.target.value,
-                  })
-                }
-                placeholder="例: 受注業務"
-              />
-            </label>
-            <label>
-              <span>概要</span>
-              <input
-                value={workflow.description ?? ""}
-                onChange={(event) =>
-                  updateWorkflowMeta({
-                    description: event.target.value,
-                  })
-                }
-                placeholder="例: 注文書受領から出荷手配まで"
-              />
-            </label>
-          </div>
+          <>
+            <div className="workflow-meta-editor workflow-meta-editor--scenario">
+              <label>
+                <span>業務名</span>
+                <input
+                  value={workflow.name}
+                  onChange={(event) =>
+                    updateWorkflowMeta({
+                      name: event.target.value,
+                    })
+                  }
+                  placeholder="例: 受注業務"
+                />
+              </label>
+              <label>
+                <span>概要</span>
+                <input
+                  value={workflow.description ?? ""}
+                  onChange={(event) =>
+                    updateWorkflowMeta({
+                      description: event.target.value,
+                    })
+                  }
+                  placeholder="例: 注文書受領から出荷手配まで"
+                />
+              </label>
+              <label>
+                <span>シナリオ</span>
+                <select
+                  value={workflow.scenario ?? "current"}
+                  onChange={(event) =>
+                    updateWorkflowMeta({
+                      scenario: event.target.value as WorkflowScenario,
+                    })
+                  }
+                >
+                  <option value="current">現行</option>
+                  <option value="future">将来案</option>
+                  <option value="alternative">代替案</option>
+                </select>
+              </label>
+              <label>
+                <span>シナリオ名</span>
+                <input
+                  value={workflow.scenarioLabel ?? ""}
+                  onChange={(event) =>
+                    updateWorkflowMeta({
+                      scenarioLabel: event.target.value || undefined,
+                    })
+                  }
+                  placeholder="例: SAP刷新後"
+                />
+              </label>
+              <label>
+                <span>有効開始日</span>
+                <input
+                  type="date"
+                  value={workflow.effectiveFrom ?? ""}
+                  onChange={(event) =>
+                    updateWorkflowMeta({
+                      effectiveFrom: event.target.value || undefined,
+                    })
+                  }
+                />
+              </label>
+              <label>
+                <span>有効終了日</span>
+                <input
+                  type="date"
+                  value={workflow.effectiveTo ?? ""}
+                  onChange={(event) =>
+                    updateWorkflowMeta({
+                      effectiveTo: event.target.value || undefined,
+                    })
+                  }
+                />
+              </label>
+              {isStructured ? (
+                <div className="scenario-branch-action">
+                  <button
+                    className="button-secondary"
+                    onClick={() => setBranching((value) => !value)}
+                  >
+                    将来案を分岐
+                  </button>
+                  {workflow.basedOnWorkflowId ? (
+                    <small>
+                      分岐元:{" "}
+                      {graph.workflows.find(
+                        (item) => item.id === workflow.basedOnWorkflowId,
+                      )?.name ?? workflow.basedOnWorkflowId}
+                    </small>
+                  ) : (
+                    <small>
+                      family: {workflow.familyId ?? workflow.id}
+                    </small>
+                  )}
+                </div>
+              ) : null}
+            </div>
+
+            {branching ? (
+              <div className="scenario-branch-form">
+                <div>
+                  <strong>現在の構造から将来案を作成</strong>
+                  <small>
+                    Process構造をコピーし、共有System/Dataはそのまま参照します。
+                  </small>
+                </div>
+                <input
+                  value={branchName}
+                  onChange={(event) => setBranchName(event.target.value)}
+                  placeholder={`${workflow.name}（将来案）`}
+                />
+                <input
+                  value={branchLabel}
+                  onChange={(event) => setBranchLabel(event.target.value)}
+                  placeholder="シナリオ名"
+                />
+                <input
+                  type="date"
+                  value={branchEffectiveFrom}
+                  onChange={(event) =>
+                    setBranchEffectiveFrom(event.target.value)
+                  }
+                />
+                <button
+                  className="button-primary"
+                  onClick={createScenarioBranch}
+                >
+                  分岐を作成
+                </button>
+              </div>
+            ) : null}
+          </>
         ) : null}
 
         <div className="business-notes-label">
           <span>ヒアリング / 業務メモ</span>
           <small>
-            会話のメモ、既存手順、補足情報をそのまま入力できます。
+            会話メモ、手順、PDF転記などの補足をそのまま入力できます。
           </small>
         </div>
 
@@ -1433,11 +1676,10 @@ function InterviewsView({
               ...current,
               [selectedWorkflowId]: event.target.value,
             }));
-            setPending(null);
           }}
           placeholder="例:
-営業がメールで注文書を受け取ります。
-内容を確認してExcelに入力し、その後ERPにも登録しています…"
+営業がメールで注文書PDFを受け取ります。
+PDFを見ながらSAPに受注内容を入力します…"
         />
 
         {error ? <div className="error-message">{error}</div> : null}
@@ -1445,8 +1687,8 @@ function InterviewsView({
         <div className="editor-footer">
           <p>
             {isStructured
-              ? "現在の業務構造を直接壊さず、新しい下書きをレビューしてから同じ業務IDへ更新します。"
-              : "まずAI下書きを作り、レビューしてから新しい業務構造として反映します。"}
+              ? "保存済み構造を右に表示しています。メモを更新してAIで再整理するか、右側を直接編集できます。"
+              : "業務メモからAIで構造化すると、右側に編集可能な業務モデルを作ります。"}
           </p>
           <button
             className="button-primary button-primary--large"
@@ -1460,20 +1702,26 @@ function InterviewsView({
             {mapping
               ? "構造を読み取り中…"
               : isStructured
-                ? "AIで構造を更新"
+                ? "AIで現在構造を更新"
                 : "AIで構造化"}
           </button>
         </div>
       </main>
 
       <ReviewPanel
-        pending={pending}
+        model={model}
+        dirty={Boolean(pending)}
         onChange={setPending}
         onDiscard={() => setPending(null)}
         onRefine={refineDraft}
         onApply={applyDraft}
         applying={applying}
         refining={refining}
+        revisions={revisions}
+        historyDetail={historyDetail}
+        historyLoading={historyLoading}
+        onOpenRevision={openRevision}
+        onCloseHistory={() => setHistoryDetail(null)}
       />
     </section>
   );
