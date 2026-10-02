@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:regression": "node tests/run-regressions.mjs"
   },
   "dependencies": {
     "@xyflow/react": "^12.8.0",
