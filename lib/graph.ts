@@ -123,6 +123,11 @@ export type ExtractionQuestion = {
     | "scope";
 };
 
+export type FollowUpAnswer = {
+  question: string;
+  answer: string;
+};
+
 export type ExtractionReviewStep = {
   stepKey: string;
   name: string;
