@@ -914,6 +914,71 @@ export function createDemoGraph(): LensGraph {
     );
   }
 
+  // Give the credential-free demo enough ownership context to exercise
+  // department/person filters without pretending these values came from AI.
+  graph = {
+    ...graph,
+    nodes: graph.nodes.map((node) => {
+      if (node.kind !== "process") return node;
+      if (node.workflowId === "order") {
+        return {
+          ...node,
+          department: "営業部",
+          responsiblePerson: "営業担当A",
+        };
+      }
+      if (node.actor === "倉庫") {
+        return {
+          ...node,
+          department: "物流部",
+          responsiblePerson: "倉庫担当A",
+        };
+      }
+      return {
+        ...node,
+        department: "カスタマーサポート部",
+        responsiblePerson: "CS担当A",
+      };
+    }),
+  };
+
+  const excel = graph.nodes.find(
+    (node) => node.canonicalKey === "system:excel-order-sheet",
+  );
+  const erp = graph.nodes.find(
+    (node) => node.canonicalKey === "system:erp",
+  );
+  const orderData = graph.nodes.find(
+    (node) => node.canonicalKey === "data:order",
+  );
+  const orderProcesses = graph.nodes
+    .filter(
+      (node) => node.kind === "process" && node.workflowId === "order",
+    )
+    .map((node) => node.id);
+
+  if (excel && erp && orderData) {
+    graph = {
+      ...graph,
+      dataFlows: [
+        ...graph.dataFlows,
+        {
+          id: "demo-excel-to-erp-order",
+          sourceSystemId: excel.id,
+          targetSystemId: erp.id,
+          dataIds: [orderData.id],
+          transferType: "manual",
+          direction: "push",
+          automation: "manual",
+          evidence: "Excelの受注管理表に入力して、その後ERPにも同じ内容を登録",
+          status: "confirmed",
+          workflowIds: ["order"],
+          processIds: orderProcesses,
+        },
+      ],
+    };
+  }
+
   return graph;
 }
 
