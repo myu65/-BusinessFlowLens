@@ -643,22 +643,6 @@ function ReviewPanel({
     });
   };
 
-  const linearTransitions = (
-    steps: ExtractionReview["steps"],
-    transitions: ExtractionReview["transitions"],
-  ) => {
-    if (transitions.some((transition) => transition.condition)) {
-      return transitions;
-    }
-
-    return steps.slice(0, -1).map((step, index) => ({
-      fromStepKey: step.stepKey,
-      toStepKey: steps[index + 1].stepKey,
-      condition: null,
-      evidence: "",
-    }));
-  };
-
   const addStep = () => {
     const used = new Set(review.steps.map((step) => step.stepKey));
     let index = review.steps.length + 1;
@@ -690,7 +674,6 @@ function ReviewPanel({
     changeReview({
       ...review,
       steps,
-      transitions: linearTransitions(steps, review.transitions),
     });
   };
 
@@ -711,7 +694,6 @@ function ReviewPanel({
     changeReview({
       ...review,
       steps: reordered,
-      transitions: linearTransitions(reordered, review.transitions),
     });
   };
 
@@ -725,13 +707,10 @@ function ReviewPanel({
     changeReview({
       ...review,
       steps,
-      transitions: linearTransitions(
-        steps,
-        review.transitions.filter(
-          (transition) =>
-            transition.fromStepKey !== stepKey &&
-            transition.toStepKey !== stepKey,
-        ),
+      transitions: review.transitions.filter(
+        (transition) =>
+          transition.fromStepKey !== stepKey &&
+          transition.toStepKey !== stepKey,
       ),
       dataFlows: review.dataFlows.map((flow) => ({
         ...flow,
@@ -1385,7 +1364,7 @@ function ReviewPanel({
             ))}
             {review.transitions.length === 0 ? (
               <p className="inline-empty">
-                明示的な接続はありません。保存時はステップ順に直列接続されます。
+                接続はありません。必要な場合だけ「＋ 接続」から追加してください。
               </p>
             ) : null}
           </div>
@@ -1749,7 +1728,7 @@ function InterviewsView({
   const isStructured = existingProcessCount > 0;
 
   const currentModel: PendingExtraction | null =
-    workflow && isStructured
+    workflow
       ? {
           workflowId: workflow.id,
           review: buildWorkflowReviewFromGraph(graph, workflow.id),
