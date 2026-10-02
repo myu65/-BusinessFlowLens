@@ -893,6 +893,20 @@ function ReviewPanel({
     });
   };
 
+  const toggleDataFlowStep = (
+    index: number,
+    stepKey: string,
+  ) => {
+    const flow = review.dataFlows[index];
+    if (!flow) return;
+
+    const relatedStepKeys = flow.relatedStepKeys.includes(stepKey)
+      ? flow.relatedStepKeys.filter((key) => key !== stepKey)
+      : [...flow.relatedStepKeys, stepKey];
+
+    updateDataFlow(index, { relatedStepKeys });
+  };
+
   const removeDataFlow = (index: number) => {
     if (!window.confirm("このSystem間データフローを削除しますか？")) return;
     changeReview({
@@ -1517,7 +1531,40 @@ function ReviewPanel({
                     />
                   </label>
                 </div>
-                <small>根拠: {flow.evidence || "—"}</small>
+                <label className="dataflow-field">
+                  <span>メモ / 根拠</span>
+                  <input
+                    value={flow.evidence}
+                    placeholder="例: 15分ごとにERPからWMSへCSV送信"
+                    onChange={(event) =>
+                      updateDataFlow(index, {
+                        evidence: event.target.value,
+                      })
+                    }
+                  />
+                </label>
+
+                <div className="dataflow-related-steps">
+                  <span>関連ステップ</span>
+                  <div>
+                    {review.steps.map((step) => {
+                      const selected = flow.relatedStepKeys.includes(
+                        step.stepKey,
+                      );
+                      return (
+                        <button
+                          key={step.stepKey}
+                          className={selected ? "active" : ""}
+                          onClick={() =>
+                            toggleDataFlowStep(index, step.stepKey)
+                          }
+                        >
+                          {step.order}. {step.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
               </article>
             ))}
           </div>
