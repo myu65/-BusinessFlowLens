@@ -106,8 +106,13 @@ export async function POST(request: Request) {
       createdAt: now,
     });
 
+    // Read back the persisted snapshot so legacy node IDs healed by the
+    // repository are also reflected in the client state immediately.
+    const persisted = await repository.loadProject(projectId);
+
     return NextResponse.json({
-      graph,
+      graph: persisted?.graph ?? graph,
+      transcripts: persisted?.transcripts ?? body.transcripts,
       review: result.review,
       revision,
       provider: result.provider,
