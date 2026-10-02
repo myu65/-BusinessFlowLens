@@ -465,6 +465,15 @@ export function getNodeWorkflowIds(
       for (const workflowId of edge.workflowIds) ids.add(workflowId);
     }
   }
+  for (const flow of graph.dataFlows ?? []) {
+    if (
+      flow.sourceSystemId === node.id ||
+      flow.targetSystemId === node.id ||
+      flow.dataIds.includes(node.id)
+    ) {
+      for (const workflowId of flow.workflowIds) ids.add(workflowId);
+    }
+  }
   return [...ids];
 }
 
