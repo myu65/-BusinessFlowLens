@@ -609,7 +609,10 @@ function collectCandidates(draft: WorkflowDraft): AssetCandidate[] {
     evidence: string,
     certainty: "explicit" | "inferred",
   ) => {
-    const id = candidateId(kind, name);
+    const cleanName = name.trim();
+    if (!cleanName) return;
+
+    const id = candidateId(kind, cleanName);
     const existing = map.get(id);
     if (existing) {
       if (evidence && !existing.evidence.includes(evidence)) {
@@ -622,7 +625,7 @@ function collectCandidates(draft: WorkflowDraft): AssetCandidate[] {
     map.set(id, {
       candidateId: id,
       kind,
-      name,
+      name: cleanName,
       evidence: evidence ? [evidence] : [],
       certainty,
     });
@@ -632,7 +635,10 @@ function collectCandidates(draft: WorkflowDraft): AssetCandidate[] {
     for (const system of step.systems) {
       add("system", system.name, system.evidence, step.certainty);
     }
-    if (step.executingSystem) {
+    if (
+      step.executingSystem?.trim() &&
+      step.executionMode !== "manual"
+    ) {
       add(
         "system",
         step.executingSystem,
@@ -857,7 +863,10 @@ function buildGraphPatch(
       action: step.action,
     });
 
-    if (step.executingSystem) {
+    if (
+      step.executingSystem?.trim() &&
+      step.executionMode !== "manual"
+    ) {
       const id = candidateId("system", step.executingSystem);
       const executingSystemKey =
         assetKeyByCandidate.get(id) ??
@@ -993,8 +1002,12 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
         responsiblePerson: step.responsiblePerson ?? null,
         executionMode: step.executionMode ?? "unknown",
         executingSystem: step.executingSystem ?? null,
-        systems: step.systems ?? [],
-        data: step.data ?? [],
+        systems: (step.systems ?? []).filter(
+          (system) => Boolean(system.name?.trim()),
+        ),
+        data: (step.data ?? []).filter(
+          (data) => Boolean(data.name?.trim()),
+        ),
       };
     })
     .sort((a, b) => a.order - b.order);
