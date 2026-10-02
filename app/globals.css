@@ -1529,3 +1529,148 @@ button:disabled {
     grid-column: 1 / -1;
   }
 }
+
+
+/* Editable extraction draft */
+
+.review-summary--editable {
+  display: grid;
+  gap: 8px;
+}
+
+.review-summary--editable label {
+  display: grid;
+  gap: 4px;
+}
+
+.review-summary--editable label > span {
+  color: var(--muted-2);
+  font-size: 7px;
+  font-weight: 850;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.review-summary--editable textarea,
+.review-summary--editable input,
+.review-step--editable input,
+.review-step--editable textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  outline: none;
+  background: #fcfcf9;
+  color: var(--ink);
+  font: inherit;
+}
+
+.review-summary--editable textarea {
+  min-height: 54px;
+  resize: vertical;
+  padding: 7px 8px;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.review-summary--editable input {
+  padding: 6px 7px;
+  font-size: 8px;
+}
+
+.review-summary-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+}
+
+.review-summary--editable textarea:focus,
+.review-summary--editable input:focus,
+.review-step--editable input:focus,
+.review-step--editable textarea:focus {
+  border-color: #9dae9f;
+  box-shadow: 0 0 0 2px rgba(47, 81, 64, 0.06);
+}
+
+.review-step--editable {
+  position: relative;
+}
+
+.review-step--editable .review-step__top {
+  grid-template-columns: 24px minmax(0, 1fr) 24px;
+}
+
+.review-step-name {
+  padding: 5px 6px;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.review-step-action {
+  min-height: 48px;
+  resize: vertical;
+  margin-top: 6px;
+  padding: 7px;
+  font-size: 8.5px;
+  line-height: 1.5;
+}
+
+.review-delete {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: #f2efeb;
+  color: #8c756d;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.review-delete:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.review-step-meta {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.review-step-meta input {
+  padding: 5px 6px;
+  font-size: 7.5px;
+}
+
+.review-step-meta span {
+  overflow: hidden;
+  color: var(--muted-2);
+  font-size: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-assets--editable {
+  margin-left: 0;
+}
+
+.review-assets--editable .asset-chip {
+  gap: 4px;
+}
+
+.review-assets--editable .asset-chip button {
+  width: 15px;
+  height: 15px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.58);
+  color: inherit;
+  cursor: pointer;
+  font-size: 9px;
+  line-height: 1;
+}
