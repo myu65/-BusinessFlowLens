@@ -18,6 +18,8 @@ export type LensNode = {
   workflowId?: string;
   actor?: string;
   evidence?: string;
+  stepOrder?: number;
+  action?: string;
 };
 
 export type LensEdge = {
@@ -43,6 +45,8 @@ export type GraphPatchNode = {
   status: Confidence;
   actor?: string | null;
   evidence?: string | null;
+  stepOrder?: number | null;
+  action?: string | null;
 };
 
 export type GraphPatchEdge = {
@@ -52,10 +56,64 @@ export type GraphPatchEdge = {
   label?: string | null;
 };
 
+export type ExtractionQuestion = {
+  question: string;
+  reason: string;
+  target:
+    | "system"
+    | "data"
+    | "handoff"
+    | "rule"
+    | "owner"
+    | "exception"
+    | "scope";
+};
+
+export type ExtractionReviewStep = {
+  stepKey: string;
+  name: string;
+  order: number;
+  actor: string | null;
+  action: string;
+  certainty: "explicit" | "inferred";
+  evidence: string;
+  systems: Array<{
+    name: string;
+    interaction:
+      | "view"
+      | "search"
+      | "input"
+      | "approve"
+      | "send"
+      | "receive"
+      | "other";
+    evidence: string;
+  }>;
+  data: Array<{
+    name: string;
+    operation: "read" | "create" | "update" | "send" | "receive";
+    evidence: string;
+  }>;
+};
+
+export type ExtractionReview = {
+  summary: string;
+  trigger: string | null;
+  outcome: string | null;
+  steps: ExtractionReviewStep[];
+  questions: ExtractionQuestion[];
+  warnings: string[];
+};
+
 export type GraphPatch = {
   nodes: GraphPatchNode[];
   edges: GraphPatchEdge[];
   questions: string[];
+};
+
+export type ExtractionResult = {
+  patch: GraphPatch;
+  review: ExtractionReview;
 };
 
 export const SAMPLE_WORKFLOWS = [
@@ -164,6 +222,8 @@ export function replaceWorkflowGraph(
       existing.status = betterStatus(existing.status, patchNode.status);
       existing.actor = patchNode.actor ?? existing.actor;
       existing.evidence = patchNode.evidence ?? existing.evidence;
+      existing.stepOrder = patchNode.stepOrder ?? existing.stepOrder;
+      existing.action = patchNode.action ?? existing.action;
       continue;
     }
 
@@ -177,6 +237,8 @@ export function replaceWorkflowGraph(
       workflowId: patchNode.kind === "process" ? workflow.id : undefined,
       actor: patchNode.actor ?? undefined,
       evidence: patchNode.evidence ?? undefined,
+      stepOrder: patchNode.stepOrder ?? undefined,
+      action: patchNode.action ?? undefined,
     };
     nodes.push(created);
     byKey.set(canonicalKey, created);
@@ -692,4 +754,98 @@ export function createDemoGraph(): LensGraph {
   }
 
   return graph;
+}
+
+
+export type StepAssetLink = {
+  asset: LensNode;
+  relation: Relation;
+  label?: string;
+};
+
+export function getWorkflowProcesses(
+  graph: LensGraph,
+  workflowId: string,
+): LensNode[] {
+  return graph.nodes
+    .filter(
+      (node) =>
+        node.kind === "process" && node.workflowId === workflowId,
+    )
+    .sort((a, b) => {
+      const ai = a.stepOrder ?? Number.MAX_SAFE_INTEGER;
+      const bi = b.stepOrder ?? Number.MAX_SAFE_INTEGER;
+      if (ai !== bi) return ai - bi;
+      return graph.nodes.indexOf(a) - graph.nodes.indexOf(b);
+    });
+}
+
+export function getProcessAssetLinks(
+  graph: LensGraph,
+  processId: string,
+): StepAssetLink[] {
+  const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+  const links: StepAssetLink[] = [];
+
+  for (const edge of graph.edges) {
+    if (edge.source !== processId && edge.target !== processId) continue;
+
+    const otherId = edge.source === processId ? edge.target : edge.source;
+    const asset = byId.get(otherId);
+    if (!asset || asset.kind === "process") continue;
+
+    links.push({
+      asset,
+      relation: edge.relation,
+      label: edge.label,
+    });
+  }
+
+  return links;
+}
+
+export type AssetUsage = {
+  workflowId: string;
+  workflowName: string;
+  processId: string;
+  processName: string;
+  relation: Relation;
+  label?: string;
+};
+
+export function getAssetUsages(
+  graph: LensGraph,
+  assetId: string,
+): AssetUsage[] {
+  const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+  const workflowName = new Map(
+    graph.workflows.map((workflow) => [workflow.id, workflow.name]),
+  );
+  const usages: AssetUsage[] = [];
+
+  for (const edge of graph.edges) {
+    if (edge.source !== assetId && edge.target !== assetId) continue;
+
+    const otherId = edge.source === assetId ? edge.target : edge.source;
+    const process = byId.get(otherId);
+    if (
+      !process ||
+      process.kind !== "process" ||
+      !process.workflowId
+    ) {
+      continue;
+    }
+
+    usages.push({
+      workflowId: process.workflowId,
+      workflowName:
+        workflowName.get(process.workflowId) ?? process.workflowId,
+      processId: process.id,
+      processName: process.label,
+      relation: edge.relation,
+      label: edge.label,
+    });
+  }
+
+  return usages;
 }
