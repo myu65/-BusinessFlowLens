@@ -252,7 +252,6 @@ export async function extractGraphWithAI(args: {
     mode === "openai"
       ? {
           model,
-          temperature: 0.1,
           messages: [
             { role: "system", content: systemPrompt(args.workflow) },
             {
@@ -275,7 +274,6 @@ export async function extractGraphWithAI(args: {
       : {
           model,
           max_tokens: 4096,
-          temperature: 0.1,
           system: systemPrompt(args.workflow),
           messages: [
             {
