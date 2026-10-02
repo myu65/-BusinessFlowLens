@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   replaceWorkflowGraph,
   type ExtractionReview,
+  type FollowUpAnswer,
   type LensGraph,
   type Workflow,
 } from "@/lib/graph";
@@ -20,6 +21,7 @@ type ApplyRequest = {
   graph?: LensGraph;
   transcripts?: Record<string, string>;
   sourceNotes?: string;
+  followUpAnswers?: FollowUpAnswer[];
 };
 
 function requestUser(request: Request) {
@@ -98,6 +100,7 @@ export async function POST(request: Request) {
       effectiveTo: body.workflow.effectiveTo,
       sourceNotes:
         body.sourceNotes ?? body.transcripts[body.workflow.id] ?? "",
+      followUpAnswers: body.followUpAnswers ?? [],
       review: result.review,
       updatedBy: requestUser(request),
       createdAt: now,
