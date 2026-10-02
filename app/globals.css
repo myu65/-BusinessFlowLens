@@ -2126,3 +2126,51 @@ button:disabled {
     grid-column: 1 / -1;
   }
 }
+
+
+/* Follow-up interview refinement loop */
+
+.followup-question {
+  align-items: start;
+}
+
+.followup-question textarea {
+  width: 100%;
+  min-height: 58px;
+  resize: vertical;
+  margin-top: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  outline: none;
+  background: #fcfcf9;
+  padding: 7px 8px;
+  color: var(--ink);
+  font-size: 8.5px;
+  line-height: 1.5;
+}
+
+.followup-question textarea:focus {
+  border-color: #9dae9f;
+  box-shadow: 0 0 0 2px rgba(47, 81, 64, 0.06);
+}
+
+.followup-refine {
+  display: grid;
+  gap: 7px;
+  margin-top: 8px;
+  border: 1px solid #d6ddd7;
+  border-radius: 10px;
+  background: #f1f6f2;
+  padding: 9px;
+}
+
+.followup-refine p {
+  margin: 0;
+  color: #667068;
+  font-size: 7.5px;
+  line-height: 1.5;
+}
+
+.followup-refine button {
+  justify-self: end;
+}
