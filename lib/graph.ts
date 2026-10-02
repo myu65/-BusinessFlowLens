@@ -17,6 +17,8 @@ export type LensNode = {
   status: Confidence;
   workflowId?: string;
   actor?: string;
+  department?: string;
+  responsiblePerson?: string;
   evidence?: string;
   stepOrder?: number;
   action?: string;
@@ -31,10 +33,47 @@ export type LensEdge = {
   workflowIds: string[];
 };
 
+export type DataFlowTransferType =
+  | "api"
+  | "file"
+  | "database"
+  | "message"
+  | "email"
+  | "manual"
+  | "unknown";
+
+export type DataFlowDirection =
+  | "push"
+  | "pull"
+  | "bidirectional"
+  | "unknown";
+
+export type DataFlowAutomation =
+  | "automatic"
+  | "manual"
+  | "mixed"
+  | "unknown";
+
+export type SystemDataFlow = {
+  id: string;
+  sourceSystemId: string;
+  targetSystemId: string;
+  dataIds: string[];
+  transferType: DataFlowTransferType;
+  direction: DataFlowDirection;
+  automation: DataFlowAutomation;
+  frequency?: string;
+  evidence?: string;
+  status: Confidence;
+  workflowIds: string[];
+  processIds: string[];
+};
+
 export type LensGraph = {
   workflows: Workflow[];
   nodes: LensNode[];
   edges: LensEdge[];
+  dataFlows: SystemDataFlow[];
 };
 
 export type GraphPatchNode = {
@@ -44,6 +83,8 @@ export type GraphPatchNode = {
   description: string;
   status: Confidence;
   actor?: string | null;
+  department?: string | null;
+  responsiblePerson?: string | null;
   evidence?: string | null;
   stepOrder?: number | null;
   action?: string | null;
@@ -54,6 +95,19 @@ export type GraphPatchEdge = {
   targetKey: string;
   relation: Relation;
   label?: string | null;
+};
+
+export type GraphPatchDataFlow = {
+  sourceSystemKey: string;
+  targetSystemKey: string;
+  dataKeys: string[];
+  transferType: DataFlowTransferType;
+  direction: DataFlowDirection;
+  automation: DataFlowAutomation;
+  frequency?: string | null;
+  evidence?: string | null;
+  status: Confidence;
+  relatedStepKeys: string[];
 };
 
 export type ExtractionQuestion = {
@@ -74,6 +128,8 @@ export type ExtractionReviewStep = {
   name: string;
   order: number;
   actor: string | null;
+  department: string | null;
+  responsiblePerson: string | null;
   action: string;
   certainty: "explicit" | "inferred";
   evidence: string;
@@ -96,6 +152,19 @@ export type ExtractionReviewStep = {
   }>;
 };
 
+export type ExtractionDataFlow = {
+  sourceSystem: string;
+  targetSystem: string;
+  data: string[];
+  transferType: DataFlowTransferType;
+  direction: DataFlowDirection;
+  automation: DataFlowAutomation;
+  frequency: string | null;
+  evidence: string;
+  certainty: "explicit" | "inferred";
+  relatedStepKeys: string[];
+};
+
 export type ExtractionTransition = {
   fromStepKey: string;
   toStepKey: string;
@@ -109,6 +178,7 @@ export type ExtractionReview = {
   outcome: string | null;
   steps: ExtractionReviewStep[];
   transitions: ExtractionTransition[];
+  dataFlows: ExtractionDataFlow[];
   questions: ExtractionQuestion[];
   warnings: string[];
 };
@@ -116,6 +186,7 @@ export type ExtractionReview = {
 export type GraphPatch = {
   nodes: GraphPatchNode[];
   edges: GraphPatchEdge[];
+  dataFlows: GraphPatchDataFlow[];
   questions: string[];
 };
 
@@ -177,6 +248,7 @@ export function emptyGraph(): LensGraph {
     })),
     nodes: [],
     edges: [],
+    dataFlows: [],
   };
 }
 
@@ -229,6 +301,9 @@ export function replaceWorkflowGraph(
       existing.description = patchNode.description || existing.description;
       existing.status = betterStatus(existing.status, patchNode.status);
       existing.actor = patchNode.actor ?? existing.actor;
+      existing.department = patchNode.department ?? existing.department;
+      existing.responsiblePerson =
+        patchNode.responsiblePerson ?? existing.responsiblePerson;
       existing.evidence = patchNode.evidence ?? existing.evidence;
       existing.stepOrder = patchNode.stepOrder ?? existing.stepOrder;
       existing.action = patchNode.action ?? existing.action;
@@ -244,6 +319,8 @@ export function replaceWorkflowGraph(
       status: patchNode.status,
       workflowId: patchNode.kind === "process" ? workflow.id : undefined,
       actor: patchNode.actor ?? undefined,
+      department: patchNode.department ?? undefined,
+      responsiblePerson: patchNode.responsiblePerson ?? undefined,
       evidence: patchNode.evidence ?? undefined,
       stepOrder: patchNode.stepOrder ?? undefined,
       action: patchNode.action ?? undefined,
@@ -292,12 +369,87 @@ export function replaceWorkflowGraph(
     edges.flatMap((edge) => [edge.source, edge.target]),
   );
 
+  const retainedDataFlows = (graph.dataFlows ?? [])
+    .map((flow) => ({
+      ...flow,
+      workflowIds: flow.workflowIds.filter((id) => id !== workflow.id),
+      processIds: flow.processIds.filter((id) => !priorProcessIds.has(id)),
+    }))
+    .filter((flow) => flow.workflowIds.length > 0);
+
+  const dataFlows = [...retainedDataFlows];
+
+  for (const patchFlow of patch.dataFlows ?? []) {
+    const source = byKey.get(patchFlow.sourceSystemKey);
+    const target = byKey.get(patchFlow.targetSystemKey);
+    if (!source || !target || source.kind !== "system" || target.kind !== "system") {
+      continue;
+    }
+
+    const dataIds = patchFlow.dataKeys
+      .map((key) => byKey.get(key))
+      .filter((node): node is LensNode => Boolean(node && node.kind === "data"))
+      .map((node) => node.id);
+
+    const processIds = patchFlow.relatedStepKeys
+      .map((key) => {
+        const scopedKey = key.startsWith(`process:${workflow.id}:`)
+          ? key
+          : `process:${workflow.id}:${key.replace(/^process:/, "")}`;
+        return byKey.get(scopedKey)?.id;
+      })
+      .filter((id): id is string => Boolean(id));
+
+    const id = [
+      source.id,
+      target.id,
+      patchFlow.transferType,
+      [...dataIds].sort().join(","),
+    ].join("--");
+
+    const existing = dataFlows.find((flow) => flow.id === id);
+    if (existing) {
+      if (!existing.workflowIds.includes(workflow.id)) {
+        existing.workflowIds = [...existing.workflowIds, workflow.id];
+      }
+      existing.processIds = [...new Set([...existing.processIds, ...processIds])];
+      continue;
+    }
+
+    dataFlows.push({
+      id,
+      sourceSystemId: source.id,
+      targetSystemId: target.id,
+      dataIds,
+      transferType: patchFlow.transferType,
+      direction: patchFlow.direction,
+      automation: patchFlow.automation,
+      frequency: patchFlow.frequency ?? undefined,
+      evidence: patchFlow.evidence ?? undefined,
+      status: patchFlow.status,
+      workflowIds: [workflow.id],
+      processIds,
+    });
+  }
+
+  const dataFlowNodeIds = new Set(
+    dataFlows.flatMap((flow) => [
+      flow.sourceSystemId,
+      flow.targetSystemId,
+      ...flow.dataIds,
+    ]),
+  );
+
   return {
     workflows,
     nodes: nodes.filter(
-      (node) => node.kind === "process" || usedNodeIds.has(node.id),
+      (node) =>
+        node.kind === "process" ||
+        usedNodeIds.has(node.id) ||
+        dataFlowNodeIds.has(node.id),
     ),
     edges,
+    dataFlows,
   };
 }
 
@@ -742,6 +894,7 @@ export function extractInterviewLocal(
   return {
     nodes,
     edges,
+    dataFlows: [],
     questions: [...new Set(questions)].slice(0, 4),
   };
 }
@@ -856,4 +1009,112 @@ export function getAssetUsages(
   }
 
   return usages;
+}
+
+
+export type OwnershipFilter = {
+  department?: string | null;
+  responsiblePerson?: string | null;
+};
+
+export function processMatchesOwnership(
+  node: LensNode,
+  filter: OwnershipFilter,
+): boolean {
+  if (node.kind !== "process") return true;
+  if (filter.department && node.department !== filter.department) return false;
+  if (
+    filter.responsiblePerson &&
+    node.responsiblePerson !== filter.responsiblePerson
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export function getDepartments(graph: LensGraph): string[] {
+  return [
+    ...new Set(
+      graph.nodes
+        .filter((node) => node.kind === "process" && node.department)
+        .map((node) => node.department as string),
+    ),
+  ].sort((a, b) => a.localeCompare(b, "ja"));
+}
+
+export function getResponsiblePeople(graph: LensGraph): string[] {
+  return [
+    ...new Set(
+      graph.nodes
+        .filter((node) => node.kind === "process" && node.responsiblePerson)
+        .map((node) => node.responsiblePerson as string),
+    ),
+  ].sort((a, b) => a.localeCompare(b, "ja"));
+}
+
+export type NodeRelationship = {
+  node: LensNode;
+  relation: string;
+  workflowIds: string[];
+};
+
+export function getNodeRelationships(
+  graph: LensGraph,
+  nodeId: string,
+): NodeRelationship[] {
+  const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+  const related = new Map<string, NodeRelationship>();
+
+  for (const edge of graph.edges) {
+    if (edge.source !== nodeId && edge.target !== nodeId) continue;
+    const otherId = edge.source === nodeId ? edge.target : edge.source;
+    const other = byId.get(otherId);
+    if (!other) continue;
+
+    related.set(`${other.id}:${edge.id}`, {
+      node: other,
+      relation:
+        edge.source === nodeId
+          ? `${edge.relation} →`
+          : `← ${edge.relation}`,
+      workflowIds: edge.workflowIds,
+    });
+  }
+
+  for (const flow of graph.dataFlows ?? []) {
+    const touches =
+      flow.sourceSystemId === nodeId ||
+      flow.targetSystemId === nodeId ||
+      flow.dataIds.includes(nodeId);
+    if (!touches) continue;
+
+    const ids = [
+      flow.sourceSystemId,
+      flow.targetSystemId,
+      ...flow.dataIds,
+    ].filter((id) => id !== nodeId);
+
+    for (const id of ids) {
+      const other = byId.get(id);
+      if (!other) continue;
+      related.set(`${other.id}:flow:${flow.id}`, {
+        node: other,
+        relation: `data-flow · ${flow.transferType}`,
+        workflowIds: flow.workflowIds,
+      });
+    }
+  }
+
+  return [...related.values()];
+}
+
+export function getDataFlowsForSystem(
+  graph: LensGraph,
+  systemId: string,
+): SystemDataFlow[] {
+  return (graph.dataFlows ?? []).filter(
+    (flow) =>
+      flow.sourceSystemId === systemId ||
+      flow.targetSystemId === systemId,
+  );
 }
