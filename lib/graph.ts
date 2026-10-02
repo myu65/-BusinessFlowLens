@@ -1228,9 +1228,15 @@ export function buildWorkflowReviewFromGraph(
   const steps: ExtractionReviewStep[] = processes.map((process, index) => {
     const systems: ExtractionReviewStep["systems"] = [];
     const data: ExtractionReviewStep["data"] = [];
+    let executingSystem: string | null = null;
 
     for (const link of getProcessAssetLinks(graph, process.id)) {
       if (link.asset.kind === "system") {
+        if (link.relation === "executes") {
+          executingSystem = link.asset.label;
+          continue;
+        }
+
         const interaction =
           link.label === "search"
             ? "search"
@@ -1277,6 +1283,14 @@ export function buildWorkflowReviewFromGraph(
       actor: process.actor ?? null,
       department: process.department ?? null,
       responsiblePerson: process.responsiblePerson ?? null,
+      executionMode:
+        process.executionMode ??
+        (executingSystem
+          ? "automatic"
+          : process.actor || process.responsiblePerson
+            ? "manual"
+            : "unknown"),
+      executingSystem,
       action: process.action ?? process.description,
       certainty:
         process.status === "confirmed"
