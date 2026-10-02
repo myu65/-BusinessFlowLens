@@ -1457,6 +1457,9 @@ function InterviewsView({
       }
 
       onGraphApply(payload.graph);
+      if (payload.transcripts) {
+        setTranscripts(payload.transcripts);
+      }
       setProvider(payload.provider ?? pending.provider);
       setPending(null);
       setHistoryDetail(null);
