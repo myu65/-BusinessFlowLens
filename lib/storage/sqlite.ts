@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import type {
   Confidence,
   DataFlowAutomation,
+  ExtractionReview,
   DataFlowDirection,
   DataFlowTransferType,
   LensEdge,
@@ -16,7 +17,10 @@ import type {
 } from "@/lib/graph";
 import type {
   BusinessFlowRepository,
+  NewWorkflowRevision,
   ProjectSnapshot,
+  WorkflowRevision,
+  WorkflowRevisionSummary,
 } from "@/lib/storage/repository";
 
 type SqliteRow = Record<string, unknown>;
@@ -120,6 +124,21 @@ export class SqliteBusinessFlowRepository
       "  PRIMARY KEY (project_id, id),",
       "  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE",
       ");",
+      "CREATE TABLE IF NOT EXISTS workflow_revisions (",
+      "  id INTEGER PRIMARY KEY AUTOINCREMENT,",
+      "  project_id TEXT NOT NULL,",
+      "  workflow_id TEXT NOT NULL,",
+      "  revision_number INTEGER NOT NULL,",
+      "  workflow_name TEXT NOT NULL,",
+      "  workflow_description TEXT,",
+      "  source_notes TEXT NOT NULL,",
+      "  summary TEXT NOT NULL,",
+      "  review_json TEXT NOT NULL,",
+      "  updated_by TEXT NOT NULL,",
+      "  created_at TEXT NOT NULL,",
+      "  UNIQUE (project_id, workflow_id, revision_number),",
+      "  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE",
+      ");",
       "CREATE INDEX IF NOT EXISTS idx_workflows_project ON workflows(project_id);",
       "CREATE INDEX IF NOT EXISTS idx_nodes_project_kind ON graph_nodes(project_id, kind);",
       "CREATE INDEX IF NOT EXISTS idx_nodes_project_workflow ON graph_nodes(project_id, workflow_id);",
@@ -127,6 +146,7 @@ export class SqliteBusinessFlowRepository
       "CREATE INDEX IF NOT EXISTS idx_edges_project_target ON graph_edges(project_id, target_id);",
       "CREATE INDEX IF NOT EXISTS idx_data_flows_project_source ON data_flows(project_id, source_system_id);",
       "CREATE INDEX IF NOT EXISTS idx_data_flows_project_target ON data_flows(project_id, target_system_id);",
+      "CREATE INDEX IF NOT EXISTS idx_workflow_revisions_lookup ON workflow_revisions(project_id, workflow_id, revision_number DESC);",
     ].join("\n"));
   }
 
@@ -227,6 +247,125 @@ export class SqliteBusinessFlowRepository
       },
       transcripts,
       updatedAt: String(project.updated_at),
+    };
+  }
+
+
+  async appendWorkflowRevision(
+    revision: NewWorkflowRevision,
+  ): Promise<WorkflowRevisionSummary> {
+    const current = this.db
+      .prepare(
+        "SELECT COALESCE(MAX(revision_number), 0) AS max_revision FROM workflow_revisions WHERE project_id = ? AND workflow_id = ?",
+      )
+      .get(revision.projectId, revision.workflowId) as SqliteRow;
+
+    const revisionNumber = Number(current.max_revision ?? 0) + 1;
+
+    const result = this.db
+      .prepare(
+        [
+          "INSERT INTO workflow_revisions (",
+          "  project_id, workflow_id, revision_number, workflow_name, workflow_description,",
+          "  source_notes, summary, review_json, updated_by, created_at",
+          ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ].join("\n"),
+      )
+      .run(
+        revision.projectId,
+        revision.workflowId,
+        revisionNumber,
+        revision.workflowName,
+        revision.workflowDescription ?? null,
+        revision.sourceNotes,
+        revision.review.summary,
+        JSON.stringify(revision.review),
+        revision.updatedBy,
+        revision.createdAt,
+      );
+
+    return {
+      id: Number(result.lastInsertRowid),
+      projectId: revision.projectId,
+      workflowId: revision.workflowId,
+      revisionNumber,
+      workflowName: revision.workflowName,
+      summary: revision.review.summary,
+      updatedBy: revision.updatedBy,
+      createdAt: revision.createdAt,
+    };
+  }
+
+  async listWorkflowRevisions(
+    projectId: string,
+    workflowId: string,
+  ): Promise<WorkflowRevisionSummary[]> {
+    const rows = this.db
+      .prepare(
+        [
+          "SELECT id, project_id, workflow_id, revision_number, workflow_name,",
+          "       summary, updated_by, created_at",
+          "  FROM workflow_revisions",
+          " WHERE project_id = ? AND workflow_id = ?",
+          " ORDER BY revision_number DESC",
+        ].join("\n"),
+      )
+      .all(projectId, workflowId) as SqliteRow[];
+
+    return rows.map((row) => ({
+      id: Number(row.id),
+      projectId: String(row.project_id),
+      workflowId: String(row.workflow_id),
+      revisionNumber: Number(row.revision_number),
+      workflowName: String(row.workflow_name),
+      summary: String(row.summary ?? ""),
+      updatedBy: String(row.updated_by),
+      createdAt: String(row.created_at),
+    }));
+  }
+
+  async getWorkflowRevision(
+    projectId: string,
+    revisionId: number,
+  ): Promise<WorkflowRevision | null> {
+    const row = this.db
+      .prepare(
+        [
+          "SELECT id, project_id, workflow_id, revision_number, workflow_name,",
+          "       workflow_description, source_notes, summary, review_json,",
+          "       updated_by, created_at",
+          "  FROM workflow_revisions",
+          " WHERE project_id = ? AND id = ?",
+        ].join("\n"),
+      )
+      .get(projectId, revisionId) as SqliteRow | undefined;
+
+    if (!row) return null;
+
+    let review: ExtractionReview;
+    try {
+      review = JSON.parse(String(row.review_json)) as ExtractionReview;
+    } catch {
+      throw new Error(
+        `Revision ${revisionId} contains invalid review JSON.`,
+      );
+    }
+
+    return {
+      id: Number(row.id),
+      projectId: String(row.project_id),
+      workflowId: String(row.workflow_id),
+      revisionNumber: Number(row.revision_number),
+      workflowName: String(row.workflow_name),
+      workflowDescription:
+        row.workflow_description == null
+          ? undefined
+          : String(row.workflow_description),
+      sourceNotes: String(row.source_notes ?? ""),
+      summary: String(row.summary ?? ""),
+      review,
+      updatedBy: String(row.updated_by),
+      createdAt: String(row.created_at),
     };
   }
 
