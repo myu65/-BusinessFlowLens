@@ -60,6 +60,12 @@ export function mergeAssets(
   }
   return {
     ...graph,
+    knowledge: graph.knowledge ? { ...graph.knowledge, handoffs: graph.knowledge.handoffs?.map(h => ({ ...h, dataIds: [...new Set(h.dataIds.map(remap))] })), systems: graph.knowledge.systems
+      .filter(s => s.systemId !== sourceId || !graph.knowledge!.systems.some(t => t.systemId === targetId))
+      .map(s => ({ ...s, systemId: remap(s.systemId), dependsOn: [...new Map([
+        ...s.dependsOn,
+        ...(s.systemId === targetId ? graph.knowledge!.systems.find(t => t.systemId === sourceId)?.dependsOn ?? [] : []),
+      ].filter(d => remap(d.systemId) !== remap(s.systemId)).map(d => [remap(d.systemId), { ...d, systemId: remap(d.systemId) }])).values()] })) } : undefined,
     workflows: graph.workflows.map(workflow => workflow.landscape ? {
       ...workflow,
       landscape: {
@@ -139,7 +145,7 @@ export function preserveRefinements(
         detailSteps[detailSteps.indexOf(updated)] = { ...detail };
       } else if (!updated) detailSteps.push(detail);
     }
-    return { ...step, technicalDetails, detailSteps };
+    return { ...step, technicalDetails, detailSteps, executionContext: prior.executionContext ?? step.executionContext };
   });
   const omitted = previous.steps.filter(
     (step) =>

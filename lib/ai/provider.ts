@@ -918,6 +918,7 @@ function buildGraphPatch(
       action: step.action,
       technicalDetails: step.technicalDetails ?? [],
       detailSteps: step.detailSteps ?? [],
+      executionContext: step.executionContext,
     });
 
     if (

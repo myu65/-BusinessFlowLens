@@ -2,8 +2,9 @@
 
 Turn business interviews into a reviewable map of **workflows, systems, and data**.
 
-BusinessFlowLens is not intended to be a "put every node on one giant canvas" diagramming tool. The prototype is organized around four concrete jobs:
+BusinessFlowLens opens with a company knowledge graph and supports six concrete jobs:
 
+0. **Understand the company** — explore Activity → Capability → Workflow → Process/Task, or start from System Landscape and follow direct use and declared platform dependencies.
 1. **Business input** — create a new workflow or edit an existing workflow's name, description, source notes, and AI-derived structure.
 2. **Workflow** — understand one business workflow step-by-step, including department, responsible person, systems, and data touched at each step.
 3. **Data flow** — understand what business data moves between systems, how it moves, and whether the transfer is automatic or manual.
@@ -336,3 +337,7 @@ The working-model editor supports direct editing without requiring another AI pa
 Register multiple business domains, site, product identity/perspective, common process identity, implementation differences and material handoffs in the overview editor. Filter the scope, follow direct relationships, and pin workflows of interest. Preferences are retained in the current browser. Material handoffs distinguish verified data correspondence, verified breaks, and unknown correspondence; missing records do not prove a break. Site implementations keep separate process steps linked by an explicit common-process ID.
 
 See [overview design](docs/overview-design.md) and [landscape design](docs/landscape-design.md) for research, interpretation boundaries, persistence and examples. Run `npm test`, `npm run typecheck`, `npm run build`, and `npm run test:regression` for local validation.
+
+## Company knowledge graph
+
+Choose **架空の化学メーカー300業務を開く** on the company screen to create/load the separate synthetic project. See [model and exploration guide](docs/knowledge-graph.md) and [actual browser validation](docs/knowledge-validation.md).
