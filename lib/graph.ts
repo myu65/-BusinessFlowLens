@@ -1177,3 +1177,135 @@ export function getDataFlowsForSystem(
       flow.targetSystemId === systemId,
   );
 }
+
+
+export function buildWorkflowReviewFromGraph(
+  graph: LensGraph,
+  workflowId: string,
+): ExtractionReview {
+  const workflow = graph.workflows.find((item) => item.id === workflowId);
+  const processes = getWorkflowProcesses(graph, workflowId);
+  const byId = new Map(graph.nodes.map((node) => [node.id, node]));
+
+  const steps: ExtractionReviewStep[] = processes.map((process, index) => {
+    const systems: ExtractionReviewStep["systems"] = [];
+    const data: ExtractionReviewStep["data"] = [];
+
+    for (const link of getProcessAssetLinks(graph, process.id)) {
+      if (link.asset.kind === "system") {
+        const interaction =
+          link.label === "search"
+            ? "search"
+            : link.label === "input" || link.label === "手入力"
+              ? "input"
+              : link.label === "approve"
+                ? "approve"
+                : link.label === "send"
+                  ? "send"
+                  : link.label === "receive"
+                    ? "receive"
+                    : "other";
+
+        systems.push({
+          name: link.asset.label,
+          interaction,
+          evidence: link.asset.evidence ?? process.evidence ?? "",
+        });
+      }
+
+      if (link.asset.kind === "data") {
+        const operation =
+          link.relation === "reads"
+            ? "read"
+            : link.relation === "writes"
+              ? "update"
+              : link.relation === "sends"
+                ? "send"
+                : "read";
+
+        data.push({
+          name: link.asset.label,
+          operation,
+          evidence: link.asset.evidence ?? process.evidence ?? "",
+        });
+      }
+    }
+
+    return {
+      stepKey:
+        process.canonicalKey.split(":").at(-1) ?? `step-${index + 1}`,
+      name: process.label,
+      order: process.stepOrder ?? index + 1,
+      actor: process.actor ?? null,
+      department: process.department ?? null,
+      responsiblePerson: process.responsiblePerson ?? null,
+      action: process.action ?? process.description,
+      certainty:
+        process.status === "confirmed"
+          ? "explicit"
+          : "inferred",
+      evidence: process.evidence ?? "",
+      systems,
+      data,
+    };
+  });
+
+  const processKeyById = new Map(
+    processes.map((process, index) => [
+      process.id,
+      process.canonicalKey.split(":").at(-1) ?? `step-${index + 1}`,
+    ]),
+  );
+
+  const processIds = new Set(processes.map((process) => process.id));
+  const transitions: ExtractionTransition[] = graph.edges
+    .filter(
+      (edge) =>
+        edge.relation === "next" &&
+        processIds.has(edge.source) &&
+        processIds.has(edge.target),
+    )
+    .map((edge) => ({
+      fromStepKey: processKeyById.get(edge.source) ?? edge.source,
+      toStepKey: processKeyById.get(edge.target) ?? edge.target,
+      condition: edge.label ?? null,
+      evidence: "",
+    }));
+
+  const dataFlows: ExtractionDataFlow[] = (graph.dataFlows ?? [])
+    .filter((flow) => flow.workflowIds.includes(workflowId))
+    .map((flow) => ({
+      sourceSystem:
+        byId.get(flow.sourceSystemId)?.label ?? flow.sourceSystemId,
+      targetSystem:
+        byId.get(flow.targetSystemId)?.label ?? flow.targetSystemId,
+      data: flow.dataIds
+        .map((id) => byId.get(id)?.label)
+        .filter((label): label is string => Boolean(label)),
+      transferType: flow.transferType,
+      direction: flow.direction,
+      automation: flow.automation,
+      frequency: flow.frequency ?? null,
+      evidence: flow.evidence ?? "",
+      certainty:
+        flow.status === "confirmed"
+          ? "explicit"
+          : "inferred",
+      relatedStepKeys: flow.processIds
+        .map((id) => processKeyById.get(id))
+        .filter((key): key is string => Boolean(key)),
+    }));
+
+  return {
+    summary:
+      workflow?.description ??
+      (workflow ? `${workflow.name}の現在の業務構造` : ""),
+    trigger: null,
+    outcome: null,
+    steps,
+    transitions,
+    dataFlows,
+    questions: [],
+    warnings: [],
+  };
+}
