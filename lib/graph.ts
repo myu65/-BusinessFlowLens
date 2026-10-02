@@ -2,10 +2,21 @@ export type NodeKind = "process" | "system" | "data";
 export type Confidence = "confirmed" | "inferred" | "unknown";
 export type Relation = "next" | "uses" | "reads" | "writes" | "sends";
 
+export type WorkflowScenario =
+  | "current"
+  | "future"
+  | "alternative";
+
 export type Workflow = {
   id: string;
   name: string;
   description?: string;
+  familyId?: string;
+  scenario?: WorkflowScenario;
+  scenarioLabel?: string;
+  basedOnWorkflowId?: string;
+  effectiveFrom?: string;
+  effectiveTo?: string;
 };
 
 export type LensNode = {
@@ -1307,5 +1318,112 @@ export function buildWorkflowReviewFromGraph(
     dataFlows,
     questions: [],
     warnings: [],
+  };
+}
+
+
+export function workflowFamilyId(workflow: Workflow): string {
+  return workflow.familyId ?? workflow.id;
+}
+
+export function isWorkflowEffectiveOn(
+  workflow: Workflow,
+  date: string,
+): boolean {
+  if (workflow.effectiveFrom && date < workflow.effectiveFrom) return false;
+  if (workflow.effectiveTo && date > workflow.effectiveTo) return false;
+  return true;
+}
+
+export function branchWorkflowScenario(
+  graph: LensGraph,
+  sourceWorkflowId: string,
+  nextWorkflow: Workflow,
+): LensGraph {
+  const sourceWorkflow = graph.workflows.find(
+    (workflow) => workflow.id === sourceWorkflowId,
+  );
+  if (!sourceWorkflow) {
+    throw new Error(`Workflow "${sourceWorkflowId}" not found.`);
+  }
+
+  if (graph.workflows.some((workflow) => workflow.id === nextWorkflow.id)) {
+    throw new Error(`Workflow "${nextWorkflow.id}" already exists.`);
+  }
+
+  const sourceProcesses = graph.nodes.filter(
+    (node) =>
+      node.kind === "process" &&
+      node.workflowId === sourceWorkflowId,
+  );
+  const sourceProcessIds = new Set(
+    sourceProcesses.map((node) => node.id),
+  );
+  const sourceById = new Map(
+    sourceProcesses.map((node) => [node.id, node]),
+  );
+
+  const processIdMap = new Map<string, string>();
+  const clonedProcesses = sourceProcesses.map((node) => {
+    const stepSlug =
+      node.canonicalKey.split(":").at(-1) ??
+      node.id.replace(/^process:/, "");
+    const canonicalKey = `process:${nextWorkflow.id}:${stepSlug}`;
+    const id = nodeId(canonicalKey);
+    processIdMap.set(node.id, id);
+
+    return {
+      ...node,
+      id,
+      canonicalKey,
+      workflowId: nextWorkflow.id,
+      evidence: node.evidence
+        ? `Scenario branch from ${sourceWorkflow.name}: ${node.evidence}`
+        : `Scenario branch from ${sourceWorkflow.name}`,
+    };
+  });
+
+  const clonedEdges: LensEdge[] = graph.edges
+    .filter(
+      (edge) =>
+        edge.workflowIds.includes(sourceWorkflowId) &&
+        (sourceProcessIds.has(edge.source) ||
+          sourceProcessIds.has(edge.target)),
+    )
+    .map((edge) => ({
+      ...edge,
+      id: `${edge.id}--scenario--${nextWorkflow.id}`,
+      source: processIdMap.get(edge.source) ?? edge.source,
+      target: processIdMap.get(edge.target) ?? edge.target,
+      workflowIds: [nextWorkflow.id],
+    }));
+
+  const clonedDataFlows: SystemDataFlow[] = (graph.dataFlows ?? [])
+    .filter((flow) => flow.workflowIds.includes(sourceWorkflowId))
+    .map((flow) => ({
+      ...flow,
+      id: `${flow.id}--scenario--${nextWorkflow.id}`,
+      workflowIds: [nextWorkflow.id],
+      processIds: flow.processIds
+        .map((id) => processIdMap.get(id))
+        .filter((id): id is string => Boolean(id)),
+      evidence: flow.evidence
+        ? `Scenario branch from ${sourceWorkflow.name}: ${flow.evidence}`
+        : `Scenario branch from ${sourceWorkflow.name}`,
+    }));
+
+  const workflow: Workflow = {
+    ...nextWorkflow,
+    familyId: nextWorkflow.familyId ?? workflowFamilyId(sourceWorkflow),
+    basedOnWorkflowId:
+      nextWorkflow.basedOnWorkflowId ?? sourceWorkflowId,
+    scenario: nextWorkflow.scenario ?? "future",
+  };
+
+  return {
+    workflows: [...graph.workflows, workflow],
+    nodes: [...graph.nodes, ...clonedProcesses],
+    edges: [...graph.edges, ...clonedEdges],
+    dataFlows: [...(graph.dataFlows ?? []), ...clonedDataFlows],
   };
 }
