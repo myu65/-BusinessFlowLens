@@ -979,7 +979,6 @@ function InterviewsView({
           : item,
       ),
     });
-    setPending(null);
   }
 
   function createInterview() {
@@ -1296,7 +1295,9 @@ function InterviewsView({
           <button
             className="button-primary button-primary--large"
             disabled={
-              mapping || !(transcripts[selectedWorkflowId] ?? "").trim()
+              mapping ||
+              !workflow?.name.trim() ||
+              !(transcripts[selectedWorkflowId] ?? "").trim()
             }
             onClick={extract}
           >
