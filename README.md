@@ -48,6 +48,8 @@ BusinessFlowLens intentionally does not depend on a Snowflake-specific model SDK
 
 Both use JSON Schema structured output.
 
+The adapter deliberately omits optional sampling parameters such as `temperature` by default. OpenAI-compatible and Anthropic-compatible endpoints are not perfectly identical across every model family, and Snowflake may ignore or reject options that a specific routed model does not support. The prototype therefore sends the smallest portable request surface first.
+
 Copy `.env.example` and configure:
 
 ```bash
