@@ -261,7 +261,7 @@ function Workspace() {
   const [view, setView] = useState<ViewMode>("all");
   const [scope, setScope] = useState<ScopeMode>("all");
   const [selected, setSelected] = useState<LensNode | null>(null);
-  const [selectedWorkflowId, setSelectedWorkflowId] = useState(
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(
     SAMPLE_WORKFLOWS[0].id,
   );
   const [transcripts, setTranscripts] = useState<Record<string, string>>(
