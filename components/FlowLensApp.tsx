@@ -225,7 +225,7 @@ function ShellNav({
   setSection: (section: Section) => void;
 }) {
   const items: Array<{ id: Section; label: string; hint: string }> = [
-    { id: "interviews", label: "ヒアリング", hint: "聞く・レビュー" },
+    { id: "interviews", label: "業務入力", hint: "新規・更新" },
     { id: "workflow", label: "業務フロー", hint: "1業務を読む" },
     { id: "dataflow", label: "データフロー", hint: "System間の流れ" },
     { id: "assets", label: "システム・データ", hint: "影響範囲を見る" },
@@ -957,6 +957,30 @@ function InterviewsView({
   const workflow = graph.workflows.find(
     (item) => item.id === selectedWorkflowId,
   );
+  const existingProcessCount = workflow
+    ? getWorkflowProcesses(graph, workflow.id).length
+    : 0;
+  const isStructured = existingProcessCount > 0;
+
+  function updateWorkflowMeta(patch: {
+    name?: string;
+    description?: string;
+  }) {
+    if (!workflow) return;
+
+    onGraphApply({
+      ...graph,
+      workflows: graph.workflows.map((item) =>
+        item.id === workflow.id
+          ? {
+              ...item,
+              ...patch,
+            }
+          : item,
+      ),
+    });
+    setPending(null);
+  }
 
   function createInterview() {
     const name = newName.trim();
@@ -1122,13 +1146,13 @@ function InterviewsView({
       <aside className="interview-list">
         <div className="pane-title">
           <div>
-            <div className="eyebrow">INTERVIEWS</div>
-            <h2>業務を聞く</h2>
+            <div className="eyebrow">BUSINESS INPUT</div>
+            <h2>業務一覧</h2>
           </div>
           <button
             className="icon-button"
             onClick={() => setCreating((value) => !value)}
-            aria-label="新規ヒアリング"
+            aria-label="新規業務"
           >
             ＋
           </button>
@@ -1138,7 +1162,7 @@ function InterviewsView({
           <div className="create-workflow">
             <input
               autoFocus
-              placeholder="業務名 例: 購買業務"
+              placeholder="新しい業務名 例: 購買業務"
               value={newName}
               onChange={(event) => setNewName(event.target.value)}
             />
@@ -1195,14 +1219,56 @@ function InterviewsView({
       <main className="interview-editor">
         <div className="editor-header">
           <div>
-            <div className="eyebrow">RAW INTERVIEW</div>
-            <h1>{workflow?.name ?? "ヒアリング"}</h1>
+            <div className="eyebrow">BUSINESS INPUT</div>
+            <h1>{isStructured ? "既存業務を更新" : "業務を入力"}</h1>
             <p>
-              {workflow?.description ??
-                "現状を話したまま、メモのまま入力します。整形はAI側で行います。"}
+              業務情報とヒアリングメモを更新し、AI下書きを確認して同じ業務モデルへ反映します。
             </p>
           </div>
-          <span className="provider-badge">{provider}</span>
+          <div className="editor-status">
+            <span className="provider-badge">
+              {isStructured
+                ? `構造化済み · ${existingProcessCount} steps`
+                : "未構造化"}
+            </span>
+            <span className="provider-badge">{provider}</span>
+          </div>
+        </div>
+
+        {workflow ? (
+          <div className="workflow-meta-editor">
+            <label>
+              <span>業務名</span>
+              <input
+                value={workflow.name}
+                onChange={(event) =>
+                  updateWorkflowMeta({
+                    name: event.target.value,
+                  })
+                }
+                placeholder="例: 受注業務"
+              />
+            </label>
+            <label>
+              <span>概要</span>
+              <input
+                value={workflow.description ?? ""}
+                onChange={(event) =>
+                  updateWorkflowMeta({
+                    description: event.target.value,
+                  })
+                }
+                placeholder="例: 注文書受領から出荷手配まで"
+              />
+            </label>
+          </div>
+        ) : null}
+
+        <div className="business-notes-label">
+          <span>ヒアリング / 業務メモ</span>
+          <small>
+            会話のメモ、既存手順、補足情報をそのまま入力できます。
+          </small>
         </div>
 
         <textarea
@@ -1223,7 +1289,9 @@ function InterviewsView({
 
         <div className="editor-footer">
           <p>
-            AIは既存グラフへ直接反映せず、まず右側にレビュー用の下書きを作成します。
+            {isStructured
+              ? "現在の業務構造を直接壊さず、新しい下書きをレビューしてから同じ業務IDへ更新します。"
+              : "まずAI下書きを作り、レビューしてから新しい業務構造として反映します。"}
           </p>
           <button
             className="button-primary button-primary--large"
@@ -1232,7 +1300,11 @@ function InterviewsView({
             }
             onClick={extract}
           >
-            {mapping ? "構造を読み取り中…" : "AIで構造化"}
+            {mapping
+              ? "構造を読み取り中…"
+              : isStructured
+                ? "AIで構造を更新"
+                : "AIで構造化"}
           </button>
         </div>
       </main>
