@@ -114,7 +114,22 @@ function localReview(patch: GraphPatch): ExtractionReview {
     outcome: null,
     steps,
     transitions,
-    dataFlows: [],
+    dataFlows: patch.dataFlows.map((flow) => ({
+      sourceSystem:
+        byKey.get(flow.sourceSystemKey)?.label ?? flow.sourceSystemKey,
+      targetSystem:
+        byKey.get(flow.targetSystemKey)?.label ?? flow.targetSystemKey,
+      data: flow.dataKeys.map(
+        (key) => byKey.get(key)?.label ?? key,
+      ),
+      transferType: flow.transferType,
+      direction: flow.direction,
+      automation: flow.automation,
+      frequency: flow.frequency ?? null,
+      evidence: flow.evidence ?? "",
+      certainty: flow.status === "confirmed" ? "explicit" : "inferred",
+      relatedStepKeys: flow.relatedStepKeys,
+    })),
     questions: patch.questions.map((question) => ({
       question,
       reason: "ヒアリングから確定できないため",
