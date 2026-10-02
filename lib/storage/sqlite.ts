@@ -1,8 +1,8 @@
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { canonicalNodeId } from "@/lib/graph";
 import type {
-  canonicalNodeId,
   Confidence,
   DataFlowAutomation,
   ExtractionReview,
