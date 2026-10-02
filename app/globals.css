@@ -815,3 +815,105 @@ button:disabled {
     overflow-x: auto;
   }
 }
+
+
+/* New interview workflow */
+
+.workflow-picker .workflow-add {
+  border-style: dashed;
+  background: #f8f8f4;
+  color: #667067;
+}
+
+.workflow-picker .workflow-add:hover {
+  border-color: #9ba89f;
+  background: #f1f4f0;
+}
+
+.new-interview-form {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #d7dad2;
+  border-radius: 12px;
+  background: white;
+  padding: 13px;
+  box-shadow: 0 8px 22px rgba(45, 48, 43, 0.07);
+}
+
+.new-interview-form label {
+  display: grid;
+  gap: 5px;
+}
+
+.new-interview-form label > span {
+  color: #626a62;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.new-interview-form label small {
+  color: #a0a59f;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.new-interview-form input {
+  width: 100%;
+  border: 1px solid #dbddd6;
+  border-radius: 9px;
+  outline: none;
+  background: #fbfbf8;
+  padding: 9px 10px;
+  color: #303630;
+  font-size: 11px;
+}
+
+.new-interview-form input:focus {
+  border-color: #91a197;
+  box-shadow: 0 0 0 3px rgba(49, 74, 60, 0.07);
+}
+
+.new-interview-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.new-interview-actions button {
+  border: 0;
+  border-radius: 9px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.secondary-button {
+  background: #eff0eb;
+  color: #606760;
+}
+
+.new-interview-actions .primary-button {
+  background: var(--accent);
+  color: white;
+}
+
+.interview-context {
+  display: grid;
+  gap: 3px;
+  padding: 1px 2px;
+}
+
+.interview-context strong {
+  font-size: 12px;
+  letter-spacing: -0.015em;
+}
+
+.interview-context span {
+  overflow: hidden;
+  color: #8a9089;
+  font-size: 9px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
