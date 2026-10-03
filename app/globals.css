@@ -3179,6 +3179,23 @@ button:disabled { cursor:not-allowed; opacity:.45; }
 .kg-information-path { margin: 18px 0; }
 .kg-information-path span { display: block; margin: 8px 0; line-height: 1.6; }
 .kg-secondary { margin: 12px 0; }
+.asset-explorer .assets-layout { display:grid; grid-template-columns:minmax(240px,300px) minmax(0,1fr); gap:24px; align-items:start; }
+.asset-explorer .asset-list-panel { min-width:0; position:sticky; top:88px; max-height:calc(100dvh - 104px); overflow:auto; padding:16px; background:white; border:1px solid var(--line); border-radius:12px; }
+.asset-explorer .shared-ranking { gap:8px; }
+.asset-explorer .shared-ranking button { display:grid; gap:8px; width:100%; }
+.asset-explorer .shared-ranking strong { font-size:16px; line-height:1.5; overflow-wrap:anywhere; }
+.asset-explorer .shared-ranking small { font-size:12px; line-height:1.6; }
+.asset-explorer .impact-panel { overflow:visible; padding:20px; background:white; border:1px solid var(--line); border-radius:12px; }
+.asset-explorer .impact-panel > h2 { margin-top:0; font-size:24px; }
+.asset-explorer .impact-panel > article { padding:18px; border-top:1px solid var(--line); overflow-wrap:anywhere; }
+.asset-explorer .impact-panel h4 { margin:0 0 10px; font-size:17px; }
+.asset-explorer .kg-edit-field { margin:0 0 16px; }
+.asset-explorer .kg-edit-field input,.asset-explorer .kg-edit-field select { min-width:0; width:100%; }
+.asset-explorer .kg-pagination { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:16px; font-size:13px; }
+@media(max-width:900px) {
+  .asset-explorer .assets-layout { grid-template-columns:minmax(0,1fr); gap:16px; }
+  .asset-explorer .asset-list-panel { position:static; max-height:320px; }
+}
 @media(max-width: 900px) { .kg-map-flow { grid-template-columns: 1fr; } .kg-orientation { padding: 16px; } }
 /* A shared anchor connects business, information, people and systems at each depth. */
 .flow-anchor { padding: 12px 16px; border-left: 4px solid #286782; background: #edf4f8; font-weight: 700; }
