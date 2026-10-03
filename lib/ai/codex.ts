@@ -6,6 +6,12 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 import { AIProviderError } from "./errors";
 
+// App-server emits internal text planning/compaction as items as well as
+// messages. These do not execute an operation; tool requests stay denied below.
+export function isInferenceOnlyItem(type: unknown): boolean {
+  return typeof type === "string" && ["userMessage", "agentMessage", "reasoning", "plan", "contextCompaction"].includes(type);
+}
+
 // Optional local model transport. The official app-server owns authentication;
 // the application never reads, exports, or stores ChatGPT login credentials.
 export async function callCodexModel<T>(args: {
@@ -144,6 +150,7 @@ export async function callCodexModel<T>(args: {
     // A server request can use its own ID sequence; handle it before matching
     // client response IDs, so a collision never bypasses the tool denial.
     if (message.id !== undefined && message.method) {
+      record("rejected_request");
       write({
         id: message.id,
         error: {
@@ -162,10 +169,10 @@ export async function callCodexModel<T>(args: {
     }
     if (
       message.method === "item/started" &&
-      !["userMessage", "agentMessage", "reasoning"].includes(
-        message.params?.item?.type,
-      )
+      !isInferenceOnlyItem(message.params?.item?.type)
     ) {
+      // Record only an allowlisted kind code, never the operation's arguments.
+      record("rejected_item", ["commandExecution", "fileChange", "mcpToolCall", "dynamicToolCall", "collabAgentToolCall", "webSearch", "imageView", "imageGeneration", "sleep"].indexOf(message.params?.item?.type));
       fail(
         new AIProviderError(
           "provider",
