@@ -263,7 +263,9 @@ export function InputReviewFlow({
           {selected.meaning?.halt
             ? transitions.length > 1
               ? "条件ごとの進み方・保留"
-              : "ここで停止・保留する"
+              : selected.meaning.condition
+                ? "条件による停止・保留"
+                : "ここで停止・保留する"
             : "その後の仕事"}
         </h4>
         {selected.meaning?.condition && (

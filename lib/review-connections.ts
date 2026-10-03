@@ -115,13 +115,19 @@ export function validateAITransitions<T extends ExtractionReview>(
     const continuedHold = target?.meaning?.halt && evidence && original.includes(evidence) &&
       /保留|停止/.test(evidence) && !/不明|分から|未確認/.test(evidence);
     const isHandoff = (text: string) =>
-      /通知|連絡|依頼|渡す|引き継|照会|問い?合わせ|inform|request|handoff/i.test(text) &&
-      !/(?:通知|連絡|依頼|照会)(?:は|を)?しない|渡さない|引き継がない|問い?合わせない/.test(text);
+      /通知|連絡|依頼|渡す|引き継|照会|問い?合わせ|知らせ|報告|inform|request|handoff/i.test(text) &&
+      !/(?:通知|連絡|依頼|照会|報告)(?:は|を)?しない|知らせない|渡さない|引き継がない|問い?合わせない/.test(text);
     const handover = evidence && original.includes(evidence) &&
       isHandoff(evidence) && isHandoff(target?.action ?? "");
+    const repair = (text: string) => /原因.{0,16}(?:調べ|調査|直|修正)|障害.{0,16}(?:調べ|調査|切り分け)/.test(text) &&
+      !/(?:調べ|直|修正|調査)(?:ない|しない|ません)|不明|分から|未確認/.test(text);
+    const targetEvidence = target && sourceEvidence(source, target.evidence);
+    const exceptionResponse = evidence && original.includes(evidence) && repair(evidence) &&
+      targetEvidence && repair(targetEvidence) && repair(target?.action ?? "") &&
+      !/確定|承認|完了|公開|納品|出荷|反映|再開|再実行|再試行|解除|配信/.test(target?.action ?? "");
     // A conditional check may have a normal path and a hold inside it. A step
     // executed only on the hold condition needs an explicit release to proceed.
-    if (step?.meaning?.halt && step.meaning.condition && !restart && !statedContinuation && !continuedHold && !handover) {
+    if (step?.meaning?.halt && step.meaning.condition && !restart && !statedContinuation && !continuedHold && !handover && !exceptionResponse) {
       warnings.push(`${step.name}：停止・保留の解除を原文で確認できないため、その先へ進む線を保留しました。`);
       questions.push({
         question: `${step.name}の後は、どの条件・判断で再開し、どの手順へ進みますか？`,

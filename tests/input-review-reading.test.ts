@@ -154,7 +154,7 @@ test("review makes registered conditions, a hold, and human changes readable wit
     ],
   };
   const html = render(changed);
-  assert.match(html, /ここで停止・保留する/);
+  assert.match(html, /条件による停止・保留/);
   assert.match(html, /与信超過なら/);
   assert.match(html, /与信超過が分かる/);
   assert.match(html, /人の訂正あり/);
