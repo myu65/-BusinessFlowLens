@@ -10,6 +10,49 @@ import {
 import { findConfirmedAsset } from "./refinement";
 
 export const NEW_MEMO_ID = "__new_memo__";
+
+export function hasUnreflectedNotes(
+  notes: Record<string, string>,
+  saved: Record<string, string>,
+) {
+  return Object.entries(notes).some(([id, text]) => text !== (saved[id] ?? ""));
+}
+
+// Keep the earlier source literally. Repeated evidence has no unique insertion point.
+export function insertNoteAfterEvidence(
+  source: string,
+  evidence: string,
+  addition: string,
+): string | null {
+  const anchor = evidence.trim();
+  const text = addition.trim();
+  if (!anchor || !text) return null;
+  const start = source.indexOf(anchor);
+  if (start < 0 || source.indexOf(anchor, start + anchor.length) >= 0)
+    return null;
+  if (
+    source
+      .slice(0, start)
+      .split(/[。\n]/)
+      .at(-1)
+      ?.trim()
+  )
+    return null;
+  if (
+    !/^(?:[ \t]*(?:。|\r?\n)|[ \t]*$)/.test(source.slice(start + anchor.length))
+  )
+    return null;
+  let end = start + anchor.length;
+  end += source.slice(end).match(/^[ \t]*。/)?.[0].length ?? 0;
+  const tail = source.slice(end);
+  return (
+    source.slice(0, end) +
+    "\n" +
+    text +
+    (tail && !/^[\r\n]/.test(tail) ? "\n" : "") +
+    tail
+  );
+}
 export function transcriptsForSave(
   saved: Record<string, string>,
   workflowId: string,

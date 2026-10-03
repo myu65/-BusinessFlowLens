@@ -5,7 +5,7 @@ import { DataFlowExplorer } from "./DataFlowExplorer";
 import { KnowledgeExplorer } from "./KnowledgeExplorer";
 import { InputWorkbench } from "./InputWorkbench";
 import { AssetExplorer, CrossBusinessOverview } from "./ScopedExplorers";
-import { NEW_MEMO_ID, previewReviewGraph, recordReviewEdits, type InputDraft } from "@/lib/review-workbench";
+import { NEW_MEMO_ID, hasUnreflectedNotes, previewReviewGraph, recordReviewEdits, type InputDraft } from "@/lib/review-workbench";
 
 import { StepDetailEditor, TechnicalDetails, WorkflowExplorer } from "./ProgressiveWorkflow";
 
@@ -301,27 +301,27 @@ function ShellNav({
   section: Section;
   setSection: (section: Section) => void;
 }) {
-  const items: Array<{ id: Section; label: string; hint: string }> = [
-    { id: "interviews", label: "業務入力", hint: "話 → 構造 → 訂正" },
-    { id: "company", label: "会社を理解する", hint: "蓄積した構造を探索" },
-    { id: "workflow", label: "業務フロー", hint: "1業務を読む" },
-    { id: "dataflow", label: "データフロー", hint: "System間の流れ" },
-    { id: "assets", label: "システム・データ", hint: "影響範囲を見る" },
-    { id: "overview", label: "横断ビュー", hint: "共通点を俯瞰" },
+  const items: Array<{ id: Section; label: string }> = [
+    { id: "interviews", label: "話を入力" },
+    { id: "company", label: "会社の全体像" },
+    { id: "assets", label: "詳しく調べる" },
   ];
 
   return (
-    <nav className="main-nav">
-      {items.map((item) => (
+    <nav className="main-nav" aria-label="アプリの使い方を選ぶ">
+      {items.map((item) => {
+        const active = section === item.id || (item.id === "assets" && !["company", "interviews"].includes(section));
+        return (
         <button
           key={item.id}
-          className={section === item.id ? "active" : ""}
-          onClick={() => setSection(item.id)}
+          className={active ? "active" : ""}
+          aria-current={active ? "page" : undefined}
+          onClick={() => setSection(active ? section : item.id)}
         >
           <strong>{item.label}</strong>
-          <span>{item.hint}</span>
         </button>
-      ))}
+        );
+      })}
     </nav>
   );
 }
@@ -2285,6 +2285,13 @@ function Workspace() {
         : saveStatus === "error"
           ? "保存エラー"
           : "保存済み";
+  const draftCount = Object.keys(drafts).length;
+  const pendingNotes = hasUnreflectedNotes(transcripts, persistedTranscripts.current);
+  const inputStatus = draftCount ? `保存前 ${draftCount}件` : pendingNotes ? "未反映のメモあり" : saveLabel;
+  const navigateSection = (next: Section) => {
+    setSection(next);
+    window.scrollTo({ top: 0, behavior: "instant" });
+  };
 
   return (
     <main className="app-shell">
@@ -2293,30 +2300,60 @@ function Workspace() {
           <div className="brand-mark">FL</div>
           <div>
             <strong>BusinessFlowLens</strong>
-            <span>Business input → workflows → shared architecture</span>
+            <span>仕事の話を、会社のしくみに</span>
           </div>
         </div>
 
-        <ShellNav section={section} setSection={setSection} />
+        <ShellNav section={section} setSection={navigateSection} />
 
-        <div className="header-meta">
-          <span>{hydrated?graph.workflows.length:"—"} workflows</span>
+        <div className="header-meta" data-pending={saveStatus !== "error" && (draftCount > 0 || pendingNotes)}>
+          <span>{hydrated ? graph.workflows.length : "—"}業務を蓄積</span>
           <span
             className={[
               "storage-status",
               `storage-status--${saveStatus}`,
             ].join(" ")}
           >
-            {storageBackend} · {saveLabel}
+            {saveStatus === "error" ? saveLabel : inputStatus}
           </span>
-          <span className="prototype-badge">PROTOTYPE</span>
         </div>
       </header>
+      {!["company", "interviews"].includes(section) && (
+        <nav className="detail-nav" aria-label="調べる対象を選ぶ">
+          <span>詳しく調べる：</span>
+          {([
+            { id: "workflow", label: "業務の流れ" },
+            { id: "dataflow", label: "情報の流れ" },
+            { id: "assets", label: "システム・道具" },
+            { id: "overview", label: "業務を比較" },
+          ] as const).map(item => (
+            <button key={item.id} aria-current={section === item.id ? "page" : undefined} onClick={() => navigateSection(item.id)}>
+              {item.label}
+            </button>
+          ))}
+        </nav>
+      )}
 
-      {section === "company" && (hydrated ? <KnowledgeExplorer onFocusStep={(id,step)=>setFocusedSteps(s=>({...s,[id]:step}))} projectId={projectId} graph={graph} onGraphApply={setGraph} onWorkflowFocus={setSelectedWorkflowId} onOpenWorkflow={id => { setSelectedWorkflowId(id); setSection("workflow"); }} /> : <section className="page-view"><h1>{saveStatus === "error" ? "会社の情報を読み込めませんでした" : "会社の情報を読み込んでいます"}</h1>{saveStatus === "error" && <button onClick={() => window.location.reload()}>もう一度読み込む</button>}</section>)}
+      {section === "company" && (hydrated ? (
+        <KnowledgeExplorer
+          onInput={id => { setSelectedWorkflowId(id ?? NEW_MEMO_ID); navigateSection("interviews"); }}
+          onFocusStep={(id, step) => setFocusedSteps(s => ({ ...s, [id]: step }))}
+          projectId={projectId}
+          graph={graph}
+          onGraphApply={setGraph}
+          onWorkflowFocus={setSelectedWorkflowId}
+          onOpenWorkflow={id => { setSelectedWorkflowId(id); navigateSection("workflow"); }}
+        />
+      ) : (
+        <section className="page-view">
+          <h1>{saveStatus === "error" ? "会社の情報を読み込めませんでした" : "会社の情報を読み込んでいます"}</h1>
+          {saveStatus === "error" && <button onClick={() => window.location.reload()}>もう一度読み込む</button>}
+        </section>
+      ))}
 
       {section === "interviews" && hydrated && draftHydrated ? (
         <InputWorkbench
+          onExplore={() => navigateSection("company")}
           focusedStepId={focusedSteps[visibleWorkflowId]} onFocusStep={(id,step)=>setFocusedSteps(s=>({...s,[id]:step}))}
           projectId={projectId}
           graph={graph}

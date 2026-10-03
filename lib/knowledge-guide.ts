@@ -23,7 +23,10 @@ export function workflowChapters(graph: LensGraph, workflowId: string) {
 
 export function termExplanation(name: string): string | undefined {
   const terms: Array<[RegExp, string]> = [
-    [/\bATP\b/i, "注文の数量を、在庫や入荷予定からいつ用意できるか確認する処理"],
+    [
+      /\bATP\b/i,
+      "注文の数量を、在庫や入荷予定からいつ用意できるか確認する処理",
+    ],
     [/\bMRP\b/i, "製品を作るために不足する原料と、必要な時期を計算する処理"],
     [/与信/, "代金を回収できる見込みを確認し、取引してよい金額か判断すること"],
     [/\bCAPA\b/i, "品質問題の原因を取り除き、再発を防ぐ対応"],
@@ -54,7 +57,10 @@ export function termExplanation(name: string): string | undefined {
     ],
     [/\bData Catalog\b/i, "どこにどんなデータがあるかを調べるための案内"],
     [/\bPower BI\b/i, "集めたデータを集計し、グラフや報告書で見る道具"],
-    [/\b(?:Entra|SSO)\b/i, "誰がどのシステムを利用できるか確認する認証の仕組み"],
+    [
+      /\b(?:Entra|SSO)\b/i,
+      "誰がどのシステムを利用できるか確認する認証の仕組み",
+    ],
     [/\b(?:VBA|Macro)\b/i, "Excel上の繰り返し作業を自動で行うプログラム"],
     [/\bExcel\b/i, "表を作り、集計・調整や手作業の記録に使う道具"],
   ];
@@ -76,9 +82,12 @@ export function companyConnections(graph: LensGraph, workflowIds: string[]) {
     {
       source: string;
       target: string;
+      sourceId: string;
+      targetId: string;
       description: string;
       workflowId: string;
       count: number;
+      status: import("./graph").Confidence;
     }
   >();
   for (const handoff of graph.knowledge?.handoffs ?? []) {
@@ -95,15 +104,70 @@ export function companyConnections(graph: LensGraph, workflowIds: string[]) {
     grouped.set(
       key,
       prior
-        ? { ...prior, count: prior.count + 1 }
+        ? {
+            ...prior,
+            count: prior.count + 1,
+            status:
+              prior.status === "unknown" ||
+              !handoff.status ||
+              handoff.status === "unknown"
+                ? "unknown"
+                : prior.status === "inferred" || handoff.status === "inferred"
+                  ? "inferred"
+                  : "confirmed",
+          }
         : {
             source: source.name,
             target: target.name,
+            sourceId: source.id,
+            targetId: target.id,
             description: handoff.description,
             workflowId: handoff.sourceWorkflowId,
             count: 1,
+            status: handoff.status ?? "unknown",
           },
     );
   }
   return [...grouped.values()];
+}
+
+// A small example path, not a claim that every company has one fixed value chain.
+// Search is bounded even when users register many activities and cyclic handoffs.
+export function overviewPath(
+  connections: ReturnType<typeof companyConnections>,
+  startId?: string,
+) {
+  const outgoing = new Map<string, typeof connections>();
+  for (const edge of connections) {
+    const list = outgoing.get(edge.sourceId) ?? [];
+    list.push(edge);
+    outgoing.set(edge.sourceId, list);
+  }
+  const starts =
+    startId && outgoing.has(startId)
+      ? [startId]
+      : [...outgoing.keys()].slice(0, 24);
+  let paths = starts.map((id) => ({
+    ids: [id],
+    edges: [] as typeof connections,
+  }));
+  let best = paths[0];
+  for (let depth = 0; depth < 5; depth++) {
+    const next: typeof paths = [];
+    for (const path of paths) {
+      for (const edge of outgoing.get(path.ids.at(-1)!) ?? []) {
+        if (path.ids.includes(edge.targetId)) continue;
+        next.push({
+          ids: [...path.ids, edge.targetId],
+          edges: [...path.edges, edge],
+        });
+        if (next.length >= 64) break;
+      }
+      if (next.length >= 64) break;
+    }
+    if (!next.length) break;
+    paths = next;
+    best = paths[0];
+  }
+  return best?.edges ?? [];
 }
