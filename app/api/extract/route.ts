@@ -36,30 +36,17 @@ export async function POST(request: Request) {
           followUpAnswers: body.followUpAnswers ?? [],
         })
       : (() => {
-          const baseReview =
-            body.followUpAnswers?.some((answer) => answer.answer.trim()) &&
-            body.previousReview?.steps.length
-              ? body.previousReview
-              : extractGroundedLocal(body.interview!, body.previousReview);
-          const answered = new Set(
-            (body.followUpAnswers ?? [])
-              .filter((item) => item.answer.trim())
-              .map((item) => item.question),
+          const baseReview = extractGroundedLocal(
+            body.interview!,
+            body.previousReview,
+            body.graph,
+            body.followUpAnswers,
           );
 
           return {
             review: {
               ...baseReview,
-              questions: baseReview.questions.filter(
-                (question) => !answered.has(question.question),
-              ),
-              warnings:
-                answered.size > 0
-                  ? [
-                      ...baseReview.warnings,
-                      "AI未接続のため回答を根拠として保存します。内容は右側のモデルへ直接反映してください。",
-                    ]
-                  : baseReview.warnings,
+              warnings: [...new Set(baseReview.warnings)],
             },
             provider: "local-demo-extractor",
           };

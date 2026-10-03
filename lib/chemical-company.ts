@@ -1,3 +1,4 @@
+import { enrichChemicalOutcomes } from "./chemical-outcomes";
 import { chemicalRecipes } from "./chemical-recipes";
 import {
   canonicalNodeId,
@@ -720,7 +721,13 @@ export function createChemicalCompany(): LensGraph {
     (w.landscape?.materialHandoffs ?? []).map((h) => ({
       id: h.id,
       sourceWorkflowId: w.id,
+      sourceProcessId: graph.nodes
+        .filter((n) => n.workflowId === w.id)
+        .sort((a, b) => b.stepOrder! - a.stepOrder!)[0]?.id,
       targetWorkflowId: h.targetWorkflowId,
+      targetProcessId: graph.nodes.find(
+        (n) => n.workflowId === h.targetWorkflowId && n.stepOrder === 1,
+      )?.id,
       dataIds: h.dataIds,
       description: h.material,
       kind: (h.material.includes("原料とロット") ||
@@ -732,6 +739,7 @@ export function createChemicalCompany(): LensGraph {
         ? "material"
         : "information") as "material" | "information",
       evidence: h.evidence,
+      status: "confirmed" as const,
     })),
   );
   // Information continuity and physical movement are separate facts.
@@ -741,6 +749,7 @@ export function createChemicalCompany(): LensGraph {
         (h) =>
           knowledge.handoffs!.find((k) => k.id === h.id)?.kind === "material",
       );
+  enrichChemicalOutcomes(graph);
   let result = graph;
   for (const sourceId of [
     "chemical-1-0-0",
@@ -768,10 +777,40 @@ export function createChemicalCompany(): LensGraph {
         )
         .map((n) => n.id),
     );
+    const priorNext = result.edges.filter(
+      (e) => e.relation === "next" && e.workflowIds.includes(futureId),
+    );
     result.nodes = result.nodes.filter((n) => !remove.has(n.id));
     result.edges = result.edges.filter(
       (e) => !remove.has(e.source) && !remove.has(e.target),
     );
+    // Skip replaced manual steps while preserving declared decision routes.
+    for (const start of priorNext.filter(
+      (e) => !remove.has(e.source) && remove.has(e.target),
+    )) {
+      const queue = [{ id: start.target, condition: start.label ?? "" }],
+        seen = new Set<string>();
+      while (queue.length) {
+        const item = queue.shift()!;
+        if (seen.has(item.id)) continue;
+        seen.add(item.id);
+        for (const edge of priorNext.filter((e) => e.source === item.id)) {
+          const condition = [item.condition, edge.label]
+            .filter(Boolean)
+            .join(" / ");
+          if (remove.has(edge.target))
+            queue.push({ id: edge.target, condition });
+          else
+            result.edges.push({
+              ...edge,
+              id: `future-bridge:${futureId}:${start.source}:${edge.target}`,
+              source: start.source,
+              label: condition || undefined,
+              evidence: "架空将来案：手動転記の置換。条件分岐は保持",
+            });
+        }
+      }
+    }
     result.dataFlows = result.dataFlows.filter(
       (f) =>
         !f.workflowIds.includes(futureId) ||
@@ -795,6 +834,16 @@ export function createChemicalCompany(): LensGraph {
         trigger: "SharePointの承認記録が確定",
         rule: "案件・ロット・版の一致を検証して反映する",
         exception: "不一致は連携を停止しTeamsで担当者へ通知する",
+      },
+      meaning: {
+        purpose: "工場の承認済み調整値を手動転記せず正式記録へ戻す",
+        basis: "SharePointの承認済み記録と案件・ロット・版",
+        result: "版の照合に成功した値だけが正式記録へ自動反映される",
+        next: "後工程が承認済みの確定値で処理する",
+        condition: "承認済み / 版が一致",
+        halt: false,
+        certainty: "inferred",
+        evidence: "架空の将来案：一致時のAPI反映、不一致時の停止を提案",
       },
     });
     const coreId =
@@ -840,20 +889,87 @@ export function createChemicalCompany(): LensGraph {
     steps.forEach((s, i) => {
       s.stepOrder = i + 1;
     });
-    result.edges = result.edges.filter(
-      (e) => !(e.relation === "next" && e.workflowIds.includes(futureId)),
+    const incoming = result.edges.filter(
+      (e) =>
+        e.relation === "next" &&
+        e.target === original.id &&
+        e.workflowIds.includes(futureId),
     );
-    steps
-      .slice(1)
-      .forEach((s, i) =>
-        result.edges.push({
-          id: `future-next:${futureId}:${i}`,
-          source: steps[i].id,
-          target: s.id,
-          relation: "next",
-          workflowIds: [futureId],
-        }),
-      );
+    result.edges = result.edges.filter((e) => !incoming.includes(e));
+    result.edges.push(
+      ...incoming.map((e) => ({
+        ...e,
+        id: `future-api-in:${e.id}`,
+        target: pid,
+      })),
+      {
+        id: `future-api-out:${futureId}`,
+        source: pid,
+        target: original.id,
+        relation: "next",
+        workflowIds: [futureId],
+        label: "照合に成功した値を反映した時",
+        status: "inferred",
+        evidence: "架空将来案",
+      },
+    );
+    const holdKey = `process:${futureId}:api-mismatch`,
+      holdId = canonicalNodeId(holdKey);
+    result.nodes.push({
+      id: holdId,
+      canonicalKey: holdKey,
+      kind: "process",
+      workflowId: futureId,
+      label: "版の不一致で連携を保留し、Teamsで担当者に照合差異を通知する",
+      action:
+        "システムは反映を止め、担当者が案件・ロット・版を確認して再申請する",
+      description: "不一致を自動で確定値へ上書きしない",
+      status: "inferred",
+      executionMode: "mixed",
+      department: original.department,
+      evidence: "架空将来案：版不一致時の停止と担当者による再申請",
+      stepOrder: steps.length + 1,
+      meaning: {
+        purpose: "誤った版の正式記録への反映を防ぐ",
+        basis: "案件・ロット・版の照合差異",
+        result: "正式記録を更新せず連携が保留される",
+        next: "担当者が差異を修正して再申請する",
+        condition: "版の照合が不一致",
+        halt: true,
+        certainty: "inferred",
+        evidence: "架空の将来案：担当者の確認後にAPI照合から再開",
+      },
+    });
+    result.edges.push(
+      {
+        id: `future-api-hold:${futureId}`,
+        source: pid,
+        target: holdId,
+        relation: "next",
+        workflowIds: [futureId],
+        label: "案件・ロット・版が不一致",
+        status: "inferred",
+        evidence: "架空将来案",
+      },
+      {
+        id: `future-api-retry:${futureId}`,
+        source: holdId,
+        target: pid,
+        relation: "next",
+        workflowIds: [futureId],
+        label: "担当者が差異を修正して再申請",
+        status: "inferred",
+        evidence: "架空将来案",
+      },
+      {
+        id: `future-hold-tool:${futureId}`,
+        source: holdId,
+        target: sys("teams"),
+        relation: "uses",
+        workflowIds: [futureId],
+        label: "照合差異の通知",
+      },
+    );
   }
   return result;
 }

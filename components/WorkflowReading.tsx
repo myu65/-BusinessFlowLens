@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   getProcessExecutionMode,
   getWorkflowProcesses,
@@ -7,8 +7,14 @@ import {
   type LensNode,
 } from "@/lib/graph";
 import { termExplanation, workflowChapters } from "@/lib/knowledge-guide";
-import { stepContext, traceData } from "@/lib/flow-context";
+import {
+  handoffEntry,
+  stepContext,
+  traceData,
+  type FlowJourney,
+} from "@/lib/flow-context";
 import { FlowNoteInput } from "./FlowNoteInput";
+import { describeHumanEdit } from "@/lib/review-workbench";
 
 type Depth = "summary" | "step" | "detail";
 const mode = (value: string) =>
@@ -25,7 +31,7 @@ const operation = (value: string) =>
 
 export function WorkflowReading({
   graph,
-  workflowId,
+  workflowId: parentWorkflowId,
   onDetail,
   onAsset,
   initialStepId,
@@ -35,6 +41,7 @@ export function WorkflowReading({
   onGraphApply,
   onStepChange,
   onNavigateWorkflow,
+  journey: initialJourney,
 }: {
   graph: LensGraph;
   workflowId: string;
@@ -46,15 +53,34 @@ export function WorkflowReading({
   initialLens?: "work" | "data";
   onGraphApply?: (graph: LensGraph) => void;
   onStepChange?: (id: string) => void;
-  onNavigateWorkflow?: (id: string) => void;
+  onNavigateWorkflow?: (id: string, journey: FlowJourney) => void;
+  journey?: FlowJourney;
 }) {
+  const [journey, setJourney] = useState(initialJourney);
+  const workflowId = journey?.workflowId ?? parentWorkflowId;
+  useEffect(() => {
+    if (journey && parentWorkflowId !== journey.workflowId)
+      setJourney(initialJourney);
+  }, [parentWorkflowId]);
+  useEffect(() => {
+    if (initialStepId) setStepId(initialStepId);
+  }, [initialStepId]);
   const [stepId, setStepId] = useState(() => {
-    const related = initialDataId ? traceData(graph, workflowId, initialDataId) : [];
-    return related.length && !related.some(t => t.step.id === initialStepId) ? related[0].step.id : initialStepId ?? "";
+    const related = initialDataId
+      ? traceData(graph, workflowId, initialDataId)
+      : [];
+    return (
+      initialJourney?.stepId ??
+      (related.length && !related.some((t) => t.step.id === initialStepId)
+        ? related[0].step.id
+        : (initialStepId ?? ""))
+    );
   });
   const [depth, setDepth] = useState<Depth>(initialDepth);
   const [lens, setLens] = useState<"work" | "data">(initialLens);
-  const [dataId, setData] = useState(initialDataId ?? "");
+  const [dataId, setData] = useState(
+    initialJourney?.dataId ?? initialDataId ?? "",
+  );
   const [systemId, setSystem] = useState("");
   const [tracePage, setTracePage] = useState(
     initialDataId
@@ -109,6 +135,11 @@ export function WorkflowReading({
         .map((n) => [n.id, n]),
     ).values(),
   ];
+  const carriedData = journey?.dataId
+    ? graph.nodes.find((n) => n.id === journey.dataId && n.kind === "data")
+    : undefined;
+  if (carriedData && !allData.some((n) => n.id === carriedData.id))
+    allData.push(carriedData);
   const focusData =
     allData.find((n) => n.id === dataId) ??
     context.inputs[0] ??
@@ -129,7 +160,8 @@ export function WorkflowReading({
         n.kind === "data" ? "この情報の流れを辿る" : "この道具の役割を見る"
       }
       onClick={() => {
-        if (contextStepId && contextStepId !== selected.id) select(contextStepId);
+        if (contextStepId && contextStepId !== selected.id)
+          select(contextStepId);
         if (n.kind === "data") {
           setData(n.id);
           setLens("data");
@@ -153,32 +185,44 @@ export function WorkflowReading({
   );
   const assetList = (nodes: LensNode[], contextStepId?: string) => (
     <>
-      {nodes.slice(0, 3).map(n => showAsset(n, contextStepId))}
+      {nodes.slice(0, 3).map((n) => showAsset(n, contextStepId))}
       {nodes.length > 3 && (
         <details>
           <summary>ほか{nodes.length - 3}件を見る</summary>
-          {nodes.slice(3).map(n => showAsset(n, contextStepId))}
+          {nodes.slice(3).map((n) => showAsset(n, contextStepId))}
         </details>
       )}
     </>
   );
-  const showTransfers = (transfers: typeof context.transfers, compact = false, contextStepId?: string) => (
+  const showTransfers = (
+    transfers: typeof context.transfers,
+    compact = false,
+    contextStepId?: string,
+  ) => (
     <>
       {transfers.slice(0, 3).map((f) => (
         <article className="flow-transfer" key={f.id}>
           <div>
             {[f.sourceSystemId, f.targetSystemId].map((id, i) => {
-              const node = graph.nodes.find(n => n.id === id);
-              return <span key={`${id}:${i}`}>{i > 0 && " → "}{node ? showAsset(node, contextStepId) : "未登録"}</span>;
+              const node = graph.nodes.find((n) => n.id === id);
+              return (
+                <span key={`${id}:${i}`}>
+                  {i > 0 && " → "}
+                  {node ? showAsset(node, contextStepId) : "未登録"}
+                </span>
+              );
             })}
           </div>
-          {!compact && <p>
-            {mode(f.automation)} · {f.frequency ?? "頻度未確認"}
-          </p>}
-          {!compact && f.dataIds
-            .map((id) => graph.nodes.find((n) => n.id === id)!)
-            .filter(Boolean)
-            .map(n => showAsset(n, contextStepId))}
+          {!compact && (
+            <p>
+              {mode(f.automation)} · {f.frequency ?? "頻度未確認"}
+            </p>
+          )}
+          {!compact &&
+            f.dataIds
+              .map((id) => graph.nodes.find((n) => n.id === id)!)
+              .filter(Boolean)
+              .map((n) => showAsset(n, contextStepId))}
           <details>
             <summary>方式・根拠を見る</summary>
             <p>
@@ -231,6 +275,52 @@ export function WorkflowReading({
       <p className="flow-anchor">
         {workflow?.name} → 手順{selected.stepOrder}
       </p>
+      {journey && (
+        <aside
+          className="flow-journey"
+          aria-label="業務をまたいで辿っている文脈"
+        >
+          <strong>同じ仕事の続き</strong>
+          {journey.trail.slice(-4).map((j, i) => (
+            <p key={i}>
+              <button
+                onClick={() => {
+                  const back: FlowJourney = {
+                    workflowId: j.workflowId,
+                    stepId: j.stepId,
+                    dataId: j.dataId,
+                    trail: journey.trail.slice(
+                      0,
+                      Math.max(0, journey.trail.length - 4) + i,
+                    ),
+                    entryKnown: true,
+                  };
+                  setJourney(back);
+                  setStepId(j.stepId);
+                  setData(j.dataId ?? "");
+                  onNavigateWorkflow?.(j.workflowId, back);
+                }}
+              >
+                ← {graph.workflows.find((w) => w.id === j.workflowId)?.name} ·{" "}
+                {label(j.stepId)}
+              </button>
+              <span>
+                {j.description} · 根拠：{j.evidence}
+              </span>
+            </p>
+          ))}
+          <p>
+            辿る情報：
+            {journey.dataId ? label(journey.dataId) : "受渡す情報は未確認"} →{" "}
+            {workflow?.name}
+          </p>
+          {!journey.entryKnown && (
+            <p>
+              受取手順は未確認です。業務の先頭を参考表示しています。接続先の手順を補足してください。
+            </p>
+          )}
+        </aside>
+      )}
       <div className="flow-depth" role="group" aria-label="流れを見る粒度">
         {(
           [
@@ -282,8 +372,16 @@ export function WorkflowReading({
                     .join(" / ")}
                 </span>
                 <span>{c.steps.length}手順を読む →</span>
-                <span>受取：{stepContext(graph, workflowId, c.steps[0].id).inputs[0]?.label ?? "未登録"}</span>
-                <span>渡す：{stepContext(graph, workflowId, c.steps.at(-1)!.id).outputs[0]?.label ?? "未登録"}</span>
+                <span>
+                  受取：
+                  {stepContext(graph, workflowId, c.steps[0].id).inputs[0]
+                    ?.label ?? "未登録"}
+                </span>
+                <span>
+                  渡す：
+                  {stepContext(graph, workflowId, c.steps.at(-1)!.id).outputs[0]
+                    ?.label ?? "未登録"}
+                </span>
               </button>
             ))}
           </div>
@@ -306,7 +404,7 @@ export function WorkflowReading({
           <div className="kg-step-navigation">
             <button
               disabled={!context.previous}
-              onClick={() => select(context.previous.id)}
+              onClick={() => context.previous && select(context.previous.id)}
             >
               ← 前の手順
             </button>
@@ -315,17 +413,60 @@ export function WorkflowReading({
             </span>
             <button
               disabled={!context.next}
-              onClick={() => select(context.next.id)}
+              onClick={() => context.next && select(context.next.id)}
             >
-              次の手順 →
+              {context.outgoing.length > 1 ? "分岐先を選ぶ ↓" : "次の手順 →"}
             </button>
           </div>
+          <label className="kg-edit-field">
+            手順を選んで読む
+            <select
+              value={selected.id}
+              onChange={(e) => select(e.target.value)}
+            >
+              {steps.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.stepOrder}. {s.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <aside className="flow-connections" aria-label="条件と次の仕事">
+            <strong>
+              {selected.meaning?.halt
+                ? "停止・保留 / 再開条件を確認"
+                : "この結果から進む仕事"}
+            </strong>
+            {context.outgoing.map(({ edge, step }) => (
+              <button key={edge.id} onClick={() => select(step.id)}>
+                {edge.label ? `条件：${edge.label}` : "順に進む"} → {step.label}{" "}
+                ·{" "}
+                {edge.status === "confirmed"
+                  ? "確認済み"
+                  : edge.status === "inferred"
+                    ? "接続は推定"
+                    : "根拠を確認"}
+              </button>
+            ))}
+            {!context.outgoing.length && (
+              <p>
+                {selected.meaning?.halt
+                  ? "解除後の再開先は未確認です。"
+                  : "次の接続は未登録です。完了または受渡し先を確認してください。"}
+              </p>
+            )}
+          </aside>
           <div className="flow-neighbors" aria-label="前後の仕事">
-            {steps
-              .slice(
-                Math.max(0, context.index - 1),
-                Math.min(steps.length, context.index + 2),
-              )
+            {[
+              ...new Map(
+                [
+                  ...context.incoming.map((i) => i.step),
+                  selected,
+                  ...context.outgoing.map((o) => o.step),
+                ].map((s) => [s.id, s]),
+              ).values(),
+            ]
+              .slice(0, 4)
               .map((s) => (
                 <button
                   key={s.id}
@@ -377,10 +518,66 @@ export function WorkflowReading({
             )}
             <p>
               {selected.department ?? "部署未確認"} ·{" "}
-              {getProcessExecutionMode(graph, selected) === "automatic" ? `実行：${context.executingSystems.map(n=>n.label).join(" / ") || "未確認"}` : `担当：${selected.actor ?? "未確認"}`} ·{" "}
-              {mode(getProcessExecutionMode(graph, selected))} ·{" "}
+              {getProcessExecutionMode(graph, selected) === "automatic"
+                ? `実行：${context.executingSystems.map((n) => n.label).join(" / ") || "未確認"}`
+                : `担当：${selected.actor ?? "未確認"}`}{" "}
+              · {mode(getProcessExecutionMode(graph, selected))} ·{" "}
               {selected.status === "confirmed" ? "確認済み" : "要確認"}
             </p>
+            <section className="flow-decision" aria-label="判断と情報の変化">
+              <h4>この処理で、何が決まるか</h4>
+              <div className="flow-meaning-grid">
+                <div>
+                  <h4>根拠にするもの</h4>
+                  <p>{selected.meaning?.basis || "判断の根拠は未確認"}</p>
+                </div>
+                <div>
+                  <h4>決まる・変わること</h4>
+                  <p>{selected.meaning?.result || "処理結果は未確認"}</p>
+                </div>
+                <div>
+                  <h4>次に動く仕事</h4>
+                  <p>
+                    {selected.meaning?.next || "結果によって動く仕事は未確認"}
+                  </p>
+                </div>
+              </div>
+              {selected.meaning?.purpose && (
+                <p>この作業が必要な理由：{selected.meaning.purpose}</p>
+              )}
+              {selected.meaning?.condition && (
+                <p>実行する条件：{selected.meaning.condition}</p>
+              )}
+              <details>
+                <summary>原文・推定・人の訂正を確認する</summary>
+                <p>
+                  {selected.status === "confirmed"
+                    ? "原文に明示 / 確認済み"
+                    : "推定・要確認"}
+                  ：{selected.evidence || "原文の根拠は未登録"}
+                </p>
+                {selected.meaning && (
+                  <p>
+                    結果の根拠（
+                    {selected.meaning.certainty === "confirmed"
+                      ? "明示・確認済み"
+                      : selected.meaning.certainty === "inferred"
+                        ? "推定"
+                        : "未確認"}
+                    ）：{selected.meaning.evidence || "未登録"}
+                  </p>
+                )}
+                {selected.humanEdits?.map((e, i) => (
+                  <div key={i}>
+                    {describeHumanEdit(e).map((text, j) => (
+                      <p key={j}>
+                        人の訂正：{text} · {e.evidence}
+                      </p>
+                    ))}
+                  </div>
+                ))}
+              </details>
+            </section>
             {lens === "work" ? (
               <>
                 <div className="kg-information-path">
@@ -426,7 +623,9 @@ export function WorkflowReading({
                     onChange={(e) => {
                       const id = e.target.value;
                       const related = traceData(graph, workflowId, id);
-                      const index = related.findIndex(t => t.step.id === selected.id);
+                      const index = related.findIndex(
+                        (t) => t.step.id === selected.id,
+                      );
                       if (index < 0 && related[0]) select(related[0].step.id);
                       setData(id);
                       setTracePage(index < 0 ? 0 : Math.floor(index / 5));
@@ -456,13 +655,44 @@ export function WorkflowReading({
                         </button>
                         <p>
                           {item.step.department ?? "部署未確認"} ·{" "}
-                          {getProcessExecutionMode(graph, item.step) === "automatic" ? `実行：${item.executingSystems.map(n=>n.label).join(" / ") || "未確認"}` : `担当：${item.step.actor ?? "未確認"}`} ·{" "}
-                          {mode(getProcessExecutionMode(graph, item.step))} ·{" "}
+                          {getProcessExecutionMode(graph, item.step) ===
+                          "automatic"
+                            ? `実行：${item.executingSystems.map((n) => n.label).join(" / ") || "未確認"}`
+                            : `担当：${item.step.actor ?? "未確認"}`}{" "}
+                          · {mode(getProcessExecutionMode(graph, item.step))} ·{" "}
                           {item.operations.map(operation).join(" / ") ||
                             "受渡しに関連"}
                         </p>
-                        {!item.transfers.length && <div>使う道具：{item.systems.length ? assetList(item.systems, item.step.id) : "未登録"}</div>}
+                        {!item.transfers.length && (
+                          <div>
+                            使う道具：
+                            {item.systems.length
+                              ? assetList(item.systems, item.step.id)
+                              : "未登録"}
+                          </div>
+                        )}
                         {showTransfers(item.transfers, true, item.step.id)}
+                        <p>
+                          この作業で変わること：
+                          {item.step.meaning?.result || "処理結果は未確認"}
+                        </p>
+                        {stepContext(
+                          graph,
+                          workflowId,
+                          item.step.id,
+                        ).outputs.some((n) => n.id !== focusData?.id) && (
+                          <div>
+                            次に使われる情報：
+                            {assetList(
+                              stepContext(
+                                graph,
+                                workflowId,
+                                item.step.id,
+                              ).outputs.filter((n) => n.id !== focusData?.id),
+                              item.step.id,
+                            )}
+                          </div>
+                        )}
                       </li>
                     ))}
                 </ol>
@@ -586,7 +816,9 @@ export function WorkflowReading({
           )}
         </>
       )}
-      {onNavigateWorkflow && (
+      {(graph.knowledge?.handoffs ?? []).some(
+        (h) => h.sourceWorkflowId === workflowId,
+      ) && (
         <details>
           <summary>この業務から次の業務へつながる情報・物</summary>
           {(graph.knowledge?.handoffs ?? [])
@@ -600,7 +832,39 @@ export function WorkflowReading({
             .map((h) => (
               <article key={h.id}>
                 <p>{h.description}</p>
-                <button onClick={() => onNavigateWorkflow(h.targetWorkflowId)}>
+                <p>
+                  受渡す情報：{h.dataIds.map(label).join("、") || "未確認"} ·{" "}
+                  {h.status === "confirmed"
+                    ? "確認済み"
+                    : h.status === "inferred"
+                      ? "接続は推定"
+                      : "接続の根拠を確認"}
+                </p>
+                <button
+                  onClick={() => {
+                    const entry = handoffEntry(graph, h, focusData?.id);
+                    const next: FlowJourney = {
+                      workflowId: h.targetWorkflowId,
+                      ...entry,
+                      trail: [
+                        ...(journey?.trail ?? []),
+                        {
+                          workflowId,
+                          stepId: selected.id,
+                          dataId: focusData?.id,
+                          description: h.description,
+                          evidence: h.evidence,
+                        },
+                      ].slice(-10),
+                    };
+                    setJourney(next);
+                    setStepId(entry.stepId ?? "");
+                    setData(entry.dataId ?? "");
+                    setTracePage(0);
+                    if (entry.dataId) setLens("data");
+                    onNavigateWorkflow?.(h.targetWorkflowId, next);
+                  }}
+                >
                   {
                     graph.workflows.find((w) => w.id === h.targetWorkflowId)
                       ?.name

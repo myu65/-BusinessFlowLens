@@ -137,7 +137,9 @@ function normalizeSnapshotGraph(graph: LensGraph): LensGraph {
     if (!source || !target) continue;
     if (!validNodeIds.has(source) || !validNodeIds.has(target)) continue;
 
-    const id = `${source}--${edge.relation}--${target}`;
+    const baseId = `${source}--${edge.relation}--${target}`;
+    const separateCondition = edge.relation==='next' && (edge.id.includes('--condition:') || edgeById.has(baseId) && edgeById.get(baseId)?.label!==edge.label);
+    const id=baseId+(separateCondition?`--condition:${encodeURIComponent(edge.label??'')}`:'');
     const existing = edgeById.get(id);
 
     if (existing) {
@@ -241,6 +243,8 @@ function normalizeSnapshotGraph(graph: LensGraph): LensGraph {
         dependsOn: s.dependsOn.map(d => ({ ...d, systemId: resolveLegacyId(d.systemId, "system") ?? d.systemId })),
       })),
       handoffs: graph.knowledge.handoffs?.map(h => ({ ...h,
+        ...(h.sourceProcessId ? {sourceProcessId:resolveLegacyId(h.sourceProcessId,'process',[h.sourceWorkflowId])??h.sourceProcessId} : {}),
+        ...(h.targetProcessId ? {targetProcessId:resolveLegacyId(h.targetProcessId,'process',[h.targetWorkflowId])??h.targetProcessId} : {}),
         dataIds: h.dataIds.map(id => resolveLegacyId(id, "data", [h.sourceWorkflowId, h.targetWorkflowId]) ?? id),
       })),
     } : undefined,
@@ -369,6 +373,7 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
       "details_json",
       "TEXT NOT NULL DEFAULT '{}'",
     );
+    this.ensureColumn("graph_edges", "details_json", "TEXT NOT NULL DEFAULT '{}'");
     this.ensureColumn(
       "workflows",
       "review_context_json",
@@ -493,6 +498,7 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
     }));
 
     const edges: LensEdge[] = edgeRows.map((row) => ({
+      ...JSON.parse(String(row.details_json ?? "{}")),
       id: String(row.id),
       source: String(row.source_id),
       target: String(row.target_id),
@@ -722,8 +728,8 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
     const insertEdge = this.db.prepare(
       [
         "INSERT INTO graph_edges (",
-        "  project_id, id, source_id, target_id, label, relation, workflow_ids_json",
-        ") VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "  project_id, id, source_id, target_id, label, relation, workflow_ids_json, details_json",
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       ].join("\n"),
     );
 
@@ -797,6 +803,8 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
             detailSteps: node.detailSteps ?? [],
             aliases: node.aliases ?? [],
             executionContext: node.executionContext,
+            meaning: node.meaning,
+            humanEdits: node.humanEdits,
           }),
         );
       }
@@ -810,6 +818,7 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
           edge.label ?? null,
           edge.relation,
           encodeArray(edge.workflowIds),
+          JSON.stringify({ evidence: edge.evidence, status: edge.status }),
         );
       }
 

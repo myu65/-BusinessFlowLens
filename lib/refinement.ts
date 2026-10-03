@@ -47,7 +47,10 @@ export function mergeAssets(
       target: remap(edge.target),
       workflowIds: [...edge.workflowIds],
     };
-    next.id = `${next.source}--${next.relation}--${next.target}`;
+    next.id =
+      next.relation === "next"
+        ? edge.id
+        : `${next.source}--${next.relation}--${next.target}`;
     const prior = edges.get(next.id);
     if (prior) {
       prior.workflowIds = [
@@ -60,22 +63,58 @@ export function mergeAssets(
   }
   return {
     ...graph,
-    knowledge: graph.knowledge ? { ...graph.knowledge, handoffs: graph.knowledge.handoffs?.map(h => ({ ...h, dataIds: [...new Set(h.dataIds.map(remap))] })), systems: graph.knowledge.systems
-      .filter(s => s.systemId !== sourceId || !graph.knowledge!.systems.some(t => t.systemId === targetId))
-      .map(s => ({ ...s, systemId: remap(s.systemId), dependsOn: [...new Map([
-        ...s.dependsOn,
-        ...(s.systemId === targetId ? graph.knowledge!.systems.find(t => t.systemId === sourceId)?.dependsOn ?? [] : []),
-      ].filter(d => remap(d.systemId) !== remap(s.systemId)).map(d => [remap(d.systemId), { ...d, systemId: remap(d.systemId) }])).values()] })) } : undefined,
-    workflows: graph.workflows.map(workflow => workflow.landscape ? {
-      ...workflow,
-      landscape: {
-        ...workflow.landscape,
-        materialHandoffs: workflow.landscape.materialHandoffs.map(handoff => ({
-          ...handoff,
-          dataIds: [...new Set(handoff.dataIds.map(remap))],
-        })),
-      },
-    } : workflow),
+    knowledge: graph.knowledge
+      ? {
+          ...graph.knowledge,
+          handoffs: graph.knowledge.handoffs?.map((h) => ({
+            ...h,
+            dataIds: [...new Set(h.dataIds.map(remap))],
+          })),
+          systems: graph.knowledge.systems
+            .filter(
+              (s) =>
+                s.systemId !== sourceId ||
+                !graph.knowledge!.systems.some((t) => t.systemId === targetId),
+            )
+            .map((s) => ({
+              ...s,
+              systemId: remap(s.systemId),
+              dependsOn: [
+                ...new Map(
+                  [
+                    ...s.dependsOn,
+                    ...(s.systemId === targetId
+                      ? (graph.knowledge!.systems.find(
+                          (t) => t.systemId === sourceId,
+                        )?.dependsOn ?? [])
+                      : []),
+                  ]
+                    .filter((d) => remap(d.systemId) !== remap(s.systemId))
+                    .map((d) => [
+                      remap(d.systemId),
+                      { ...d, systemId: remap(d.systemId) },
+                    ]),
+                ).values(),
+              ],
+            })),
+        }
+      : undefined,
+    workflows: graph.workflows.map((workflow) =>
+      workflow.landscape
+        ? {
+            ...workflow,
+            landscape: {
+              ...workflow.landscape,
+              materialHandoffs: workflow.landscape.materialHandoffs.map(
+                (handoff) => ({
+                  ...handoff,
+                  dataIds: [...new Set(handoff.dataIds.map(remap))],
+                }),
+              ),
+            },
+          }
+        : workflow,
+    ),
     nodes: graph.nodes
       .filter((node) => node.id !== sourceId)
       .map((node): LensNode =>
@@ -116,37 +155,94 @@ export function preserveRefinements(
 ): ExtractionReview {
   if (!previous) return review;
   const warnings = [...review.warnings];
-  const steps = review.steps.map((step) => {
-    const prior =
-      previous.steps.find((item) => item.stepKey === step.stepKey) ??
-      previous.steps.find((item) => item.name === step.name);
-    if (!prior) return step;
-    const technicalDetails = [...(step.technicalDetails ?? [])];
-    for (const detail of prior.technicalDetails ?? []) {
-      if (
-        !technicalDetails.some(
-          (item) => JSON.stringify(item) === JSON.stringify(detail),
-        )
-      ) {
-        if (technicalDetails.some((item) => item.system === detail.system))
-          warnings.push(
-            `${step.name}: 既存の技術詳細と追加情報を併記しました。矛盾がないか確認してください。`,
-          );
-        technicalDetails.push(detail);
-      }
-    }
-    const detailSteps = [...(step.detailSteps ?? [])];
-    for (const detail of prior.detailSteps ?? []) {
-      const updated = detailSteps.find((item) => item.id === detail.id);
-      if (updated && JSON.stringify(updated) !== JSON.stringify(detail)) {
+  const excludedSteps = previous.excludedSteps ?? [];
+  const steps = review.steps
+    .filter((step) => {
+      const excluded = excludedSteps.some(
+        (p) => p.evidence === step.evidence || p.action === step.action,
+      );
+      if (excluded)
         warnings.push(
-          `${step.name}: 詳細手順「${detail.action}」への変更案があります。既存の手順を保持しました。`,
+          `${step.name}: 利用者が除外した手順です。原文は保持し、候補への除外を維持しました。`,
         );
-        detailSteps[detailSteps.indexOf(updated)] = { ...detail };
-      } else if (!updated) detailSteps.push(detail);
-    }
-    return { ...step, technicalDetails, detailSteps, executionContext: prior.executionContext ?? step.executionContext };
-  });
+      return !excluded;
+    })
+    .map((step) => {
+      const prior =
+        previous.steps.find((item) => item.stepKey === step.stepKey) ??
+        previous.steps.find((item) => item.name === step.name);
+      if (!prior) return step;
+      const technicalDetails = [...(step.technicalDetails ?? [])];
+      for (const detail of prior.technicalDetails ?? []) {
+        if (
+          !technicalDetails.some(
+            (item) => JSON.stringify(item) === JSON.stringify(detail),
+          )
+        ) {
+          if (technicalDetails.some((item) => item.system === detail.system))
+            warnings.push(
+              `${step.name}: 既存の技術詳細と追加情報を併記しました。矛盾がないか確認してください。`,
+            );
+          technicalDetails.push(detail);
+        }
+      }
+      const detailSteps = [...(step.detailSteps ?? [])];
+      for (const detail of prior.detailSteps ?? []) {
+        const updated = detailSteps.find((item) => item.id === detail.id);
+        if (updated && JSON.stringify(updated) !== JSON.stringify(detail)) {
+          warnings.push(
+            `${step.name}: 詳細手順「${detail.action}」への変更案があります。既存の手順を保持しました。`,
+          );
+          detailSteps[detailSteps.indexOf(updated)] = { ...detail };
+        } else if (!updated) detailSteps.push(detail);
+      }
+      const edited = {
+        ...step,
+        technicalDetails,
+        detailSteps,
+        executionContext: prior.executionContext ?? step.executionContext,
+        humanEdits: prior.humanEdits,
+      };
+      for (const edit of new Map(
+        (prior.humanEdits ?? []).map((edit) => [edit.field, edit]),
+      ).values()) {
+        if (edit.field.startsWith("meaning.")) {
+          const field = edit.field.slice("meaning.".length);
+          const meaning = {
+            purpose: "",
+            basis: "",
+            result: "",
+            next: "",
+            condition: "",
+            halt: false,
+            certainty: "unknown" as const,
+            evidence: "",
+            ...edited.meaning,
+          };
+          if (
+            JSON.stringify(meaning[field as keyof typeof meaning]) !==
+            JSON.stringify(edit.after)
+          )
+            warnings.push(
+              `${step.name}: 利用者が訂正した「${edit.field}」と再抽出に差があります。利用者の訂正を保持しました。`,
+            );
+          edited.meaning = {
+            ...meaning,
+            [field]: edit.after,
+            certainty: "confirmed",
+            evidence: prior.meaning?.evidence ?? "利用者が構造の確認中に補足",
+          };
+          continue;
+        }
+        const field = edit.field as keyof typeof edited;
+        if (JSON.stringify(edited[field]) !== JSON.stringify(edit.after))
+          warnings.push(
+            `${step.name}: 利用者が訂正した「${field}」と再抽出に差があります。利用者の訂正を保持しました。`,
+          );
+        Object.assign(edited, { [field]: edit.after });
+      }
+      return edited;
+    });
   const omitted = previous.steps.filter(
     (step) =>
       !steps.some(
@@ -154,7 +250,11 @@ export function preserveRefinements(
       ),
   );
   for (const step of omitted) {
-    if (step.technicalDetails?.length || step.detailSteps?.length) {
+    if (
+      step.technicalDetails?.length ||
+      step.detailSteps?.length ||
+      step.humanEdits?.length
+    ) {
       steps.push(step);
       warnings.push(
         `${step.name}: 詳細がある既存ステップを保持しました。不要なら手動で除外してください。`,
@@ -164,7 +264,10 @@ export function preserveRefinements(
   const retainedKeys = new Set(
     omitted
       .filter(
-        (step) => step.technicalDetails?.length || step.detailSteps?.length,
+        (step) =>
+          step.technicalDetails?.length ||
+          step.detailSteps?.length ||
+          step.humanEdits?.length,
       )
       .map((step) => step.stepKey),
   );
@@ -184,5 +287,49 @@ export function preserveRefinements(
     )
       transitions.push(transition);
   }
-  return { ...review, steps, transitions, warnings: [...new Set(warnings)] };
+  const keys = new Set(steps.map((s) => s.stepKey));
+  const handoffs = [...(review.handoffs ?? [])];
+  for (const confirmed of previous.handoffs ?? []) {
+    if (confirmed.certainty !== "confirmed" || !keys.has(confirmed.fromStepKey))
+      continue;
+    const proposed = handoffs.findIndex(
+      (h) =>
+        h.fromStepKey === confirmed.fromStepKey &&
+        h.targetWorkflowId === confirmed.targetWorkflowId,
+    );
+    if (proposed >= 0) {
+      if (JSON.stringify(handoffs[proposed]) !== JSON.stringify(confirmed))
+        warnings.push(
+          "利用者が確認した業務間の受渡しと再抽出に差があります。確認した接続を保持しました。",
+        );
+      handoffs[proposed] = confirmed;
+    } else {
+      handoffs.push(confirmed);
+      warnings.push(
+        "再抽出に含まれなかった、利用者が確認した業務間の受渡しを保持しました。",
+      );
+    }
+  }
+  return {
+    ...review,
+    steps: [...steps]
+      .sort((a, b) => a.order - b.order)
+      .map((s, i) => ({ ...s, order: i + 1 })),
+    excludedSteps,
+    transitions: transitions.filter(
+      (t) => keys.has(t.fromStepKey) && keys.has(t.toStepKey),
+    ),
+    dataFlows: review.dataFlows
+      .filter(
+        (f) =>
+          !f.relatedStepKeys.length ||
+          f.relatedStepKeys.some((k) => keys.has(k)),
+      )
+      .map((f) => ({
+        ...f,
+        relatedStepKeys: f.relatedStepKeys.filter((k) => keys.has(k)),
+      })),
+    handoffs: handoffs.filter((h) => keys.has(h.fromStepKey)),
+    warnings: [...new Set(warnings)],
+  };
 }

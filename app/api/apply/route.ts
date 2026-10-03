@@ -12,6 +12,7 @@ import {
   resolveWorkflowReviewWithAI,
 } from "@/lib/ai/provider";
 import { getBusinessFlowRepository } from "@/lib/storage";
+import { applyReviewConnections } from "@/lib/review-workbench";
 
 type ApplyRequest = {
   projectId?: string;
@@ -73,12 +74,13 @@ export async function POST(request: Request) {
         questions: result.review.questions,
         warnings: result.review.warnings,
         followUpAnswers: body.followUpAnswers ?? [],
+        excludedSteps: result.review.excludedSteps,
       },
     };
-    const graph = replaceWorkflowGraph(
-      body.graph,
+    const graph = applyReviewConnections(
+      replaceWorkflowGraph(body.graph, reviewedWorkflow, result.patch),
       reviewedWorkflow,
-      result.patch,
+      result.review,
     );
 
     const projectId = body.projectId?.trim() || "default";

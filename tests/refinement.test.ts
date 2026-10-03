@@ -353,7 +353,10 @@ for (const protocol of ["openai", "anthropic"] as const) {
   test(`${protocol} adapter sends detail schema, preserves human details and enforces confirmed alias reuse`, async () => {
     const graph = mergeAssets(fixture(), "system:erp", "system:sap-prod");
     const previous = refinedReview();
+    previous.steps[0].meaning={purpose:'転記の確認',basis:'承認済み記録',result:'人が確認した確定結果',next:'出荷へ渡す',condition:'承認後',halt:false,certainty:'confirmed',evidence:'担当者の補足'};
+    previous.steps[0].humanEdits=[{field:'meaning.result',before:'',after:'人が確認した確定結果',evidence:'利用者の訂正'}];
     const raw = structuredClone(previous);
+    raw.steps[0].meaning!.result='抽出の変更候補';
     raw.steps[0].technicalDetails = [];
     raw.steps[0].detailSteps = [];
     const calls: Record<string, any>[] = [];
@@ -397,6 +400,8 @@ for (const protocol of ["openai", "anthropic"] as const) {
         previousReview: previous,
       });
       assert.deepEqual(extracted.review.steps[0].technicalDetails, [detail]);
+      assert.equal(extracted.review.steps[0].meaning?.result,'人が確認した確定結果');
+      assert.ok(extracted.review.warnings.some(w=>w.includes('利用者が訂正')));
       const schema =
         protocol === "openai"
           ? calls[0].response_format.json_schema.schema
@@ -405,6 +410,10 @@ for (const protocol of ["openai", "anthropic"] as const) {
         schema.properties.steps.items.required.includes("technicalDetails"),
       );
       assert.ok(schema.properties.steps.items.required.includes("detailSteps"));
+      assert.ok(schema.properties.steps.items.required.includes("meaning"));
+      assert.ok(schema.properties.steps.items.properties.meaning.required.includes("result"));
+      assert.ok(schema.required.includes("handoffs"));
+      assert.ok(schema.properties.transitions.items.required.includes("certainty"));
       const applied = await resolveWorkflowReviewWithAI({
         review: extractGroundedLocal("ERPで登録"),
         workflow: graph.workflows[0],

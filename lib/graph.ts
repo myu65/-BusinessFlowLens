@@ -58,7 +58,7 @@ export type Workflow = {
   landscape?: WorkflowLandscape;
   reviewContext?: Pick<
     ExtractionReview,
-    "summary" | "trigger" | "outcome" | "questions" | "warnings"
+    "summary" | "trigger" | "outcome" | "questions" | "warnings" | "excludedSteps"
   > & {
     followUpAnswers?: FollowUpAnswer[];
   };
@@ -80,6 +80,28 @@ export type DetailStep = {
   evidence: string;
 };
 
+// Business-level changes, kept separate from merely reading/writing a record.
+export type ProcessMeaning = {
+  purpose: string;
+  basis: string;
+  result: string;
+  next: string;
+  condition: string;
+  halt: boolean;
+  certainty: Confidence;
+  evidence: string;
+};
+export type HumanEdit = { field: string; before: unknown; after: unknown; evidence: string };
+export type ReviewHandoff = {
+  fromStepKey: string;
+  targetWorkflowId: string;
+  targetStepKey?: string;
+  data: string[];
+  description: string;
+  evidence: string;
+  certainty: Confidence;
+};
+
 export type LensNode = {
   id: string;
   canonicalKey: string;
@@ -99,6 +121,8 @@ export type LensNode = {
   detailSteps?: DetailStep[];
   aliases?: string[];
   executionContext?: { trigger: string; rule: string; exception: string };
+  meaning?: ProcessMeaning;
+  humanEdits?: HumanEdit[];
 };
 
 export type LensEdge = {
@@ -108,6 +132,8 @@ export type LensEdge = {
   label?: string;
   relation: Relation;
   workflowIds: string[];
+  evidence?: string;
+  status?: Confidence;
 };
 
 export type DataFlowTransferType =
@@ -149,7 +175,7 @@ export type CompanyKnowledge = {
   systems: Array<{ systemId: string; categoryId: string; owner: string; purpose: string;
     dependsOn: Array<{ systemId: string; reason: string }> }>;
   criticalWorkflows: Array<{ workflowId: string; reason: string }>;
-  handoffs?: Array<{ id: string; sourceWorkflowId: string; targetWorkflowId: string; dataIds: string[]; description: string; kind: 'information' | 'material'; evidence: string }>;
+  handoffs?: Array<{ id: string; sourceWorkflowId: string; targetWorkflowId: string; sourceProcessId?: string; targetProcessId?: string; dataIds: string[]; description: string; kind: 'information' | 'material'; evidence: string; status?: Confidence }>;
 };
 
 export type GraphPatchNode = {
@@ -168,6 +194,8 @@ export type GraphPatchNode = {
   technicalDetails?: TechnicalDetail[];
   detailSteps?: DetailStep[];
   executionContext?: LensNode["executionContext"];
+  meaning?: ProcessMeaning;
+  humanEdits?: HumanEdit[];
 };
 
 export type GraphPatchEdge = {
@@ -175,6 +203,8 @@ export type GraphPatchEdge = {
   targetKey: string;
   relation: Relation;
   label?: string | null;
+  evidence?: string;
+  status?: Confidence;
 };
 
 export type GraphPatchDataFlow = {
@@ -204,6 +234,8 @@ export type FollowUpAnswer = {
 
 export type ExtractionReviewStep = {
   executionContext?: LensNode["executionContext"];
+  meaning?: ProcessMeaning;
+  humanEdits?: HumanEdit[];
   stepKey: string;
   name: string;
   order: number;
@@ -248,6 +280,7 @@ export type ExtractionTransition = {
   toStepKey: string;
   condition: string | null;
   evidence: string;
+  certainty?: Confidence;
 };
 
 export type ExtractionReview = {
@@ -255,10 +288,12 @@ export type ExtractionReview = {
   trigger: string | null;
   outcome: string | null;
   steps: ExtractionReviewStep[];
+  excludedSteps?: ExtractionReviewStep[];
   transitions: ExtractionTransition[];
   dataFlows: ExtractionDataFlow[];
   questions: ExtractionQuestion[];
   warnings: string[];
+  handoffs?: ReviewHandoff[];
 };
 
 export type GraphPatch = {
@@ -403,6 +438,8 @@ export function replaceWorkflowGraph(
         patchNode.technicalDetails ?? existing.technicalDetails;
       existing.detailSteps = patchNode.detailSteps ?? existing.detailSteps;
       existing.executionContext = patchNode.executionContext ?? existing.executionContext;
+      existing.meaning = patchNode.meaning ?? existing.meaning;
+      existing.humanEdits = patchNode.humanEdits ?? existing.humanEdits;
       continue;
     }
 
@@ -424,6 +461,8 @@ export function replaceWorkflowGraph(
       technicalDetails: patchNode.technicalDetails,
       detailSteps: patchNode.detailSteps,
       executionContext: patchNode.executionContext,
+      meaning: patchNode.meaning,
+      humanEdits: patchNode.humanEdits,
     };
     nodes.push(created);
     byKey.set(canonicalKey, created);
@@ -445,7 +484,7 @@ export function replaceWorkflowGraph(
 
     if (!source || !target) continue;
 
-    const id = edgeId(source.id, target.id, patchEdge.relation);
+    const id = edgeId(source.id, target.id, patchEdge.relation) + (patchEdge.relation==='next' && patchEdge.label ? `--condition:${encodeURIComponent(patchEdge.label)}` : '');
     const existing = edges.find((edge) => edge.id === id);
     if (existing) {
       if (!existing.workflowIds.includes(workflow.id)) {
@@ -462,6 +501,8 @@ export function replaceWorkflowGraph(
       relation: patchEdge.relation,
       label: patchEdge.label ?? undefined,
       workflowIds: [workflow.id],
+      evidence: patchEdge.evidence,
+      status: patchEdge.status,
     });
   }
 
@@ -1356,6 +1397,8 @@ export function buildWorkflowReviewFromGraph(
       technicalDetails: process.technicalDetails ?? [],
       detailSteps: process.detailSteps ?? [],
       executionContext: process.executionContext,
+      meaning: process.meaning,
+      humanEdits: process.humanEdits,
       certainty: process.status === "confirmed" ? "explicit" : "inferred",
       evidence: process.evidence ?? "",
       systems,
@@ -1382,7 +1425,8 @@ export function buildWorkflowReviewFromGraph(
       fromStepKey: processKeyById.get(edge.source) ?? edge.source,
       toStepKey: processKeyById.get(edge.target) ?? edge.target,
       condition: edge.label ?? null,
-      evidence: "",
+      evidence: edge.evidence ?? "",
+      certainty: edge.status,
     }));
 
   const dataFlows: ExtractionDataFlow[] = (graph.dataFlows ?? [])
@@ -1416,6 +1460,14 @@ export function buildWorkflowReviewFromGraph(
     dataFlows,
     questions: workflow?.reviewContext?.questions ?? [],
     warnings: workflow?.reviewContext?.warnings ?? [],
+    excludedSteps: workflow?.reviewContext?.excludedSteps,
+    handoffs: (graph.knowledge?.handoffs ?? []).filter(h => h.sourceWorkflowId === workflowId && h.sourceProcessId).map(h => ({
+      fromStepKey: processKeyById.get(h.sourceProcessId!) ?? "",
+      targetWorkflowId: h.targetWorkflowId,
+      targetStepKey: graph.nodes.find(n => n.id === h.targetProcessId)?.canonicalKey.split(":").at(-1),
+      data: h.dataIds.map(id => byId.get(id)?.label ?? id),
+      description: h.description, evidence: h.evidence, certainty: h.status ?? "unknown",
+    })),
   };
 }
 
