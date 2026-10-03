@@ -173,6 +173,7 @@ export function validateReviewConnections(
   review: ExtractionReview,
   graph: LensGraph,
   workflow: Workflow,
+  source?: string,
 ): ExtractionReview {
   const warnings = [...review.warnings],
     questions = [...review.questions];
@@ -202,6 +203,39 @@ export function validateReviewConnections(
       target: "handoff",
     });
   };
+  const compact = (text: string) => text.normalize("NFKC").replace(/[\s「」『』]/g, "");
+  const nodes = new Map(graph.nodes.map(n => [n.id, n]));
+  const received = new Map<string, Set<string>>();
+  if (source !== undefined) for (const edge of graph.edges) {
+    if (edge.relation !== "reads" || edge.status === "unknown") continue;
+    const process = nodes.get(edge.source), data = nodes.get(edge.target);
+    if (process?.kind !== "process" || !workflows.has(process.workflowId ?? "") ||
+        process.status === "unknown" || data?.kind !== "data" || data.status === "unknown") continue;
+    const names = received.get(process.id) ?? new Set<string>();
+    for (const name of [data.label, ...(data.aliases ?? [])]) names.add(normalizeAssetName(name));
+    received.set(process.id, names);
+  }
+  const groundedTarget = (h: NonNullable<ExtractionReview["handoffs"]>[number]) => {
+    if (source === undefined || h.origin === "human") return { certainty: h.certainty };
+    const evidence = sourceEvidence(source, h.evidence);
+    if (!evidence) return null;
+    const text = compact(evidence);
+    if (/未確認|特定でき|分から|分かりません|不明|渡さない|渡しません|渡していない|送らない|送りません|送っていない|引き継がない|依頼しない|依頼しません|通知しない|連絡しない/.test(text)) return null;
+    const named = [...workflows.values()].filter(w => w.name.trim().length > 1 && text.includes(compact(w.name)));
+    if (named.length) return named.length === 1 && named[0].id === h.targetWorkflowId
+      ? { certainty: h.certainty } : null;
+    if (!h.data.length || !h.data.every(name => normalizeAssetName(text).includes(normalizeAssetName(name)))) return null;
+    const matching = new Set<string>();
+    for (const [processId, names] of received) {
+      const process = nodes.get(processId)!;
+      const actor = compact(process.actor ?? "").replace(/担当(?:者)?$/, "");
+      if (!actor || !h.data.every(name => names.has(normalizeAssetName(name)))) continue;
+      const escaped = actor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      // Match the recipient, not a sender elsewhere in the quote.
+      if (new RegExp(`${escaped}(?:担当者?)?(?:へ|に)`).test(text)) matching.add(process.workflowId!);
+    }
+    return matching.size === 1 && matching.has(h.targetWorkflowId) ? { certainty: "inferred" as const } : null;
+  };
   return {
     ...review,
     handoffs: review.handoffs?.flatMap((h) => {
@@ -209,15 +243,28 @@ export function validateReviewConnections(
         reject("受渡し先");
         return [];
       }
-      if (h.targetStepKey && !stepExists(h.targetWorkflowId, h.targetStepKey)) {
+      const grounded = groundedTarget(h);
+      if (!grounded) {
+        const target = workflows.get(h.targetWorkflowId)!;
+        warnings.push(`「${target.name}」を受渡し先とする根拠が一致しないため、接続を保留しました。送出の作業と情報は残っています。`);
+        questions.push({ question: `${h.data.join("・") || "この仕事の結果"}は、どの登録済み業務の誰が受け取りますか？`,
+          reason: `原文の名指し、または受取人と情報に対応する仕事を一つに特定できません。候補の根拠：${h.evidence}`,
+          target: "handoff" });
+        return [];
+      }
+      const targetProcess = h.targetStepKey && graph.nodes.find(n => n.kind === "process" &&
+        n.workflowId === h.targetWorkflowId && n.canonicalKey.split(":").at(-1) === h.targetStepKey);
+      const inputMatches = source === undefined || h.origin === "human" || !h.data.length ||
+        (targetProcess && h.data.every(name => received.get(targetProcess.id)?.has(normalizeAssetName(name))));
+      if (h.targetStepKey && (!stepExists(h.targetWorkflowId, h.targetStepKey) || !inputMatches)) {
         warnings.push(
-          "受渡し先の手順を対応づけられませんでした。業務への接続を残し、受取手順は未確認にしました。",
+          "受渡し先の手順と入力情報を対応づけられませんでした。業務への接続を残し、受取手順は未確認にしました。",
         );
         return [
           { ...h, targetStepKey: undefined, certainty: "unknown" as const },
         ];
       }
-      return [h];
+      return [{ ...h, certainty: grounded.certainty }];
     }),
     incomingHandoffs: review.incomingHandoffs?.flatMap((h) => {
       if (!workflows.has(h.sourceWorkflowId)) {
