@@ -4,6 +4,7 @@ import { buildExtractionContext, buildPreviousReviewContext } from "./context";
 import { buildAssetResolutionContext, scopedAssetNodes } from "./asset-context";
 import type { AIConfigurationStatus } from "./status";
 import { AIProviderError } from "./errors";
+import { separateMissingFacts } from "../review-facts";
 import { callCodexModel } from "./codex";
 import {
   validateReviewConnections,
@@ -707,6 +708,7 @@ Your first job is NOT to build a knowledge graph and NOT to normalize entities. 
 Rules:
 1. Preserve business meaning. Prefer 3-10 meaningful business steps, not sentence fragments.
 2. A step is an activity with an actor/action/outcome. Do not create a step for a noun.
+2a. A missing fact is a question, not a performed business task. For example, 'the waste-handling owner is still unknown' does not say that someone checks the owner: keep a question about the owner and the stated exception in executionContext, without inventing an 'identify/check the owner' step or a transition to it. Unknown actors, tools or outcomes do not erase an otherwise stated action. Create a confirmation task only when the source actually describes someone asking or checking.
 3. Only list a system when the transcript names a system, application, spreadsheet, email, portal, screen, tool, or clearly says a system is used. "Check inventory" does NOT imply an inventory system.
 4. Data may be explicit ("order data", "customer master", "Excel row") or strongly implied by an explicit read/write operation. Mark the containing step inferred when the business object itself is inferred.
 4a. Receiving or reading an existing decision/quantity is receive/read, not create. A person entering it into a system may also update a record, but must not appear to originate the upstream decision. Include the named incoming information on the receiving step.
@@ -1406,7 +1408,7 @@ export async function extractWorkflowReviewWithAI(args: {
     a.referenceReading ? groundedReferenceReading(a, a.referenceReading).facts.flatMap(f => f.evidence) : [a.answer]);
   const evidenceSource = [args.interview, ...additionalEvidence].join("\n");
   const sourceDraft = validateAITransitions(
-    scopeReferenceDataFlows(normalizeDraft(rawDraft), args.graph, args.workflow.id, args.interview, args.followUpAnswers ?? []),
+    scopeReferenceDataFlows(separateMissingFacts(normalizeDraft(rawDraft), evidenceSource), args.graph, args.workflow.id, args.interview, args.followUpAnswers ?? []),
     evidenceSource,
   );
 
