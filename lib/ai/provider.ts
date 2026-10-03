@@ -734,7 +734,7 @@ Rules:
 15. Process execution mode is separate from ownership and from System-to-System Data Flow:
    - manual: a person performs the step
    - automatic: a System performs the step internally
-   - mixed: human action/approval and System automation are both essential to the step
+   - mixed: human action/approval and explicitly described System automation are both essential to the step. Using a named tool is not automation: a person isolating a container and sending a Teams request is manual, not mixed.
    - unknown: execution mode is not clear
 16. Set executingSystem ONLY when the interview explicitly says or very clearly describes a named System performing the step automatically. Example: "SAPが自動で在庫を引き当てる" => executionMode=automatic, executingSystem=SAP. "SAPで在庫を確認する" does NOT imply SAP executes the business step; that is usually a manual step using SAP.
 17. Automatic internal System execution is NOT a dataFlow. "ERP automatically assigns an order number" is an automatic Process step. "ERP sends the order to WMS" is a dataFlow and may also cause a later automatic Process step in WMS if explicitly described.

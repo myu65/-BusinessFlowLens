@@ -12,6 +12,34 @@ export function suggestMissingSourceConnections<T extends ExtractionReview>(
   const clauses = source.split(/[。\n]/).map(s => s.trim()).filter(Boolean);
   const literal = (text: string) => text.normalize("NFKC").replace(/[\s「」『』。]/g, "");
   const nodes = new Map(graph.nodes.map(n => [n.id, n]));
+  const identities = new Map<string, Set<string>>();
+  for (const node of graph.nodes.filter(n => n.kind === "data" && n.status !== "unknown"))
+    for (const name of [node.label, ...(node.aliases ?? [])]) {
+      const ids = identities.get(normalizeAssetName(name)) ?? new Set<string>();
+      ids.add(node.id); identities.set(normalizeAssetName(name), ids);
+    }
+  const aliases = (name: string) => {
+    const ids = identities.get(normalizeAssetName(name));
+    const node = ids?.size === 1 ? nodes.get([...ids][0]) : undefined;
+    return [...new Set([name, ...(node ? [node.label, ...(node.aliases ?? [])] : [])].map(normalizeAssetName))]
+      .filter(alias => alias === normalizeAssetName(name) || identities.get(alias)?.size === 1);
+  };
+  const otherSources = [...graph.nodes.filter(n => n.kind === "system").flatMap(n => [n.label, ...(n.aliases ?? [])]),
+    ...review.steps.flatMap(s => s.systems.map(t => t.name)), ...graph.workflows.map(w => w.name)]
+    .filter(name => name.trim().length > 1).map(literal);
+  const referenceInformation = (clause: string, workflowName: string) => {
+    const text = literal(clause), name = literal(workflowName);
+    const tail = text.slice(text.indexOf(name) + name.length);
+    let end = tail.indexOf("を");
+    if (end < 0) end = tail.length;
+    // A named output joined with another system's information is not all from
+    // that workflow: 'its label and MES's lot' has two different sources.
+    for (const other of otherSources) {
+      const boundary = tail.indexOf(`と${other}`);
+      if (boundary >= 0) end = Math.min(end, boundary);
+    }
+    return normalizeAssetName(tail.slice(0, end));
+  };
   const writers = new Map<string, Set<string>>();
   const creators = new Map<string, Set<string>>();
   const senders = new Map<string, Set<string>>();
@@ -20,38 +48,42 @@ export function suggestMissingSourceConnections<T extends ExtractionReview>(
     const process = nodes.get(edge.source), data = nodes.get(edge.target);
     if (process?.kind !== "process" || !process.workflowId || process.status === "unknown" || data?.kind !== "data" || data.status === "unknown") continue;
     const outputs = writers.get(process.id) ?? new Set<string>();
-    outputs.add(normalizeAssetName(data.label));
+    aliases(data.label).forEach(name => outputs.add(name));
     writers.set(process.id, outputs);
     if (edge.relation === "writes") {
       const written = creators.get(process.id) ?? new Set<string>();
-      written.add(normalizeAssetName(data.label));
+      aliases(data.label).forEach(name => written.add(name));
       creators.set(process.id, written);
     }
     if (edge.relation === "sends") {
       const sent = senders.get(process.id) ?? new Set<string>();
-      sent.add(normalizeAssetName(data.label));
+      aliases(data.label).forEach(name => sent.add(name));
       senders.set(process.id, sent);
     }
   }
   const candidates = graph.workflows.filter(w => w.id !== workflow.id && w.name.trim().length > 1 &&
     (w.scenario ?? "current") === (workflow.scenario ?? "current"));
-  for (const step of review.steps) {
-    if (incoming.some(h => h.toStepKey === step.stepKey)) continue;
-    const isReceipt = step.data.some(d => d.operation === "receive");
-    const received = step.data.filter(d => d.operation === (isReceipt ? "receive" : "read")).map(d => d.name);
+  for (const { step, datum } of review.steps.flatMap(step => step.data
+    .filter(d => d.operation === "receive" || d.operation === "read")
+    .map(datum => ({ step, datum })))) {
+    if (incoming.some(h => h.toStepKey === step.stepKey && h.origin === "human")) continue;
+    const isReceipt = datum.operation === "receive";
+    const received = [datum.name];
+    const stepEvidence = sourceEvidence(source, step.evidence) ?? step.evidence;
+    if (incoming.some(h => h.toStepKey === step.stepKey && h.data.some(name => aliases(datum.name).includes(normalizeAssetName(name))))) continue;
     const verb = isReceipt ? /受け取|受領|受信/ : /読み込|読む|読ん|参照|確認/;
     const denied = isReceipt
       ? /受け取ら|受領しない|受信しない|受け取るか|受領するか|受信するか/
       : /読まな|読みません|読んでいな|読んでいません|読み込まな|読み込みません|読み込んでいな|読み込んでいません|(?:参照|確認)し(?:ない|ません|ていない|ていません|ておら)|(?:参照|確認)でき(?:ない|ません|ていない|ていません)|(?:読む|読み込む|参照する|参照できる|確認する|確認できる)か/;
-    if (!received.length || !verb.test(step.evidence)) continue;
+    if (!received.length || !verb.test(stepEvidence)) continue;
     const matches: Array<{ workflow: Workflow; processId: string; evidence: string }> = [];
     const named = new Map<string, string>();
     for (const candidate of candidates) {
       const evidence = clauses.find(clause =>
         clause.includes(candidate.name) && verb.test(clause) &&
-        (literal(clause).includes(literal(step.evidence)) || literal(step.evidence).includes(literal(clause))) &&
+        (literal(clause).includes(literal(stepEvidence)) || literal(stepEvidence).includes(literal(clause))) &&
         !denied.test(clause) && !/後で説明|あとで説明|未確認|不明|分から/.test(clause) &&
-        received.every(name => normalizeAssetName(clause).includes(normalizeAssetName(name))),
+        received.every(name => aliases(name).some(alias => referenceInformation(clause, candidate.name).includes(alias))),
       );
       if (!evidence) continue;
       named.set(candidate.id, candidate.name);

@@ -139,3 +139,51 @@ test("negative or uncertain reads, future sources and human corrections cannot b
     data: ["日次経営データ"], via: "reference", description: "人の訂正", evidence: "人の訂正", certainty: "confirmed", origin: "human" }];
   assert.deepEqual(suggestMissingSourceConnections(review, graph, reader, source).incomingHandoffs, review.incomingHandoffs);
 });
+
+test("a named output and another system's information do not share an invented source", () => {
+  const { graph, review, reader, producer } = referenceFixture();
+  const source = `${producer.name}の日次経営データとMESの製品ロットを分析担当が参照します。`;
+  review.steps[0].evidence = source;
+  review.steps[0].systems = [{ name: "MES", interaction: "view", evidence: "MESの製品ロット" }];
+  review.steps[0].data.push({ name: "製品ロット", operation: "read", evidence: "MESの製品ロット" });
+  const next = suggestMissingSourceConnections(review, graph, reader, source);
+  assert.equal(next.incomingHandoffs?.length, 1);
+  assert.deepEqual(next.incomingHandoffs![0].data, ["日次経営データ"]);
+  assert(!next.questions.some(q => q.question.includes("製品ロット")));
+  review.steps[0].evidence = `「${producer.name}…製品ロットを分析担当が参照します」`;
+  assert.equal(suggestMissingSourceConnections(review, graph, reader, source).incomingHandoffs?.length, 1);
+});
+
+test("two named inputs in one check independently identify their recorded writers", () => {
+  const { graph, review, reader, producer, produced } = referenceFixture();
+  const other = { ...producer, id: "other", name: "生産集計を更新する" };
+  produced.steps[0].data = [{ name: "生産集計", operation: "update", evidence: "生産集計を更新する" }];
+  const both = previewReviewGraph(graph, other, produced);
+  const source = `${producer.name}の日次経営データと${other.name}の生産集計を参照します。`;
+  review.steps[0].evidence = source;
+  review.steps[0].data.push({ name: "生産集計", operation: "read", evidence: "生産集計を参照" });
+  const next = suggestMissingSourceConnections(review, both, reader, source);
+  assert.equal(next.incomingHandoffs?.length, 2);
+  assert.deepEqual(next.incomingHandoffs!.map(h => [h.sourceWorkflowId, h.data]),
+    [[producer.id, ["日次経営データ"]], [other.id, ["生産集計"]]]);
+});
+
+test("a literal receipt and a separate read are both retained, using only unambiguous registered aliases", () => {
+  const { graph, review } = fixture();
+  const { graph: otherGraph, producer } = referenceFixture();
+  const both = { ...graph, workflows: [...graph.workflows, ...otherGraph.workflows],
+    nodes: [...graph.nodes, ...otherGraph.nodes], edges: [...graph.edges, ...otherGraph.edges] };
+  const data = both.nodes.find(n => n.kind === "data" && n.label === "日次経営データ")!;
+  data.aliases = ["朝の経営データ"];
+  const input = source + `${producer.name}の朝の経営データを参照します。`;
+  review.steps[0].evidence = input;
+  review.steps[0].data.push({ name: "朝の経営データ", operation: "read", evidence: "朝の経営データを参照" });
+  // One step's evidence can contain both source clauses; each Data is scoped separately.
+  const next = suggestMissingSourceConnections(review, both, receiver, input);
+  assert.equal(next.incomingHandoffs?.length, 2);
+  assert.equal(next.incomingHandoffs!.find(h => h.sourceWorkflowId === producer.id)?.via, "reference");
+  both.nodes.push({ ...data, id: "other-data", canonicalKey: "data:other", label: "別のデータ", aliases: ["朝の経営データ"] });
+  const ambiguous = suggestMissingSourceConnections(review, both, receiver, input);
+  assert(!ambiguous.incomingHandoffs?.some(h => h.sourceWorkflowId === producer.id));
+  assert(ambiguous.questions.some(q => q.question.includes("朝の経営データ")));
+});
