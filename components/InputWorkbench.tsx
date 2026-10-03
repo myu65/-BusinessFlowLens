@@ -26,6 +26,8 @@ import {
 } from "@/lib/review-workbench";
 import { InputReviewFlow } from "./InputReviewFlow";
 import { aiStatusLabel, type AIConfigurationStatus } from "@/lib/ai/status";
+import { reviewedWorkflowName } from "@/lib/input-knowledge";
+import { InputOrganization } from "./InputOrganization";
 
 const REVIEW_PAGE_SIZE = 3;
 
@@ -106,6 +108,9 @@ export function InputWorkbench({
   const [target, setTarget] = useState("");
   const [targetStep, setTargetStep] = useState("");
   const [handoffText, setHandoffText] = useState("");
+  const [handoffDirection, setHandoffDirection] = useState<
+    "outgoing" | "incoming" | "reference"
+  >("outgoing");
   const [revisions, setRevisions] = useState<
     Array<{
       id: number;
@@ -219,8 +224,18 @@ export function InputWorkbench({
           answerHistory: saved?.reviewContext?.followUpAnswers ?? [],
           answers: {},
         };
-  const update = (nextReview: ExtractionReview) =>
-    onDraft(key, ensureDraft(nextReview));
+  const update = (nextReview: ExtractionReview) => {
+    const next = ensureDraft(nextReview);
+    next.workflow = {
+      ...next.workflow,
+      name: reviewedWorkflowName(
+        next.workflow,
+        nextReview,
+        review?.organization?.title,
+      ),
+    };
+    onDraft(key, next);
+  };
   const choose = (s: ExtractionReviewStep) => {
     setStepKey(s.stepKey);
     setStepPage(Math.floor(steps.indexOf(s) / REVIEW_PAGE_SIZE));
@@ -271,7 +286,14 @@ export function InputWorkbench({
         throw new Error(payload.error ?? "構造化に失敗しました。");
       if (payload.provider !== "local-demo-extractor") setAIResponse("success");
       const next: InputDraft = {
-        workflow: w,
+        workflow: {
+          ...w,
+          name: reviewedWorkflowName(
+            w,
+            payload.review,
+            before?.organization?.title,
+          ),
+        },
         review: payload.review,
         provider: payload.provider,
         sourceNotes: text,
@@ -402,6 +424,9 @@ export function InputWorkbench({
         })),
       handoffs: review.handoffs?.filter(
         (h) => h.fromStepKey !== selected.stepKey,
+      ),
+      incomingHandoffs: review.incomingHandoffs?.filter(
+        (h) => h.toStepKey !== selected.stepKey,
       ),
       questions: [
         ...review.questions,
@@ -768,8 +793,16 @@ export function InputWorkbench({
               {review.extraction.method === "ai"
                 ? `${review.extraction.model ?? review.extraction.provider}（AI）`
                 : "簡易整理"}
-              {selected?.humanEdits?.length ? " · 人の訂正を含む" : ""}
+              {review.steps.some((s) => s.humanEdits?.length) ||
+              review.organization?.origin === "human" ||
+              review.handoffs?.some((h) => h.origin === "human") ||
+              review.incomingHandoffs?.some((h) => h.origin === "human")
+                ? " · 人の訂正を含む"
+                : ""}
             </p>
+          )}
+          {review && (
+            <InputOrganization review={review} busy={busy} onChange={update} />
           )}
           {error && (
             <p role="alert" className="error-message input-mobile-error">
@@ -998,6 +1031,7 @@ export function InputWorkbench({
                   review={review}
                   selected={selected}
                   graph={preview}
+                  workflowId={workflow!.id}
                   busy={busy}
                   choose={choose}
                   onOverview={() =>
@@ -1210,7 +1244,33 @@ export function InputWorkbench({
               </details>
               {known.length > 0 && (
                 <details>
-                  <summary>既存の業務へ受け渡す接続を補足する</summary>
+                  <summary>前後の業務との接続を補足・訂正する</summary>
+                  <label className="kg-edit-field">
+                    この手順との関係
+                    <select
+                      value={handoffDirection}
+                      onChange={(e) => {
+                        setHandoffDirection(
+                          e.target.value as
+                            | "incoming"
+                            | "outgoing"
+                            | "reference",
+                        );
+                        setTarget("");
+                        setTargetStep("");
+                      }}
+                    >
+                      <option value="outgoing">
+                        この手順から、次の業務へ渡す
+                      </option>
+                      <option value="incoming">
+                        前の業務から、この手順で受け取る
+                      </option>
+                      <option value="reference">
+                        前の業務が作った情報を、この手順で使う
+                      </option>
+                    </select>
+                  </label>
                   <label className="kg-edit-field">
                     接続する業務を検索
                     <input
@@ -1219,7 +1279,11 @@ export function InputWorkbench({
                     />
                   </label>
                   <label className="kg-edit-field">
-                    次の業務
+                    {handoffDirection !== "outgoing"
+                      ? handoffDirection === "reference"
+                        ? "情報を作る業務"
+                        : "受取元の業務"
+                      : "次の業務"}
                     <select
                       value={target}
                       onChange={(e) => {
@@ -1238,12 +1302,20 @@ export function InputWorkbench({
                     </select>
                   </label>
                   <label className="kg-edit-field">
-                    受け取る手順
+                    {handoffDirection !== "outgoing"
+                      ? handoffDirection === "reference"
+                        ? "情報を作る手順"
+                        : "送り出す手順"
+                      : "受け取る手順"}
                     <select
                       value={targetStep}
                       onChange={(e) => setTargetStep(e.target.value)}
                     >
-                      <option value="">受取手順は未確認</option>
+                      <option value="">
+                        {handoffDirection !== "outgoing"
+                          ? "前の業務の手順は未確認"
+                          : "受取手順は未確認"}
+                      </option>
                       {getWorkflowProcesses(graph, target).map((p) => (
                         <option
                           key={p.id}
@@ -1255,7 +1327,11 @@ export function InputWorkbench({
                     </select>
                   </label>
                   <label className="kg-edit-field">
-                    何を渡して、どの仕事が動くか
+                    {handoffDirection !== "outgoing"
+                      ? handoffDirection === "reference"
+                        ? "何の情報を、何のために使うか"
+                        : "何を受け取って、この仕事が動くか"
+                      : "何を渡して、どの仕事が動くか"}
                     <input
                       value={handoffText}
                       onChange={(e) => setHandoffText(e.target.value)}
@@ -1264,10 +1340,51 @@ export function InputWorkbench({
                   <button
                     disabled={!target || !handoffText.trim() || busy}
                     onClick={() => {
+                      if (handoffDirection !== "outgoing") {
+                        update({
+                          ...review,
+                          incomingHandoffs: [
+                            ...(review.incomingHandoffs ?? []).filter(
+                              (h) =>
+                                !(
+                                  h.toStepKey === selected.stepKey &&
+                                  h.sourceWorkflowId === target
+                                ),
+                            ),
+                            {
+                              via:
+                                handoffDirection === "reference"
+                                  ? "reference"
+                                  : "handoff",
+                              sourceWorkflowId: target,
+                              sourceStepKey: targetStep || undefined,
+                              toStepKey: selected.stepKey,
+                              data: selected.data
+                                .filter((d) =>
+                                  ["read", "receive"].includes(d.operation),
+                                )
+                                .map((d) => d.name),
+                              description: handoffText,
+                              evidence: `利用者の補足：${handoffText}`,
+                              certainty: "confirmed",
+                              origin: "human",
+                            },
+                          ],
+                        });
+                        setTarget("");
+                        setHandoffText("");
+                        return;
+                      }
                       update({
                         ...review,
                         handoffs: [
-                          ...(review.handoffs ?? []),
+                          ...(review.handoffs ?? []).filter(
+                            (h) =>
+                              !(
+                                h.fromStepKey === selected.stepKey &&
+                                h.targetWorkflowId === target
+                              ),
+                          ),
                           {
                             fromStepKey: selected.stepKey,
                             targetWorkflowId: target,
@@ -1282,6 +1399,7 @@ export function InputWorkbench({
                             description: handoffText,
                             evidence: `利用者の補足：${handoffText}`,
                             certainty: "confirmed",
+                            origin: "human",
                           },
                         ],
                       });
@@ -1289,7 +1407,11 @@ export function InputWorkbench({
                       setHandoffText("");
                     }}
                   >
-                    この業務へ接続する
+                    {handoffDirection !== "outgoing"
+                      ? handoffDirection === "reference"
+                        ? "この情報の作成元へつなぐ"
+                        : "この業務から受け取る"
+                      : "この業務へ接続する"}
                   </button>
                 </details>
               )}

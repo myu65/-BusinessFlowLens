@@ -63,6 +63,16 @@ export function CompanyMap({
     const a = activities.find((a) => a.id === id)!;
     const rows = a.rows.filter((r) => visible.has(r.workflow.id));
     const departments = [...new Set(rows.flatMap((r) => r.departments))];
+    const actors = [
+      ...new Set(
+        rows.flatMap((r) =>
+          r.processes
+            .filter((p) => p.executionMode !== "automatic")
+            .map((p) => p.actor)
+            .filter(Boolean),
+        ),
+      ),
+    ];
     return (
       <button
         className={
@@ -74,8 +84,11 @@ export function CompanyMap({
         onClick={() => choose(id)}
       >
         <strong>{a.name}</strong>
+        {a.certainty && a.certainty !== "confirmed" && (
+          <small>話からの整理案</small>
+        )}
         <span>
-          {rows.length}業務 · {departments[0] ?? "担当未登録"}
+          {rows.length}業務 · {departments[0] ?? actors[0] ?? "担当は未確認"}
           {departments.length > 1 ? ` ほか${departments.length - 1}部署` : ""}
         </span>
       </button>
@@ -146,7 +159,7 @@ export function CompanyMap({
           <p className="company-map-caption">
             登録された受渡しの一例{" "}
             <span>
-              矢印は、登録された活動間の受渡しです。
+              矢印は、登録された活動間の受渡しや情報の参照です。
               {path.some((c) => c.status !== "confirmed") &&
                 " 点線の矢印（⇢）は要確認です。"}
             </span>
@@ -210,10 +223,31 @@ export function CompanyMap({
             <section className="company-detail-center">
               <h4>ここで行う仕事</h4>
               <p>{selected.description}</p>
+              {selected.evidence && (
+                <details>
+                  <summary>活動のまとまりの根拠</summary>
+                  <blockquote>{selected.evidence}</blockquote>
+                  <p>
+                    {selected.certainty === "confirmed"
+                      ? "確認済み"
+                      : "話をまとめる整理案です。内容を確認・訂正できます。"}
+                  </p>
+                </details>
+              )}
               <p>
                 担当：
                 {[...new Set(rows.flatMap((r) => r.departments))].join(" / ") ||
-                  "未登録"}
+                  [
+                    ...new Set(
+                      rows.flatMap((r) =>
+                        r.processes
+                          .filter((p) => p.executionMode !== "automatic")
+                          .map((p) => p.actor)
+                          .filter(Boolean),
+                      ),
+                    ),
+                  ].join(" / ") ||
+                  "担当は未確認"}
               </p>
               <p>
                 {rows.length}業務 ·{" "}

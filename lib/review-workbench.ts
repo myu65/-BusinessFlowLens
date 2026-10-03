@@ -8,6 +8,11 @@ import {
   type Workflow,
 } from "./graph";
 import { findConfirmedAsset } from "./refinement";
+import {
+  applyInputOrganization,
+  emptyInputKnowledge,
+  reviewedWorkflowName,
+} from "./input-knowledge";
 
 export const NEW_MEMO_ID = "__new_memo__";
 
@@ -189,6 +194,7 @@ export function previewReviewGraph(
     graph,
     {
       ...workflow,
+      name: reviewedWorkflowName(workflow, review),
       summary: review.summary,
       trigger: review.trigger,
       outcome: review.outcome,
@@ -199,11 +205,20 @@ export function previewReviewGraph(
         questions: review.questions,
         warnings: review.warnings,
         excludedSteps: review.excludedSteps,
+        extraction: review.extraction,
+        protectedDetails: review.protectedDetails,
+        organization: review.organization,
+        systemProfiles: review.systemProfiles,
       },
     },
     patch,
   );
-  return applyReviewConnections(projected, workflow, review);
+  return applyInputOrganization(
+    applyReviewConnections(projected, workflow, review),
+    workflow,
+    review,
+    graph,
+  );
 }
 
 export function applyReviewConnections(
@@ -211,9 +226,9 @@ export function applyReviewConnections(
   workflow: Workflow,
   review: ExtractionReview,
 ) {
-  if (!review.handoffs) return graph;
+  if (!review.handoffs && !review.incomingHandoffs) return graph;
   const prior = graph.knowledge?.handoffs ?? [];
-  const handoffs = review.handoffs.flatMap((h, index) => {
+  const handoffs = (review.handoffs ?? []).flatMap((h, index) => {
     const target = graph.workflows.find(
       (w) =>
         w.id === h.targetWorkflowId &&
@@ -236,7 +251,10 @@ export function applyReviewConnections(
       : undefined;
     return [
       {
-        id: `input-handoff:${workflow.id}:${index}`,
+        id: `input-handoff:${workflow.id}:out:${index}`,
+        reviewedWorkflowId: workflow.id,
+        origin: h.origin,
+        via: h.via,
         sourceWorkflowId: workflow.id,
         sourceProcessId: source.id,
         targetWorkflowId: target.id,
@@ -252,28 +270,83 @@ export function applyReviewConnections(
       },
     ];
   });
-  const knowledge = graph.knowledge ?? {
-    name: "入力から育つ業務構造",
-    description: "入力された話と確認された関係",
-    activities: [],
-    categories: [],
-    systems: [],
-    criticalWorkflows: [],
-  };
+  const incoming = (review.incomingHandoffs ?? []).flatMap((h, index) => {
+    const source = graph.workflows.find(
+      (w) =>
+        w.id === h.sourceWorkflowId &&
+        w.id !== workflow.id &&
+        (w.scenario ?? "current") === (workflow.scenario ?? "current"),
+    );
+    const targetProcess = graph.nodes.find(
+      (n) =>
+        n.kind === "process" &&
+        n.workflowId === workflow.id &&
+        n.canonicalKey.split(":").at(-1) === h.toStepKey,
+    );
+    if (!source || !targetProcess) return [];
+    const sourceProcess = graph.nodes.find(
+      (n) =>
+        n.kind === "process" &&
+        n.workflowId === source.id &&
+        n.canonicalKey.split(":").at(-1) === h.sourceStepKey,
+    );
+    return [
+      {
+        id: `input-handoff:${workflow.id}:in:${index}`,
+        reviewedWorkflowId: workflow.id,
+        origin: h.origin,
+        via: h.via,
+        sourceWorkflowId: source.id,
+        sourceProcessId: sourceProcess?.id,
+        targetWorkflowId: workflow.id,
+        targetProcessId: targetProcess.id,
+        dataIds: h.data.flatMap((name) => {
+          const n = findConfirmedAsset(graph, "data", name);
+          return n ? [n.id] : [];
+        }),
+        description: h.description,
+        kind: "information" as const,
+        evidence: h.evidence,
+        status: h.certainty,
+      },
+    ];
+  });
+  const knowledge = graph.knowledge ?? emptyInputKnowledge();
+  const preserved = prior.filter((h) =>
+    h.reviewedWorkflowId
+      ? h.reviewedWorkflowId !== workflow.id
+      : !(
+          h.sourceWorkflowId === workflow.id &&
+          (h.sourceProcessId || h.id.startsWith("input-handoff:"))
+        ),
+  );
+  const connectionKey = (
+    h: NonNullable<LensGraph["knowledge"]>["handoffs"] extends
+      | Array<infer T>
+      | undefined
+      ? T
+      : never,
+  ) =>
+    JSON.stringify([
+      h.sourceWorkflowId,
+      h.targetWorkflowId,
+      h.sourceProcessId,
+      h.targetProcessId,
+      [...h.dataIds].sort(),
+      h.description,
+    ]);
+  const seen = new Set(preserved.map(connectionKey));
+  const additions = [...handoffs, ...incoming].filter((h) => {
+    const key = connectionKey(h);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
   return {
     ...graph,
     knowledge: {
       ...knowledge,
-      handoffs: [
-        ...prior.filter(
-          (h) =>
-            !(
-              h.sourceWorkflowId === workflow.id &&
-              (h.sourceProcessId || h.id.startsWith("input-handoff:"))
-            ),
-        ),
-        ...handoffs,
-      ],
+      handoffs: [...preserved, ...additions],
     },
   };
 }
@@ -354,7 +427,11 @@ export function diffReviews(
     ),
     ...(r?.handoffs ?? []).map(
       (h) =>
-        `${h.fromStepKey} → 業務:${h.targetWorkflowId} / 受取:${h.targetStepKey ?? "未確認"} / ${h.data.join("、")} / ${h.description}`,
+        `${h.fromStepKey} → 業務:${h.targetWorkflowId} / ${h.via === "reference" ? "参照" : "受渡し"} / 受取:${h.targetStepKey ?? "未確認"} / ${h.data.join("、")} / ${h.description}`,
+    ),
+    ...(r?.incomingHandoffs ?? []).map(
+      (h) =>
+        `業務:${h.sourceWorkflowId} / ${h.via === "reference" ? "参照" : "受渡し"} / 送元:${h.sourceStepKey ?? "未確認"} → ${h.toStepKey} / ${h.data.join("、")} / ${h.description}`,
     ),
     ...(r?.dataFlows ?? []).map(
       (f) =>

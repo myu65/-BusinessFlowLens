@@ -33,6 +33,35 @@ export function stepContext(
     )
     .map((edge) => ({ edge, step: byId.get(edge.source)! }));
   const links = step ? getProcessAssetLinks(graph, step.id) : [];
+  const scenarios = new Map(
+    graph.workflows.map((w) => [w.id, w.scenario ?? "current"]),
+  );
+  const scenario = scenarios.get(workflowId) ?? "current";
+  const related = (graph.knowledge?.handoffs ?? []).filter((h) =>
+    [h.sourceWorkflowId, h.targetWorkflowId].every(
+      (id) => scenarios.get(id) === scenario,
+    ),
+  );
+  const incomingHandoffs = related.filter(
+    (h) =>
+      h.targetWorkflowId === workflowId &&
+      h.targetProcessId === stepId &&
+      !!step,
+  );
+  const outgoingHandoffs = related.filter(
+    (h) =>
+      h.sourceWorkflowId === workflowId &&
+      h.sourceProcessId === stepId &&
+      !!step,
+  );
+  const receivedIds = new Set(
+    incomingHandoffs
+      .filter((h) => h.kind === "information")
+      .flatMap((h) => h.dataIds),
+  );
+  const receivedData = graph.nodes.filter(
+    (n) => n.kind === "data" && receivedIds.has(n.id),
+  );
   const unique = (nodes: LensNode[]) => [
     ...new Map(nodes.map((n) => [n.id, n])).values(),
   ];
@@ -47,14 +76,17 @@ export function stepContext(
         : undefined,
     outgoing,
     incoming,
+    incomingHandoffs,
+    outgoingHandoffs,
     systems: unique(
       links.filter((l) => l.asset.kind === "system").map((l) => l.asset),
     ),
-    inputs: unique(
-      links
+    inputs: unique([
+      ...receivedData,
+      ...links
         .filter((l) => l.asset.kind === "data" && l.relation === "reads")
         .map((l) => l.asset),
-    ),
+    ]),
     outputs: unique(
       links
         .filter(
@@ -78,6 +110,7 @@ export type FlowJourney = {
   workflowId: string;
   stepId?: string;
   dataId?: string;
+  depth?: "summary" | "step" | "detail";
   trail: Array<{
     workflowId: string;
     stepId: string;
@@ -139,6 +172,7 @@ export function handoffJourney(
       };
   return {
     workflowId: forward ? handoff.targetWorkflowId : handoff.sourceWorkflowId,
+    depth: previous?.depth,
     ...entry,
     trail: [
       ...(previous?.workflowId === fromWorkflowId ? previous.trail : []),
@@ -166,11 +200,21 @@ export function traceData(
     const transfers = context.transfers.filter((f) =>
       f.dataIds.includes(dataId),
     );
-    return operations.length || transfers.length
+    const handoffOperations = [
+      ...context.incomingHandoffs
+        .filter((h) => h.kind === "information" && h.dataIds.includes(dataId))
+        .map((h) => (h.via === "reference" ? "業務間の参照" : "業務間の受取")),
+      ...context.outgoingHandoffs
+        .filter((h) => h.kind === "information" && h.dataIds.includes(dataId))
+        .map((h) =>
+          h.via === "reference" ? "別業務での参照" : "業務間の受渡し",
+        ),
+    ];
+    return operations.length || transfers.length || handoffOperations.length
       ? [
           {
             step,
-            operations: [...new Set(operations)],
+            operations: [...new Set([...operations, ...handoffOperations])],
             systems: context.systems,
             executingSystems: context.executingSystems,
             transfers,

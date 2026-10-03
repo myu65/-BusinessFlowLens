@@ -188,6 +188,18 @@ export function buildExtractionContext(
     },
     systems: assets("system"),
     data: assets("data"),
+    organization: {
+      activities: (graph.knowledge?.activities ?? [])
+        .slice(0, 30)
+        .map((a) => ({
+          name: a.name,
+          capabilities: a.capabilities.slice(0, 20).map((c) => c.name),
+          certainty: a.certainty ?? "unknown",
+        })),
+      systemCategories: (graph.knowledge?.categories ?? [])
+        .slice(0, 30)
+        .map((c) => ({ name: c.name, description: compact(c.description) })),
+    },
     workflows: workflows.map(({ workflow: w }) => {
       const ordered = [...(processesByWorkflow.get(w.id) ?? [])].sort(
         (a, b) => (a.stepOrder ?? 0) - (b.stepOrder ?? 0),

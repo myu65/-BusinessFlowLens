@@ -14,6 +14,10 @@ import {
 } from "@/lib/ai/provider";
 import { getBusinessFlowRepository } from "@/lib/storage";
 import { applyReviewConnections } from "@/lib/review-workbench";
+import {
+  applyInputOrganization,
+  reviewedWorkflowName,
+} from "@/lib/input-knowledge";
 
 type ApplyRequest = {
   projectId?: string;
@@ -65,6 +69,7 @@ export async function POST(request: Request) {
 
     const reviewedWorkflow: Workflow = {
       ...body.workflow,
+      name: reviewedWorkflowName(body.workflow, result.review),
       summary: result.review.summary,
       trigger: result.review.trigger,
       outcome: result.review.outcome,
@@ -78,12 +83,20 @@ export async function POST(request: Request) {
         excludedSteps: result.review.excludedSteps,
         extraction: result.review.extraction,
         protectedDetails: result.review.protectedDetails,
+        organization: result.review.organization,
+        systemProfiles: result.review.systemProfiles,
       },
     };
-    const graph = applyReviewConnections(
+    const connected = applyReviewConnections(
       replaceWorkflowGraph(body.graph, reviewedWorkflow, result.patch),
       reviewedWorkflow,
       result.review,
+    );
+    const graph = applyInputOrganization(
+      connected,
+      reviewedWorkflow,
+      result.review,
+      body.graph,
     );
 
     const projectId = body.projectId?.trim() || "default";
@@ -102,7 +115,7 @@ export async function POST(request: Request) {
     const revision = await repository.appendWorkflowRevision({
       projectId,
       workflowId: body.workflow.id,
-      workflowName: body.workflow.name,
+      workflowName: reviewedWorkflow.name,
       workflowDescription: body.workflow.description,
       familyId: body.workflow.familyId ?? body.workflow.id,
       scenario: body.workflow.scenario ?? "current",

@@ -16,6 +16,7 @@ import { CompanyOrientation } from "./CompanyOrientation";
 import { termExplanation } from "@/lib/knowledge-guide";
 import { KnowledgeEditor } from "./KnowledgeEditor";
 import { createChemicalCompany } from "@/lib/chemical-company";
+import { inputSystemRoles } from "@/lib/input-knowledge";
 
 type Focus =
   | { kind: "company" | "systems" }
@@ -515,6 +516,9 @@ export function KnowledgeExplorer({
       {activity && (
         <>
           <h2>{activity.name}</h2>
+          {activity.certainty && activity.certainty !== "confirmed" && (
+            <p>入力された話からの整理案です。</p>
+          )}
           <p>{activity.description}</p>
           <p className="kg-context">
             ここでは、この活動に必要な「仕事の種類」を選びます。たとえば受注登録は仕事の種類で、工場ごとに担当部署や手順が違います。
@@ -529,6 +533,9 @@ export function KnowledgeExplorer({
                   onClick={() => go({ kind: "capability", id: c.id })}
                 >
                   <strong>{c.name}</strong>
+                  {c.certainty && c.certainty !== "confirmed" && (
+                    <small> 整理案</small>
+                  )}
                   <p>{c.description}</p>
                   {c.rows.length}業務
                 </button>
@@ -847,13 +854,22 @@ export function KnowledgeExplorer({
                 (s) => s.systemId === n.id,
               );
               const related = view.systemProfile(n.id);
+              const roles = inputSystemRoles(
+                graph,
+                n.id,
+                related.direct.map((r) => r.workflow.id),
+              );
+              const purpose = profile?.purpose || roles[0]?.purpose;
               return (
                 <button
                   key={n.id}
                   onClick={() => go({ kind: "asset", id: n.id })}
                 >
                   <strong>{n.label}</strong>
-                  <p>{profile?.purpose ?? n.description}</p>
+                  <p>{purpose || termExplanation(n.label) || n.description}</p>
+                  {!profile?.purpose && roles.length > 0 && (
+                    <small>入力で分かった役割の一例</small>
+                  )}
                   <span>
                     {graph.knowledge?.categories.find(
                       (c) => c.id === profile?.categoryId,
@@ -928,7 +944,62 @@ export function KnowledgeExplorer({
             <p className="kg-term">{termExplanation(asset.label)}</p>
           )}
           <p>{impact.profile?.purpose ?? asset.description}</p>
-          <p>管理部署: {impact.profile?.owner ?? "未登録"}</p>
+          {impact.profile?.certainty && (
+            <p>
+              {impact.profile.certainty === "confirmed"
+                ? "原文にある役割"
+                : "入力された話からの整理案"}{" "}
+              · 根拠：{impact.profile.evidence || "未確認"}
+            </p>
+          )}
+          <p>管理部署: {impact.profile?.owner || "未登録"}</p>
+          {asset.kind === "system" &&
+            (() => {
+              const roles = inputSystemRoles(
+                graph,
+                asset.id,
+                impact.direct.map((r) => r.workflow.id),
+              );
+              const role = (r: (typeof roles)[number]) => (
+                <li key={`${r.workflowId}:${r.name}`}>
+                  <button
+                    onClick={() => go({ kind: "workflow", id: r.workflowId })}
+                  >
+                    {r.workflowName}
+                  </button>
+                  <p>{r.purpose}</p>
+                  <small>
+                    {r.certainty === "confirmed"
+                      ? "原文に明示"
+                      : r.certainty === "unknown"
+                        ? "対応は未確認"
+                        : "整理案・要確認"}{" "}
+                    · 根拠：{r.evidence}
+                  </small>
+                </li>
+              );
+              return (
+                roles.length > 0 && (
+                  <section aria-label="入力した話ごとのシステムの役割">
+                    <h3>この道具は、どの仕事で何をする？</h3>
+                    <ul>{roles.slice(0, 3).map(role)}</ul>
+                    {roles.length > 3 && (
+                      <details>
+                        <summary>
+                          ほか{roles.length - 3}業務の役割を見る
+                        </summary>
+                        <ul>{roles.slice(3, 20).map(role)}</ul>
+                        {roles.length > 20 && (
+                          <p>
+                            ここでは20業務まで表示しています。ほかの役割は、下の業務一覧から確認できます。
+                          </p>
+                        )}
+                      </details>
+                    )}
+                  </section>
+                )
+              );
+            })()}
           <p className="kg-context">
             {asset.kind === "data"
               ? "これは業務で受け取り、参照・更新する情報です。下で、その情報を使う仕事と、受渡し先を確かめられます。"
@@ -1043,9 +1114,14 @@ export function KnowledgeExplorer({
             </p>
           )}
           <h3>
-            情報はどこから来て、どこへ渡るか（
+            道具の間で情報を渡す経路（
             {impact.flows.length}）
           </h3>
+          {!impact.flows.length && (
+            <p className="kg-context">
+              別の道具への転送は、まだ説明されていません。人や業務への受渡しは、上の手順から辿れます。
+            </p>
+          )}
           <div className="kg-links">
             {impact.flows.slice(0, 30).map((f) => (
               <article key={f.id}>

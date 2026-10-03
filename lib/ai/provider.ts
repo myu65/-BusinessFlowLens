@@ -4,6 +4,11 @@ import { buildExtractionContext } from "./context";
 import type { AIConfigurationStatus } from "./status";
 import { AIProviderError } from "./errors";
 import { callCodexModel } from "./codex";
+import {
+  validateReviewConnections,
+  validateAITransitions,
+} from "../review-connections";
+import { retainRegisteredGrouping } from "../input-knowledge";
 import type {
   Confidence,
   ExtractionQuestion,
@@ -55,6 +60,39 @@ const WORKFLOW_DRAFT_SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
+    organization: {
+      type: ["object", "null"],
+      additionalProperties: false,
+      properties: {
+        title: { type: "string", maxLength: 40 },
+        activity: { type: "string", maxLength: 24 },
+        capability: { type: "string", maxLength: 24 },
+        certainty: {
+          type: "string",
+          enum: ["confirmed", "inferred", "unknown"],
+        },
+        evidence: { type: "string" },
+      },
+      required: ["title", "activity", "capability", "certainty", "evidence"],
+    },
+    systemProfiles: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          name: { type: "string" },
+          category: { type: "string" },
+          purpose: { type: "string" },
+          certainty: {
+            type: "string",
+            enum: ["confirmed", "inferred", "unknown"],
+          },
+          evidence: { type: "string" },
+        },
+        required: ["name", "category", "purpose", "certainty", "evidence"],
+      },
+    },
     summary: { type: "string" },
     trigger: { type: ["string", "null"] },
     outcome: { type: ["string", "null"] },
@@ -270,6 +308,36 @@ const WORKFLOW_DRAFT_SCHEMA = {
         ],
       },
     },
+    incomingHandoffs: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          via: { type: "string", enum: ["handoff", "reference"] },
+          sourceWorkflowId: { type: "string" },
+          sourceStepKey: { type: ["string", "null"] },
+          toStepKey: { type: "string" },
+          data: { type: "array", items: { type: "string" } },
+          description: { type: "string" },
+          evidence: { type: "string" },
+          certainty: {
+            type: "string",
+            enum: ["confirmed", "inferred", "unknown"],
+          },
+        },
+        required: [
+          "via",
+          "sourceWorkflowId",
+          "sourceStepKey",
+          "toStepKey",
+          "data",
+          "description",
+          "evidence",
+          "certainty",
+        ],
+      },
+    },
     dataFlows: {
       type: "array",
       items: {
@@ -359,6 +427,9 @@ const WORKFLOW_DRAFT_SCHEMA = {
     },
   },
   required: [
+    "organization",
+    "systemProfiles",
+    "incomingHandoffs",
     "summary",
     "trigger",
     "outcome",
@@ -501,6 +572,7 @@ async function structuredCall<T>(args: {
 
   if (env("AI_RUNTIME") === "codex" && model) {
     return callCodexModel<T>({
+      task: args.schemaName,
       model,
       schema: args.schema,
       system: args.system,
@@ -634,10 +706,14 @@ Rules:
 2. A step is an activity with an actor/action/outcome. Do not create a step for a noun.
 3. Only list a system when the transcript names a system, application, spreadsheet, email, portal, screen, tool, or clearly says a system is used. "Check inventory" does NOT imply an inventory system.
 4. Data may be explicit ("order data", "customer master", "Excel row") or strongly implied by an explicit read/write operation. Mark the containing step inferred when the business object itself is inferred.
+4a. Receiving or reading an existing decision/quantity is receive/read, not create. A person entering it into a system may also update a record, but must not appear to originate the upstream decision. Include the named incoming information on the receiving step.
 5. Do not invent integrations, APIs, databases, owners, approval rules, automation, or master-data sources.
 6. Evidence must be a short phrase grounded in the interview. Do not paraphrase invented detail into evidence.
 7. Separate actor, department/team, responsible person, and system. "営業部の田中さんがERPに入力" => department=営業部; responsiblePerson=田中さん; actor may be 営業担当; system=ERP. Do not infer department/person when not stated.
 8. Capture branches and conditions as transitions. Do not force a single linear flow when the interview describes alternatives. Stops, holds, returns and release/resume points must have explicit evidence. If a destination is missing, ask a handoff/exception question and leave it unconnected.
+8b. A condition for a later action must not become a prerequisite of the preceding check. 'Compare the quantity; if it matches, record receipt' => the comparison runs without that condition, and only recording receipt is conditional. A judgment's possible result is not its execution condition.
+8c. Keep distinct exceptions distinct. An unusable raw-material lot causes a request to confirm that lot; a process-temperature deviation causes a product-inspection request. A shared recipient or the word 'hold' does not connect those different exceptions. Emit a separate exception step when the source states a separate action. Never route a branch to a step whose stated triggering condition is incompatible with that branch. Unknown restart points stay unconnected and become questions.
+8d. Never use a self-loop to represent a conditional action, a child operation, or a stop inside the same step. A transition to the same step is allowed only when the source explicitly states repeating that action, with the literal repeat clause as evidence. A hold with an unknown restart has no outgoing restart transition. A separate confirmation request before production and a product inspection after production are separate branch steps, even if both go to quality control.
 8a. meaning captures business changes: purpose (why), basis (evidence used for judgment), result (what is decided/changed), next (what work this result triggers), condition and halt. Leave unmentioned strings empty, certainty=unknown or inferred; use null if nothing is known. Do not repeat a generic record name as a business outcome, invent a credit/ATP rule, or assume that checking inventory means shipment is allowed. Keep the exact supporting source in evidence.
 9. Capture system-to-system dataFlows ONLY when the transcript explicitly describes information moving from one named system/tool to another, including human transcription. Examples: "ERPからWMSへCSVを送る", "Excelを見ながらERPへ手入力". Do NOT infer an API or integration merely because two systems appear in adjacent steps.
 10. For each dataFlow record source system, target system, transferred business data, transferType, direction, automation, frequency if stated, evidence, and relatedStepKeys. Use unknown rather than guessing a transfer method.
@@ -653,13 +729,21 @@ Rules:
 16. Set executingSystem ONLY when the interview explicitly says or very clearly describes a named System performing the step automatically. Example: "SAPが自動で在庫を引き当てる" => executionMode=automatic, executingSystem=SAP. "SAPで在庫を確認する" does NOT imply SAP executes the business step; that is usually a manual step using SAP.
 17. Automatic internal System execution is NOT a dataFlow. "ERP automatically assigns an order number" is an automatic Process step. "ERP sends the order to WMS" is a dataFlow and may also cause a later automatic Process step in WMS if explicitly described.
 17a. executionContext contains only the explicitly stated trigger, rule and failure/exception for that step. Use null when none are stated; unknown fields are empty strings. Do not infer rules from standard ERP practice.
-18a. Emit handoffs only to IDs in the provided workflow catalog. Keep the source step, transferred Data and interview evidence. A targetStepKey must be null unless a specific receiving step is known. Workflow name similarity alone is inferred, not confirmed. Unknown destinations must become questions.
+18a. Emit handoffs only to IDs in the provided workflow catalog. Keep the source step, transferred Data and interview evidence. A targetStepKey must be null unless a specific receiving step is known. Workflow name similarity alone cannot establish a handoff; ask a question instead. Unknown destinations must become questions.
+18b. When this new story receives an output from an existing workflow, emit incomingHandoffs with the catalog sourceWorkflowId, sourceStepKey (null if unknown), this draft's toStepKey, the transferred data and source evidence. Use both the interview and the catalog's result/data to identify the source; a similar name alone is insufficient. Do not create fake IDs for unregistered work. Keep ambiguous matches unconnected with a question. An incoming connection is distinct from an outgoing handoff.
+18c. Mentioning a workflow as outside the scope or something to explain later is not a handoff. An outgoing handoff needs an actual described transfer or triggering result. incomingHandoffs may be via=handoff for a described receipt, or via=reference for an explicitly stated read of a named output from a specific existing workflow. Referencing a shared record is not a notification, API or file delivery; preserve that distinction in the description. Use the causal clause as evidence, not just a workflow name. Ask a question rather than linking work based only on a mention or name similarity.
 18. Existing System/Data/Workflow context may be provided as reference candidates. Use it to understand aliases, shorthand, and handoffs, but NEVER treat a candidate as confirmed solely because it exists in the catalog.
 19. "ERP" may plausibly refer to an existing SAP system, and "いつもの出荷処理" may plausibly refer to an existing shipping workflow. Preserve the interview wording/evidence and surface uncertainty rather than inventing or silently canonicalizing.
 20. Follow-up answers are additional interview evidence. Incorporate them into steps, ownership, execution mode, executing System, data flows, trigger/outcome, warnings, and questions. Remove questions that are answered.
 21. certainty=explicit unless the step itself requires a modest inference to make the workflow coherent.
 22. technicalDetails records ONLY explicitly stated system, SAP module, transaction/app, HANA area/schema and physical objects. Never derive transaction codes or tables from a business action. Use null for unknown fields. Physical objects belong here, not in business data unless explicitly described as business data too.
 23. detailSteps are ordered child operations of this business step, with a condition when explicitly stated. Use [] if no detailed operations are stated. Preserve current human edits and stable child IDs. Never expand vague notes into invented detail.
+24. organization is a concise title for this story, an understandable company activity (what the company accomplishes), and a capability (a type of work under it). Use plain Japanese rather than Activity/Capability jargon. Reuse suitable names from the organization catalog rather than adding synonyms. This is an organizing proposal, not a new business fact: certainty=inferred unless the interview explicitly states the classification. Evidence must quote the supporting interview. Use null, or empty activity/capability, when there is insufficient context. Keep the title specific and short; omit '入力した話'. Do not invent a company name, hierarchy of departments, or enterprise-wide value chain.
+24a. activity is broader than the individual workflow and should group several types of work. For example a production-planning story might have activity '製品をつくる' and capability '製造計画'; this is a grouping proposal only. Do not copy this story's detailed actions or quantities into the activity label. Prefer short, familiar words. Do not put a planning story into a sales activity merely because sales is its upstream source.
+25. systemProfiles describe each named tool's category and purpose in THIS interview. Categories are editable organization labels; reuse suitable catalog category names. Include groupware, infrastructure and local tools as named tools, not miscellaneous. Mark classifications inferred unless explicit; explain only the stated role, and never assume dependencies, owners or integrations from product knowledge. Use empty strings for unknown role/category. System names must match the draft mentions.
+25a. A category groups the stated role, not an assumed vendor architecture. When the role is clear, propose a short editable category with certainty=inferred. For example, notices and collaboration can be '連絡・共同作業', transaction records '取引・業務処理', spreadsheet adjustments '部門の作業道具', and laboratory judgments '検査・品質管理'. These are examples, not a fixed taxonomy. Keep category empty only when there is no basis to organize the stated role. An unknown category must never erase a known purpose.
+26. Keep the draft concise. Use short phrases for meaning (usually 10-35 Japanese characters), summaries under 120 Japanese characters, and minimal verbatim evidence phrases. Do not repeat the whole action in purpose, basis, result and next; leave absent facts empty. A single business check can have several ordered child operations instead of turning every small interaction into a separate top-level step, but preserve separate human judgments, automatic system decisions and exception branches. System/Data mention evidence should be just the relevant short source phrase. Never shorten by dropping a stated condition or changing its meaning.
+27. Describe connections in plain business terms: what information is used or received and what job it enables. Do not add implementation commentary or explain absent APIs/transfers in the description; use via to distinguish a reference from a handoff. Put any missing transfer method in questions only if it materially affects understanding.
 
 Write concise Japanese labels/descriptions when the interview is Japanese.`;
 }
@@ -827,7 +911,7 @@ async function resolveAssets(
   const exact = new Map<string, AssetResolution>();
   for (const candidate of candidates) {
     const confirmed = findConfirmedAsset(graph, candidate.kind, candidate.name);
-    if (confirmed)
+    if (confirmed?.status === "confirmed")
       exact.set(candidate.candidateId, {
         candidateId: candidate.candidateId,
         decision: "reuse",
@@ -1209,6 +1293,24 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
     }));
 
   return {
+    organization: raw.organization,
+    systemProfiles: raw.systemProfiles?.filter(
+      (p) => p.name?.trim() && p.evidence?.trim(),
+    ),
+    incomingHandoffs: raw.incomingHandoffs
+      ?.filter(
+        (h) =>
+          validKeys.has(normalizeName(h.toStepKey)) &&
+          h.sourceWorkflowId &&
+          h.evidence?.trim(),
+      )
+      .map((h) => ({
+        ...h,
+        toStepKey: normalizeName(h.toStepKey),
+        sourceStepKey: h.sourceStepKey
+          ? normalizeName(h.sourceStepKey)
+          : undefined,
+      })),
     summary: raw.summary ?? "",
     trigger: raw.trigger ?? null,
     outcome: raw.outcome ?? null,
@@ -1218,9 +1320,9 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
       .filter((flow) =>
         Boolean(
           flow.sourceSystem &&
-          flow.targetSystem &&
-          flow.sourceSystem !== flow.targetSystem &&
-          flow.evidence,
+            flow.targetSystem &&
+            flow.sourceSystem !== flow.targetSystem &&
+            flow.evidence,
         ),
       )
       .map((flow) => ({
@@ -1276,14 +1378,33 @@ export async function extractWorkflowReviewWithAI(args: {
       "AIの候補に手順がありませんでした。メモと前の候補は残っています。再試行してください。",
     );
   }
-  normalizeDraft(rawDraft);
+  const sourceDraft = validateAITransitions(
+    normalizeDraft(rawDraft),
+    args.interview,
+  );
 
   const draft = normalizeDraft(
-    preserveRefinements(rawDraft, args.previousReview),
+    retainRegisteredGrouping(
+      validateReviewConnections(
+        preserveRefinements(sourceDraft, args.previousReview),
+        args.graph,
+        args.workflow,
+      ),
+      args.graph,
+      args.workflow,
+    ),
   );
 
   return {
     review: {
+      organization: draft.organization
+        ? { ...draft.organization, origin: draft.organization.origin ?? "ai" }
+        : draft.organization,
+      systemProfiles: draft.systemProfiles,
+      incomingHandoffs: draft.incomingHandoffs?.map((h) => ({
+        ...h,
+        origin: h.origin ?? "ai",
+      })),
       extraction: {
         method: "ai",
         provider: providerLabel(),
@@ -1298,7 +1419,10 @@ export async function extractWorkflowReviewWithAI(args: {
       dataFlows: draft.dataFlows,
       questions: draft.questions,
       warnings: draft.warnings,
-      handoffs: draft.handoffs,
+      handoffs: draft.handoffs?.map((h) => ({
+        ...h,
+        origin: h.origin ?? "ai",
+      })),
       excludedSteps: draft.excludedSteps,
       protectedDetails: draft.protectedDetails,
     },
