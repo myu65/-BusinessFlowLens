@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { LensGraph, LensNode } from "@/lib/graph";
 import { handoffJourney, type FlowJourney } from "@/lib/flow-context";
 import {
@@ -24,6 +24,16 @@ type Focus =
       kind: "activity" | "capability" | "workflow" | "process" | "asset";
       id: string;
     };
+type ExplorationPosition = {
+  focus: Focus;
+  scope: KnowledgeScope;
+  query: string;
+  department: string;
+  category: string;
+};
+export type KnowledgeExploration = ExplorationPosition & {
+  history: ExplorationPosition[];
+};
 const mode = {
   manual: "人による作業",
   automatic: "システム自動処理",
@@ -39,6 +49,8 @@ export function KnowledgeExplorer({
   onWorkflowFocus,
   onFocusStep,
   onInput,
+  exploration,
+  onExplorationChange,
 }: {
   projectId: string;
   graph: LensGraph;
@@ -47,24 +59,21 @@ export function KnowledgeExplorer({
   onWorkflowFocus: (id: string) => void;
   onFocusStep?: (workflowId: string, stepId: string) => void;
   onInput?: (workflowId?: string) => void;
+  exploration?: KnowledgeExploration;
+  onExplorationChange?: (value: KnowledgeExploration) => void;
 }) {
   const [report, setReport] = useState<{ text: string; url: string } | null>(
     null,
   );
-  const [focus, setFocus] = useState<Focus>({ kind: "company" });
-  const [history, setHistory] = useState<
-    Array<{
-      focus: Focus;
-      scope: KnowledgeScope;
-      query: string;
-      department: string;
-      category: string;
-    }>
-  >([]);
-  const [scope, setScope] = useState<KnowledgeScope>("current");
-  const [query, setQuery] = useState("");
-  const [department, setDepartment] = useState("");
-  const [category, setCategory] = useState("");
+  const [focus, setFocus] = useState<Focus>(exploration?.focus ?? { kind: "company" });
+  const [history, setHistory] = useState<ExplorationPosition[]>(exploration?.history ?? []);
+  const [scope, setScope] = useState<KnowledgeScope>(exploration?.scope ?? "current");
+  const [query, setQuery] = useState(exploration?.query ?? "");
+  const [department, setDepartment] = useState(exploration?.department ?? "");
+  const [category, setCategory] = useState(exploration?.category ?? "");
+  useEffect(() => {
+    onExplorationChange?.({ focus, history, scope, query, department, category });
+  }, [focus, history, scope, query, department, category, onExplorationChange]);
   const [page, setPage] = useState(0);
   const [readStepId, setReadStep] = useState("");
   const [readerJourney, setReaderJourney] = useState<FlowJourney>();
@@ -370,7 +379,7 @@ export function KnowledgeExplorer({
             value={scope}
             onChange={(e) => {
               setScope(e.target.value as KnowledgeScope);
-              setFocus({ kind: "company" });
+              if (focus.kind !== "asset") setFocus({ kind: "company" });
               setHistory([]);
               setPage(0);
             }}

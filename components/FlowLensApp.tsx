@@ -2,14 +2,14 @@
 
 import { scopedDataFlows, aggregateDataFlows, scenarioGraph } from "@/lib/knowledge";
 import { DataFlowExplorer } from "./DataFlowExplorer";
-import { KnowledgeExplorer } from "./KnowledgeExplorer";
+import { KnowledgeExplorer, type KnowledgeExploration } from "./KnowledgeExplorer";
 import { InputWorkbench } from "./InputWorkbench";
-import { AssetExplorer, CrossBusinessOverview } from "./ScopedExplorers";
+import { AssetExplorer, CrossBusinessOverview, type AssetExploration } from "./ScopedExplorers";
 import { NEW_MEMO_ID, hasUnreflectedNotes, previewReviewGraph, recordReviewEdits, type InputDraft } from "@/lib/review-workbench";
 
 import { StepDetailEditor, TechnicalDetails, WorkflowExplorer } from "./ProgressiveWorkflow";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
   Controls,
@@ -2147,6 +2147,23 @@ function DataFlowView({ graph, initialWorkflowId }: { graph: LensGraph; initialW
 function Workspace() {
   const [projectId, setProjectId] = useState("default");
   const [section, setSection] = useState<Section>("interviews");
+  const [knowledgeExploration, setKnowledgeExploration] = useState<KnowledgeExploration>();
+  const [assetExploration, setAssetExploration] = useState<AssetExploration>();
+  const keepKnowledgeExploration = useCallback((value: KnowledgeExploration) => {
+    setKnowledgeExploration(value);
+    const focus = value.focus;
+    setAssetExploration(previous => focus.kind === "asset"
+      ? { id: focus.id, scope: value.scope, department: value.department }
+      : previous ? { ...previous, scope: value.scope, department: value.department } : undefined);
+  }, []);
+  const keepAssetExploration = useCallback((value: AssetExploration) => {
+    setAssetExploration(value);
+    setKnowledgeExploration(previous => ({
+      focus: { kind: "asset", id: value.id }, scope: value.scope,
+      department: value.department, query: "", category: "",
+      history: previous?.history ?? [],
+    }));
+  }, []);
   const [graph, setGraph] = useState<LensGraph>(() => createDemoGraph());
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>(
     NEW_MEMO_ID,
@@ -2336,6 +2353,8 @@ function Workspace() {
 
       {section === "company" && (hydrated ? (
         <KnowledgeExplorer
+          exploration={knowledgeExploration}
+          onExplorationChange={keepKnowledgeExploration}
           onInput={id => { setSelectedWorkflowId(id ?? NEW_MEMO_ID); navigateSection("interviews"); }}
           onFocusStep={(id, step) => setFocusedSteps(s => ({ ...s, [id]: step }))}
           projectId={projectId}
@@ -2386,7 +2405,7 @@ function Workspace() {
 
       {section === "dataflow" ? <><div hidden={!activeDraft} className="input-preview-banner">保存前の候補を表示しています。<button onClick={()=>setSection("interviews")}>入力と構造の確認へ戻る</button></div><DataFlowExplorer graph={visibleGraph} initialWorkflowId={visibleWorkflowId} onSelectWorkflow={setSelectedWorkflowId} onGraphApply={activeDraft ? ()=>setSection("interviews") : setGraph} onEdit={id => {setSelectedWorkflowId(id===activeDraft?.workflow.id ? selectedWorkflowId : id);setSection("interviews");}}><DataFlowView graph={visibleGraph} initialWorkflowId={visibleWorkflowId} /></DataFlowExplorer></> : null}
 
-      {section === "assets" ? <AssetExplorer graph={graph} onGraphApply={setGraph} onEdit={id=>{setSelectedWorkflowId(id);setSection("interviews");}} /> : null}
+      {section === "assets" ? <AssetExplorer exploration={assetExploration} onExplorationChange={keepAssetExploration} graph={graph} onGraphApply={setGraph} onEdit={id=>{setSelectedWorkflowId(id);setSection("interviews");}} /> : null}
       {section === "overview" ? <CrossBusinessOverview graph={graph} onOpen={id=>{setSelectedWorkflowId(id);setSection("interviews");}} /> : null}
     </main>
   );
