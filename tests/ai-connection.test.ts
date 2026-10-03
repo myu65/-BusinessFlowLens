@@ -102,7 +102,7 @@ test("provider failure, timeout and malformed output do not become a local extra
         AI_MODEL: "mock",
         AI_API_KEY: "secret-key",
         AI_BASE_URL: `http://127.0.0.1:${address.port}`,
-        AI_TIMEOUT_MS: "100",
+        AI_TIMEOUT_MS: "5000",
       },
       async () => {
         for (const [mode, code] of [
@@ -112,6 +112,9 @@ test("provider failure, timeout and malformed output do not become a local extra
           ["malformed", "invalid_response"],
         ]) {
           behavior = mode;
+          // Only the stalled response uses a short deadline. Under parallel CI
+          // load, a valid local 401 must not race an unrelated timeout assertion.
+          process.env.AI_TIMEOUT_MS = mode === "timeout" ? "100" : "5000";
           await assert.rejects(
             extractWorkflowReviewWithAI({
               interview: "注文が届く",
