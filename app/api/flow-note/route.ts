@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { hasAIConfig, extractWorkflowReviewWithAI } from "@/lib/ai/provider";
 import { planFlowAddition, reviewFlowNote } from "@/lib/flow-note";
 import type { LensGraph } from "@/lib/graph";
+import { safeAIError } from "@/lib/ai/errors";
 
 export async function POST(request: Request) {
   try {
@@ -17,10 +18,14 @@ export async function POST(request: Request) {
       !Array.isArray(body.graph?.nodes) ||
       !Array.isArray(body.graph?.edges) ||
       !Array.isArray(body.graph?.dataFlows) ||
-      typeof body.workflowId !== "string" || !body.workflowId ||
-      typeof body.afterStepId !== "string" || !body.afterStepId ||
-      typeof body.note !== "string" || !body.note.trim() ||
-      typeof body.id !== "string" || !body.id ||
+      typeof body.workflowId !== "string" ||
+      !body.workflowId ||
+      typeof body.afterStepId !== "string" ||
+      !body.afterStepId ||
+      typeof body.note !== "string" ||
+      !body.note.trim() ||
+      typeof body.id !== "string" ||
+      !body.id ||
       !/^[\w-]{1,80}$/.test(body.id) ||
       body.note.length > 4000
     )
@@ -56,12 +61,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ plan, provider: result.provider });
   } catch (error) {
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "メモを整理できませんでした。",
-      },
+      safeAIError(
+        error,
+        "メモを整理できませんでした。元の流れは残っています。接続先とメモを確認して再試行してください。",
+      ),
       { status: 400 },
     );
   }

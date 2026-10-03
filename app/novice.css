@@ -1,4 +1,23 @@
 /* The everyday path: write a story, check one flow, then explore the company. */
+.input-ai-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px 20px;
+  padding: 12px 16px;
+  margin-bottom: 18px;
+  border: 1px solid #ddd8cb;
+  border-radius: 10px;
+  background: #faf7ed;
+}
+.input-ai-status > div { flex: 1 1 320px; }
+.input-ai-status p { margin: 4px 0; color: #596457; font-size: 14px; }
+.input-ai-status details { max-width: 480px; }
+.input-ai-status summary { cursor: pointer; }
+.input-extraction-origin { font-size: 13px; color: #596457; margin: 8px 0; }
+.input-ai-status[data-mode="success"] { background: #f1f7ee; border-color: #bcd0b0; }
+.input-ai-status[data-mode="failure"] { background: #fff3ef; border-color: #e4c3b5; }
 .app-shell {
   font-size: 15px;
   line-height: 1.6;

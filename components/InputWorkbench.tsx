@@ -25,6 +25,7 @@ import {
   transcriptsForSave,
 } from "@/lib/review-workbench";
 import { InputReviewFlow } from "./InputReviewFlow";
+import { aiStatusLabel, type AIConfigurationStatus } from "@/lib/ai/status";
 
 const REVIEW_PAGE_SIZE = 3;
 
@@ -88,6 +89,11 @@ export function InputWorkbench({
   const [stepPage, setStepPage] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [aiConfig, setAIConfig] = useState<AIConfigurationStatus | null>(null);
+  const [aiResponse, setAIResponse] = useState<
+    "unchecked" | "success" | "failure"
+  >("unchecked");
+  const [aiConfigError, setAIConfigError] = useState(false);
   const [edit, setEdit] = useState<ExtractionReviewStep | null>(null);
   const editorRef = useRef<HTMLFieldSetElement>(null);
   const focusRef = useRef<HTMLDivElement>(null);
@@ -123,6 +129,21 @@ export function InputWorkbench({
     key,
   });
   latest.current = { graph, memo, draft, transcripts, savedTranscripts, key };
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/ai/status", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("status unavailable");
+        const value: AIConfigurationStatus = await response.json();
+        if (!cancelled) setAIConfig(value);
+      })
+      .catch(() => {
+        if (!cancelled) setAIConfigError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   useEffect(() => {
     setStepKey(focusedStepId?.split(":").at(-1) ?? "");
     const index =
@@ -248,6 +269,7 @@ export function InputWorkbench({
       const payload = await response.json();
       if (!response.ok)
         throw new Error(payload.error ?? "構造化に失敗しました。");
+      if (payload.provider !== "local-demo-extractor") setAIResponse("success");
       const next: InputDraft = {
         workflow: w,
         review: payload.review,
@@ -280,6 +302,7 @@ export function InputWorkbench({
         );
       }
     } catch (cause) {
+      if (aiConfig?.configured) setAIResponse("failure");
       setError(
         cause instanceof Error ? cause.message : "読み取りに失敗しました。",
       );
@@ -416,6 +439,51 @@ export function InputWorkbench({
           </p>
         </div>
       </header>
+      <aside
+        className="input-ai-status"
+        data-mode={aiConfig?.configured ? aiResponse : "local"}
+        aria-label="話を整理する方法"
+      >
+        <div>
+          <strong>
+            {aiConfigError
+              ? "AI設定を確認できません"
+              : aiStatusLabel(aiConfig, aiResponse)}
+          </strong>
+          <p>
+            {aiConfig?.configured
+              ? aiResponse === "success"
+                ? "AIが読み取った候補です。原文と照らして、違うところを直してください。"
+                : aiResponse === "failure"
+                  ? "メモと前の候補は残っています。接続を確認して、もう一度整理できます。"
+                  : "話を整理するときにAIへ送ります。この画面を開いてからの応答は未確認です。保存した構造の整理方法は、流れの上に表示します。"
+              : aiConfigError
+                ? "メモは書けます。整理を実行した結果で、使われた方法を確認してください。"
+                : aiConfig
+                  ? "今は書かれた文を簡易的に並べます。曖昧な話の意味や自由な補足の理解は、AI接続後に確かめます。"
+                  : "メモを書きながら、整理方法の確認を待てます。"}
+          </p>
+        </div>
+        <details>
+          <summary>整理方法と設定</summary>
+          {aiConfig?.configured ? (
+            <p>
+              設定したモデル：{aiConfig.model}
+              {aiConfig.runtime === "codex"
+                ? "（このPCのCodexログインを利用）"
+                : ""}
+              。AIの応答成功と、内容が正しいかの確認は別です。
+            </p>
+          ) : (
+            <p>
+              管理者がAIの接続先・モデル・認証を設定すると、話の意味をAIで整理できます。
+            </p>
+          )}
+          <p>
+            接続に失敗した場合、簡易整理へ自動で切り替えません。元のメモを保ってエラーを表示します。
+          </p>
+        </details>
+      </aside>
       <nav className="input-mobile-tabs" aria-label="メモと流れの表示切替">
         <button
           aria-pressed={mobilePane === "note"}
@@ -694,6 +762,15 @@ export function InputWorkbench({
               </button>
             )}
           </div>
+          {review?.extraction && (
+            <p className="input-extraction-origin">
+              この構造の整理：
+              {review.extraction.method === "ai"
+                ? `${review.extraction.model ?? review.extraction.provider}（AI）`
+                : "簡易整理"}
+              {selected?.humanEdits?.length ? " · 人の訂正を含む" : ""}
+            </p>
+          )}
           {error && (
             <p role="alert" className="error-message input-mobile-error">
               {error}

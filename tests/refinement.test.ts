@@ -35,7 +35,9 @@ const detail = {
 };
 
 test("grounded fallback distinguishes explicit internal automation from vague system use", () => {
-  const review = extractGroundedLocal("SAPが自動で在庫を引き当てる。SAPで受注を確認する。");
+  const review = extractGroundedLocal(
+    "SAPが自動で在庫を引き当てる。SAPで受注を確認する。",
+  );
   assert.equal(review.steps[0].executionMode, "automatic");
   assert.equal(review.steps[0].executingSystem, "SAP");
   assert.equal(review.steps[1].executionMode, "unknown");
@@ -211,6 +213,99 @@ test("AI omission cannot silently remove a step with manually recorded detail", 
   );
 });
 
+test("source correction updates AI-generated detail and execution context while keeping only the human-edited result", () => {
+  const previous = extractGroundedLocal("営業担当がExcelで確認する。");
+  previous.extraction = {
+    method: "ai",
+    provider: "codex-chatgpt:gpt-6-luna",
+    model: "gpt-6-luna",
+    completedAt: "2026-10-03T00:00:00Z",
+  };
+  previous.steps[0].detailSteps = [
+    {
+      id: "transfer",
+      action: "Excelへ転記する",
+      condition: null,
+      evidence: "Excelで確認",
+    },
+  ];
+  previous.steps[0].technicalDetails = [
+    { ...detail, system: "Excel", transaction: null },
+  ];
+  previous.steps[0].executionContext = {
+    trigger: "旧説明",
+    rule: "旧規則",
+    exception: "旧例外",
+  };
+  previous.steps[0].meaning = {
+    purpose: "",
+    basis: "在庫表",
+    result: "人が不足数量を確定した",
+    next: "",
+    condition: "",
+    halt: false,
+    certainty: "confirmed",
+    evidence: "人の補足",
+  };
+  previous.steps[0].humanEdits = [
+    {
+      field: "meaning.result",
+      before: "",
+      after: "人が不足数量を確定した",
+      evidence: "利用者の訂正",
+    },
+  ];
+  const raw = structuredClone(previous);
+  raw.steps[0].systems = [
+    { name: "SharePoint", interaction: "input", evidence: "SharePointに訂正" },
+  ];
+  raw.steps[0].detailSteps![0].action = "SharePointへ転記する";
+  raw.steps[0].technicalDetails = [];
+  raw.steps[0].executionContext = {
+    trigger: "新説明",
+    rule: "新規則",
+    exception: "新例外",
+  };
+  raw.steps[0].meaning!.result = "新しい抽出案";
+  const updated = preserveRefinements(raw, previous);
+  assert.equal(updated.steps[0].detailSteps![0].action, "SharePointへ転記する");
+  assert.deepEqual(updated.steps[0].technicalDetails, []);
+  assert.equal(updated.steps[0].executionContext!.trigger, "新説明");
+  assert.equal(updated.steps[0].meaning!.result, "人が不足数量を確定した");
+  assert.equal(updated.steps[0].systems[0].name, "SharePoint");
+});
+
+test("removing source-derived detail does not retain an unedited AI step, but old details with unknown origin stay protected across revisions", () => {
+  const source = refinedReview();
+  source.extraction = {
+    method: "ai",
+    provider: "test",
+    completedAt: "2026-10-03T00:00:00Z",
+  };
+  const omitted = { ...source, steps: source.steps.slice(1) };
+  assert.ok(
+    !preserveRefinements(omitted, source).steps.some(
+      (s) => s.stepKey === source.steps[0].stepKey,
+    ),
+  );
+  const legacy = refinedReview();
+  const once = preserveRefinements(
+    { ...legacy, extraction: source.extraction, steps: legacy.steps.slice(1) },
+    legacy,
+  );
+  assert.ok(
+    once.protectedDetails?.some((p) => p.stepKey === legacy.steps[0].stepKey),
+  );
+  const twice = preserveRefinements(
+    {
+      ...once,
+      steps: once.steps.filter((s) => s.stepKey !== legacy.steps[0].stepKey),
+    },
+    once,
+  );
+  assert.ok(twice.steps.some((s) => s.stepKey === legacy.steps[0].stepKey));
+});
+
 test("saving technical details and child conditions reconstructs the same review", () => {
   const graph = createDemoGraph();
   const review = refinedReview();
@@ -295,6 +390,13 @@ test("saved questions, trigger/outcome and follow-up evidence survive reload", a
     ],
     warnings: ["承認者未確認"],
     followUpAnswers: [{ question: "担当は誰？", answer: "営業部" }],
+    extraction: {
+      method: "ai",
+      provider: "codex-chatgpt:gpt-6-luna",
+      model: "gpt-6-luna",
+      completedAt: "2026-10-03T13:47:35Z",
+    },
+    protectedDetails: [{ stepKey: "receive-order", fields: ["detailSteps"] }],
   };
   await repository.saveProject({
     projectId: "test",
@@ -309,6 +411,14 @@ test("saved questions, trigger/outcome and follow-up evidence survive reload", a
   assert.equal(review.trigger, "注文を受け取った時");
   assert.equal(review.outcome, "保存結果を確認した時");
   assert.equal(review.questions[0].question, "承認者は誰？");
+  assert.deepEqual(
+    review.extraction,
+    graph.workflows[0].reviewContext?.extraction,
+  );
+  assert.deepEqual(
+    review.protectedDetails,
+    graph.workflows[0].reviewContext?.protectedDetails,
+  );
   assert.deepEqual(
     loaded.graph.workflows[0].reviewContext?.followUpAnswers,
     graph.workflows[0].reviewContext?.followUpAnswers,
@@ -353,10 +463,26 @@ for (const protocol of ["openai", "anthropic"] as const) {
   test(`${protocol} adapter sends detail schema, preserves human details and enforces confirmed alias reuse`, async () => {
     const graph = mergeAssets(fixture(), "system:erp", "system:sap-prod");
     const previous = refinedReview();
-    previous.steps[0].meaning={purpose:'転記の確認',basis:'承認済み記録',result:'人が確認した確定結果',next:'出荷へ渡す',condition:'承認後',halt:false,certainty:'confirmed',evidence:'担当者の補足'};
-    previous.steps[0].humanEdits=[{field:'meaning.result',before:'',after:'人が確認した確定結果',evidence:'利用者の訂正'}];
+    previous.steps[0].meaning = {
+      purpose: "転記の確認",
+      basis: "承認済み記録",
+      result: "人が確認した確定結果",
+      next: "出荷へ渡す",
+      condition: "承認後",
+      halt: false,
+      certainty: "confirmed",
+      evidence: "担当者の補足",
+    };
+    previous.steps[0].humanEdits = [
+      {
+        field: "meaning.result",
+        before: "",
+        after: "人が確認した確定結果",
+        evidence: "利用者の訂正",
+      },
+    ];
     const raw = structuredClone(previous);
-    raw.steps[0].meaning!.result='抽出の変更候補';
+    raw.steps[0].meaning!.result = "抽出の変更候補";
     raw.steps[0].technicalDetails = [];
     raw.steps[0].detailSteps = [];
     const calls: Record<string, any>[] = [];
@@ -400,8 +526,13 @@ for (const protocol of ["openai", "anthropic"] as const) {
         previousReview: previous,
       });
       assert.deepEqual(extracted.review.steps[0].technicalDetails, [detail]);
-      assert.equal(extracted.review.steps[0].meaning?.result,'人が確認した確定結果');
-      assert.ok(extracted.review.warnings.some(w=>w.includes('利用者が訂正')));
+      assert.equal(
+        extracted.review.steps[0].meaning?.result,
+        "人が確認した確定結果",
+      );
+      assert.ok(
+        extracted.review.warnings.some((w) => w.includes("利用者が訂正")),
+      );
       const schema =
         protocol === "openai"
           ? calls[0].response_format.json_schema.schema
@@ -411,9 +542,15 @@ for (const protocol of ["openai", "anthropic"] as const) {
       );
       assert.ok(schema.properties.steps.items.required.includes("detailSteps"));
       assert.ok(schema.properties.steps.items.required.includes("meaning"));
-      assert.ok(schema.properties.steps.items.properties.meaning.required.includes("result"));
+      assert.ok(
+        schema.properties.steps.items.properties.meaning.required.includes(
+          "result",
+        ),
+      );
       assert.ok(schema.required.includes("handoffs"));
-      assert.ok(schema.properties.transitions.items.required.includes("certainty"));
+      assert.ok(
+        schema.properties.transitions.items.required.includes("certainty"),
+      );
       const applied = await resolveWorkflowReviewWithAI({
         review: extractGroundedLocal("ERPで登録"),
         workflow: graph.workflows[0],

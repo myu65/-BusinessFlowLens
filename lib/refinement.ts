@@ -155,6 +155,40 @@ export function preserveRefinements(
 ): ExtractionReview {
   if (!previous) return review;
   const warnings = [...review.warnings];
+  const protectedDetails = new Map(
+    (previous.protectedDetails ?? []).map((item) => [
+      item.stepKey,
+      item.fields,
+    ]),
+  );
+  // Older snapshots did not record extraction origin. Protect those details
+  // conservatively, and carry that reason into later AI revisions.
+  if (!previous.extraction)
+    for (const step of previous.steps) {
+      const fields: NonNullable<
+        ExtractionReview["protectedDetails"]
+      >[number]["fields"] = [];
+      if (step.technicalDetails?.length) fields.push("technicalDetails");
+      if (step.detailSteps?.length) fields.push("detailSteps");
+      if (step.executionContext) fields.push("executionContext");
+      if (fields.length)
+        protectedDetails.set(step.stepKey, [
+          ...new Set([
+            ...(protectedDetails.get(step.stepKey) ?? []),
+            ...fields,
+          ]),
+        ]);
+    }
+  const protects = (
+    step: ExtractionReview["steps"][number],
+    field: "technicalDetails" | "detailSteps" | "executionContext",
+  ) =>
+    protectedDetails.get(step.stepKey)?.includes(field) ||
+    step.humanEdits?.some(
+      (edit) => edit.field === field || edit.field.startsWith(`${field}.`),
+    );
+  const retains = (step: ExtractionReview["steps"][number]) =>
+    !!step.humanEdits?.length || !!protectedDetails.get(step.stepKey)?.length;
   const excludedSteps = previous.excludedSteps ?? [];
   const steps = review.steps
     .filter((step) => {
@@ -172,8 +206,15 @@ export function preserveRefinements(
         previous.steps.find((item) => item.stepKey === step.stepKey) ??
         previous.steps.find((item) => item.name === step.name);
       if (!prior) return step;
+      if (prior.stepKey !== step.stepKey && protectedDetails.has(prior.stepKey))
+        protectedDetails.set(
+          step.stepKey,
+          protectedDetails.get(prior.stepKey)!,
+        );
       const technicalDetails = [...(step.technicalDetails ?? [])];
-      for (const detail of prior.technicalDetails ?? []) {
+      for (const detail of protects(prior, "technicalDetails")
+        ? (prior.technicalDetails ?? [])
+        : []) {
         if (
           !technicalDetails.some(
             (item) => JSON.stringify(item) === JSON.stringify(detail),
@@ -187,7 +228,9 @@ export function preserveRefinements(
         }
       }
       const detailSteps = [...(step.detailSteps ?? [])];
-      for (const detail of prior.detailSteps ?? []) {
+      for (const detail of protects(prior, "detailSteps")
+        ? (prior.detailSteps ?? [])
+        : []) {
         const updated = detailSteps.find((item) => item.id === detail.id);
         if (updated && JSON.stringify(updated) !== JSON.stringify(detail)) {
           warnings.push(
@@ -200,7 +243,9 @@ export function preserveRefinements(
         ...step,
         technicalDetails,
         detailSteps,
-        executionContext: prior.executionContext ?? step.executionContext,
+        executionContext: protects(prior, "executionContext")
+          ? (prior.executionContext ?? step.executionContext)
+          : step.executionContext,
         humanEdits: prior.humanEdits,
       };
       for (const edit of new Map(
@@ -250,11 +295,7 @@ export function preserveRefinements(
       ),
   );
   for (const step of omitted) {
-    if (
-      step.technicalDetails?.length ||
-      step.detailSteps?.length ||
-      step.humanEdits?.length
-    ) {
+    if (retains(step)) {
       steps.push(step);
       warnings.push(
         `${step.name}: 詳細がある既存ステップを保持しました。不要なら手動で除外してください。`,
@@ -262,14 +303,7 @@ export function preserveRefinements(
     }
   }
   const retainedKeys = new Set(
-    omitted
-      .filter(
-        (step) =>
-          step.technicalDetails?.length ||
-          step.detailSteps?.length ||
-          step.humanEdits?.length,
-      )
-      .map((step) => step.stepKey),
+    omitted.filter((step) => retains(step)).map((step) => step.stepKey),
   );
   const transitions = [...review.transitions];
   for (const transition of previous.transitions) {
@@ -316,6 +350,9 @@ export function preserveRefinements(
       .sort((a, b) => a.order - b.order)
       .map((s, i) => ({ ...s, order: i + 1 })),
     excludedSteps,
+    protectedDetails: [...protectedDetails]
+      .filter(([stepKey]) => keys.has(stepKey))
+      .map(([stepKey, fields]) => ({ stepKey, fields })),
     transitions: transitions.filter(
       (t) => keys.has(t.fromStepKey) && keys.has(t.toStepKey),
     ),
