@@ -19,6 +19,7 @@ import {
 import {
   diffReviews,
   editReviewStep,
+  stepToolsFromText,
   insertNoteAfterEvidence,
   NEW_MEMO_ID,
   previewReviewGraph,
@@ -110,6 +111,7 @@ export function InputWorkbench({
   >("unchecked");
   const [aiConfigError, setAIConfigError] = useState(false);
   const [edit, setEdit] = useState<ExtractionReviewStep | null>(null);
+  const [toolText, setToolText] = useState<string | null>(null);
   const editorRef = useRef<HTMLFieldSetElement>(null);
   const focusRef = useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLElement>(null);
@@ -414,8 +416,11 @@ export function InputWorkbench({
   }
   function applyEdit() {
     if (!edit || !review || !selected) return;
+    const corrected = toolText === null ? edit : {
+      ...edit, systems: stepToolsFromText(edit.systems, toolText),
+    };
     const patch = Object.fromEntries(
-      Object.entries(edit).filter(
+      Object.entries(corrected).filter(
         ([field, value]) =>
           field !== "humanEdits" &&
           JSON.stringify(selected[field as keyof ExtractionReviewStep]) !==
@@ -1056,7 +1061,10 @@ export function InputWorkbench({
                       block: "start",
                     })
                   }
-                  onEdit={() => setEdit(structuredClone(selected))}
+                  onEdit={() => {
+                    setEdit(structuredClone(selected));
+                    setToolText(null);
+                  }}
                   onExclude={removeStep}
                   onWorkflow={(id, stepKey) => {
                     const step = getWorkflowProcesses(graph, id).find(
@@ -1095,6 +1103,12 @@ export function InputWorkbench({
                         setEdit({ ...edit, actor: e.target.value || null })
                       }
                     />
+                  </label>
+                  <label className="kg-edit-field">
+                    使う道具
+                    <textarea rows={2} value={toolText ?? edit.systems.map(tool => tool.name).join("\n")}
+                      onChange={e => setToolText(e.target.value)} />
+                    <small>1行に1つ。使う道具が分からない場合は空欄にできます。</small>
                   </label>
                   <label className="kg-edit-field">
                     何が決まる・変わるか

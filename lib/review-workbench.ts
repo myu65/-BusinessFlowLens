@@ -470,6 +470,16 @@ export function diffReviews(
   };
 }
 
+export function stepToolsFromText(
+  previous: ExtractionReviewStep["systems"],
+  text: string,
+): ExtractionReviewStep["systems"] {
+  const names = [...new Set(text.split(/\r?\n/).map(name => name.trim()).filter(Boolean))];
+  return names.map(name => previous.find(tool => tool.name === name) ?? {
+    name, interaction: "other", evidence: "利用者が構造の確認中に補足",
+  });
+}
+
 export function editReviewStep(
   review: ExtractionReview,
   stepKey: string,

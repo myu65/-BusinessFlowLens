@@ -8,6 +8,7 @@ import {
   applyReviewConnections,
   diffReviews,
   editReviewStep,
+  stepToolsFromText,
   previewReviewGraph,
   recordReviewEdits,
   describeHumanEdit,
@@ -17,6 +18,7 @@ import {
   buildWorkflowReviewFromGraph,
   replaceWorkflowGraph,
   type LensGraph,
+  type ExtractionReviewStep,
 } from "../lib/graph";
 import { handoffEntry, stepContext } from "../lib/flow-context";
 import { SqliteBusinessFlowRepository } from "../lib/storage/sqlite";
@@ -229,6 +231,33 @@ test("human result corrections protect only edited meaning fields while the late
       "決まる・変わること：未確認 → 承認後に価格が確定",
     ),
   );
+});
+
+test("clearing an inferred tool preserves other steps and human correction after save, reload and re-extraction", async () => {
+  const original = extractGroundedLocal("営業担当がFormsに要件を入力する。技術営業がFormsで要求条件を確認する。");
+  original.steps.forEach(step => { step.systems = [{ name: "Forms", interaction: "view", evidence: step.evidence }]; });
+  const target = original.steps[1];
+  const edited = editReviewStep(original, target.stepKey, { systems: stepToolsFromText(target.systems, "") });
+  const graph = previewReviewGraph(empty, workflow, edited);
+  assert(original.steps[0].systems.some(s => s.name === "Forms"));
+  assert.equal(graph.edges.filter(e => e.source.includes(target.stepKey) && e.relation === "uses").length, 0);
+  const repository = new SqliteBusinessFlowRepository(join(mkdtempSync(join(tmpdir(), "lens-tools-")), "test.sqlite"));
+  await repository.saveProject({ projectId: "tool-correction", projectName: "Test", graph, transcripts: {}, updatedAt: new Date().toISOString() });
+  const loaded = (await repository.loadProject("tool-correction"))!.graph;
+  const restored = buildWorkflowReviewFromGraph(loaded, workflow.id);
+  const reread = preserveRefinements(original, restored);
+  assert.deepEqual(reread.steps[1].systems, []);
+  assert(reread.steps[0].systems.some(s => s.name === "Forms"));
+  assert.deepEqual(restored.steps[1].humanEdits?.find(e => e.field === "systems")?.after, []);
+});
+
+test("editing tools keeps unchanged source evidence, exact environment names and separately added human evidence", () => {
+  const original: ExtractionReviewStep["systems"] = [{ name: "SAP 本番", interaction: "input", evidence: "本番SAPで登録" }, { name: "SAP 検証", interaction: "view", evidence: "検証SAPで試す" }];
+  const tools = stepToolsFromText(original, "SAP 本番\n\nSAP 検証\nTeams\nTeams\n");
+  assert.deepEqual(tools.slice(0, 2), original);
+  assert.equal(tools.length, 3);
+  assert.equal(tools[2].evidence, "利用者が構造の確認中に補足");
+  assert.equal(tools[2].interaction, "other");
 });
 
 test("a human exclusion survives re-extraction and reload, with no invented bridge across it", () => {
