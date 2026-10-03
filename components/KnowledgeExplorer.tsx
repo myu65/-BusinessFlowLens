@@ -8,6 +8,9 @@ import {
   knowledgeReport,
   type KnowledgeScope,
 } from "@/lib/knowledge";
+import { WorkflowReading } from "./WorkflowReading";
+import { CompanyOrientation } from "./CompanyOrientation";
+import { termExplanation } from "@/lib/knowledge-guide";
 import { KnowledgeEditor } from "./KnowledgeEditor";
 import { createChemicalCompany } from "@/lib/chemical-company";
 
@@ -53,6 +56,7 @@ export function KnowledgeExplorer({
   const [department, setDepartment] = useState("");
   const [category, setCategory] = useState("");
   const [page, setPage] = useState(0);
+  const [readStepId, setReadStep] = useState("");
   const [categoryName, setCategoryName] = useState("");
   const [dependencyId, setDependencyId] = useState("");
   const [dependencyReason, setDependencyReason] = useState("");
@@ -93,6 +97,12 @@ export function KnowledgeExplorer({
     <button
       className={`kg-chip kg-chip--${n.kind}`}
       key={n.id}
+      title={
+        termExplanation(n.label) ??
+        (n.kind === "system"
+          ? "この道具が支える仕事を見る"
+          : "この情報を使う仕事を見る")
+      }
       onClick={() => go({ kind: "asset", id: n.id })}
     >
       {n.label}
@@ -228,16 +238,34 @@ export function KnowledgeExplorer({
   );
   return (
     <section className="page-view kg-view">
-      <div className="eyebrow">Business Knowledge Graph</div>
+      <div className="eyebrow">会社のしくみを知る</div>
       <h1>{graph.knowledge?.name ?? "会社がどう動いているかを探索する"}</h1>
       <p>
         {graph.knowledge?.description ??
           "会社の活動から業務を読み、System・Dataから支えている活動へ戻れます。未分類の業務も下の一覧から探索できます。"}
       </p>
+      {focus.kind === "company" && (
+        <CompanyOrientation
+          graph={graph}
+          workflowIds={view.rows.map((r) => r.workflow.id)}
+          onWorkflow={(id) => go({ kind: "workflow", id })}
+          onSystems={() => go({ kind: "systems" })}
+          onActivity={(id) => go({ kind: "activity", id })}
+        />
+      )}
       <div className="kg-toolbar">
-        <button onClick={() => go({ kind: "company" })}>会社全体</button>
+        <button
+          onClick={() => {
+            go({ kind: "company" });
+            setQuery("");
+            setDepartment("");
+            setCategory("");
+          }}
+        >
+          会社全体
+        </button>
         <button onClick={() => go({ kind: "systems" })}>
-          System Landscape
+          システム・道具の全体像
         </button>
         <button
           disabled={!history.length}
@@ -256,17 +284,22 @@ export function KnowledgeExplorer({
           ひとつ戻る
         </button>
         <button onClick={download}>この範囲をレポート出力</button>
-        <button
-          disabled={importing}
-          onClick={() => {
-            setImporting(true);
-            void loadExample();
-          }}
-        >
-          架空の化学メーカー300業務を開く
-        </button>
-        <a href="/?projectId=default">自分のプロジェクトへ</a>
       </div>
+      <details className="kg-secondary">
+        <summary>サンプル・プロジェクトの切替</summary>
+        <div className="kg-toolbar">
+          <button
+            disabled={importing}
+            onClick={() => {
+              setImporting(true);
+              void loadExample();
+            }}
+          >
+            架空の化学メーカー300業務を開く
+          </button>
+          <a href="/?projectId=default">自分のプロジェクトへ</a>
+        </div>
+      </details>
       {error && <p role="alert">{error}</p>}
       {report && (
         <section aria-label="レポートプレビュー">
@@ -291,7 +324,7 @@ export function KnowledgeExplorer({
 
       <div className="kg-toolbar">
         <label>
-          シナリオ
+          表示する状態
           <select
             value={scope}
             onChange={(e) => {
@@ -301,9 +334,9 @@ export function KnowledgeExplorer({
               setPage(0);
             }}
           >
-            <option value="current">Current / 現状</option>
-            <option value="future">Future / 将来案</option>
-            <option value="alternative">Alternative / 代替案</option>
+            <option value="current">現在の仕事（Current）</option>
+            <option value="future">改善後の案（Future）</option>
+            <option value="alternative">別の案（Alternative）</option>
           </select>
         </label>
         <label>
@@ -325,7 +358,7 @@ export function KnowledgeExplorer({
           会社内を検索
           <input
             value={query}
-            placeholder="活動・業務・System・Data・工場"
+            placeholder="業務名・部署・システム・情報・工場"
             onChange={(e) => {
               setQuery(e.target.value);
               setPage(0);
@@ -333,7 +366,7 @@ export function KnowledgeExplorer({
           />
         </label>
         <span>
-          {view.rows.length}業務 ·{" "}
+          検索対象：{view.rows.length}業務 ·{" "}
           {view.rows.reduce((s, r) => s + r.processes.length, 0)}工程
         </span>
       </div>
@@ -357,16 +390,44 @@ export function KnowledgeExplorer({
             : row
               ? ` → ${row.capabilities.map((c) => `${c.activity.name} → ${c.capability.name}`).join(" / ")} → ${row.workflow.name}`
               : asset
-                ? ` → ${asset.kind === "process" ? "個別工程" : asset.kind === "system" ? "System" : "Data"} → ${asset.label}`
+                ? ` → ${asset.kind === "process" ? "ひとつの手順" : asset.kind === "system" ? "システム・道具" : "業務で使う情報"} → ${asset.label}`
                 : focus.kind === "systems"
-                  ? " → System Landscape"
+                  ? " → システム・道具の全体像"
                   : ""}
       </p>
+      {(row || processRow || cap || activity) && (
+        <nav className="kg-toolbar" aria-label="大きな視点へ戻る">
+          {(row ?? processRow)?.capabilities.slice(0, 1).map((c) => (
+            <span key={c.capability.id}>
+              <button
+                onClick={() => go({ kind: "activity", id: c.activity.id })}
+              >
+                ↑ 活動全体：{c.activity.name}
+              </button>{" "}
+              <button
+                onClick={() => go({ kind: "capability", id: c.capability.id })}
+              >
+                ↑ 仕事の種類：{c.capability.name}
+              </button>
+            </span>
+          ))}
+          {processRow && (
+            <button
+              onClick={() =>
+                go({ kind: "workflow", id: processRow.workflow.id })
+              }
+            >
+              ↑ 業務の流れに戻る
+            </button>
+          )}
+        </nav>
+      )}
       {focus.kind === "company" && (
         <>
-          <KnowledgeEditor graph={graph} onApply={onGraphApply} />
           <h2>会社の活動</h2>
-          <p>活動を選ぶと、会社に必要な能力と各部署・工場の業務へ進めます。</p>
+          <p>
+            「何のために働くか」でまとめた、大きな仕事です。気になる活動を選んでください。
+          </p>
           <div className="kg-cards">
             {view.activities
               .filter((a) => a.rows.length)
@@ -379,7 +440,7 @@ export function KnowledgeExplorer({
                   <p>{a.description}</p>
                   <span>
                     {a.capabilities.filter((c) => c.rows.length).length}{" "}
-                    Capability · {a.rows.length}業務
+                    種類の仕事 · {a.rows.length}業務
                   </span>
                   <p>
                     {[...new Set(a.rows.flatMap((r) => r.departments))].join(
@@ -394,13 +455,21 @@ export function KnowledgeExplorer({
               ? "対象範囲の業務"
               : "登録済み業務（活動の分類は未登録）"}
           </h2>
-          {list(view.rows)}
+          <details>
+            <summary>業務の一覧を直接見る（{view.rows.length}件）</summary>
+            {list(view.rows)}
+          </details>
+          <KnowledgeEditor graph={graph} onApply={onGraphApply} />
         </>
       )}
       {activity && (
         <>
           <h2>{activity.name}</h2>
           <p>{activity.description}</p>
+          <p className="kg-context">
+            ここでは、この活動に必要な「仕事の種類」を選びます。たとえば受注登録は仕事の種類で、工場ごとに担当部署や手順が違います。
+          </p>
+          <h3>どの仕事を知りたいですか？</h3>
           <div className="kg-cards">
             {activity.capabilities
               .filter((c) => c.rows.length)
@@ -436,12 +505,18 @@ export function KnowledgeExplorer({
         <>
           <h2>{cap.name}</h2>
           <p>{cap.description}</p>
+          <p className="kg-context">
+            同じ仕事でも、部署・工場・製品ごとに行い方が違います。ひとつ選ぶと、開始から完了までの手順がわかります。
+          </p>
           {list(cap.rows)}
         </>
       )}
       {row && (
         <>
           <h2>{row.workflow.name}</h2>
+          <p className="kg-context">
+            ひとつの業務を、上から順番に読んでください。手順を押すと判断や個別作業が、青いラベルを押すとシステムの役割が、緑のラベルを押すと情報の使われ方がわかります。
+          </p>
           <p>{row.workflow.description}</p>
           <p>
             起点: {row.workflow.trigger ?? "未登録"} → 成果:{" "}
@@ -466,23 +541,28 @@ export function KnowledgeExplorer({
               </button>
             ))}
           </div>
-          <h3>System / Tool / Platform・Data</h3>
-          {row.assets.map(assetButton)}
+          <details>
+            <summary>この業務で使うシステム・情報をまとめて見る</summary>
+            <h3>システム・道具</h3>
+            {row.assets.filter((n) => n.kind === "system").map(assetButton)}
+            <h3>記録・ファイルなどの情報</h3>
+            {row.assets.filter((n) => n.kind === "data").map(assetButton)}
+          </details>
           <h3>業務の流れ</h3>
-          <ol className="kg-steps">
-            {row.processes.map((p) => (
-              <li key={p.id}>
-                <button onClick={() => go({ kind: "process", id: p.id })}>
-                  {p.label}
-                </button>
-                <span>
-                  {mode[p.executionMode ?? "unknown"]} ·{" "}
-                  {p.department ?? "部署未登録"}
-                </span>
-                <div>{view.assetsFor([p]).map(assetButton)}</div>
-              </li>
-            ))}
-          </ol>
+          <WorkflowReading
+            key={row.workflow.id}
+            graph={graph}
+            workflowId={row.workflow.id}
+            initialStepId={readStepId}
+            onDetail={(id) => {
+              setReadStep(id);
+              go({ kind: "process", id });
+            }}
+            onAsset={(n, stepId) => {
+              setReadStep(stepId);
+              go({ kind: "asset", id: n.id });
+            }}
+          />
           <h3>前後の業務・活動</h3>
           <div className="kg-links">
             {(graph.knowledge?.handoffs ?? [])
@@ -511,41 +591,43 @@ export function KnowledgeExplorer({
                 );
               })}
           </div>
-          <h3>Current / Future 比較</h3>
-          {compareWorkflow(graph, row.workflow.id).length ? (
-            compareWorkflow(graph, row.workflow.id).map((c) => (
-              <article key={c.workflow.id}>
-                <button
-                  onClick={() => {
-                    setScope(c.workflow.scenario ?? "current");
-                    setQuery("");
-                    setDepartment("");
-                    go({ kind: "workflow", id: c.workflow.id });
-                  }}
-                >
-                  {c.workflow.name}
-                </button>
-                <p>
-                  有効日: {c.workflow.effectiveFrom ?? "未定"} · 手動受渡し{" "}
-                  {c.beforeManual} → {c.afterManual}
-                </p>
-                <p>
-                  削除される工程:{" "}
-                  {c.removed.map((n) => n.label).join(" / ") || "なし"}
-                </p>
-                <p>
-                  追加される工程:{" "}
-                  {c.added.map((n) => n.label).join(" / ") || "なし"}
-                </p>
-                <p>
-                  System: {c.beforeSystems.map((n) => n.label).join(" / ")} →{" "}
-                  {c.afterSystems.map((n) => n.label).join(" / ")}
-                </p>
-              </article>
-            ))
-          ) : (
-            <p>比較できる同一業務の別シナリオは未登録です。</p>
-          )}
+          <details>
+            <summary>改善すると何が変わるか（現状と将来案）</summary>
+            {compareWorkflow(graph, row.workflow.id).length ? (
+              compareWorkflow(graph, row.workflow.id).map((c) => (
+                <article key={c.workflow.id}>
+                  <button
+                    onClick={() => {
+                      setScope(c.workflow.scenario ?? "current");
+                      setQuery("");
+                      setDepartment("");
+                      go({ kind: "workflow", id: c.workflow.id });
+                    }}
+                  >
+                    {c.workflow.name}
+                  </button>
+                  <p>
+                    有効日: {c.workflow.effectiveFrom ?? "未定"} · 手動受渡し{" "}
+                    {c.beforeManual} → {c.afterManual}
+                  </p>
+                  <p>
+                    削除される工程:{" "}
+                    {c.removed.map((n) => n.label).join(" / ") || "なし"}
+                  </p>
+                  <p>
+                    追加される工程:{" "}
+                    {c.added.map((n) => n.label).join(" / ") || "なし"}
+                  </p>
+                  <p>
+                    System: {c.beforeSystems.map((n) => n.label).join(" / ")} →{" "}
+                    {c.afterSystems.map((n) => n.label).join(" / ")}
+                  </p>
+                </article>
+              ))
+            ) : (
+              <p>比較できる同一業務の別シナリオは未登録です。</p>
+            )}
+          </details>
         </>
       )}
       {focus.kind === "workflow" && !row && (
@@ -556,6 +638,9 @@ export function KnowledgeExplorer({
       {focus.kind === "process" && asset && processRow && (
         <>
           <h2>{asset.label}</h2>
+          {termExplanation(asset.label) && (
+            <p className="kg-term">{termExplanation(asset.label)}</p>
+          )}
           <p>{asset.action ?? asset.description}</p>
           <p>
             {mode[asset.executionMode ?? "unknown"]} · 管理部署:{" "}
@@ -564,10 +649,10 @@ export function KnowledgeExplorer({
           <div className="kg-toolbar">
             {asset.workflowId && workflowButton(asset.workflowId)}
           </div>
-          <h3>実行System・入出力Data</h3>
+          <h3>使う道具と、受け取る・作る情報</h3>
           {view.assetsFor([asset]).map(assetButton)}
           <p>
-            実行System:{" "}
+            自動処理を行うシステム:{" "}
             {graph.edges
               .filter((e) => e.relation === "executes" && e.target === asset.id)
               .map((e) => label(e.source))
@@ -595,10 +680,13 @@ export function KnowledgeExplorer({
               .map((e) => label(e.source === asset.id ? e.target : e.source))
               .join(" / ") || "未登録"}
           </p>
-          <h3>起点・判断・例外</h3>
-          <p>起点: {asset.executionContext?.trigger ?? "未登録"}</p>
-          <p>ルール / 判断: {asset.executionContext?.rule ?? "未登録"}</p>
-          <p>失敗 / 例外: {asset.executionContext?.exception ?? "未登録"}</p>
+          <h3>いつ始まり、何を判断するか</h3>
+          <p>始まるきっかけ: {asset.executionContext?.trigger ?? "未登録"}</p>
+          <p>確認・判断すること: {asset.executionContext?.rule ?? "未登録"}</p>
+          <p>
+            うまく進まないときの対応:{" "}
+            {asset.executionContext?.exception ?? "未登録"}
+          </p>
           <details>
             <summary>起点・ルール・例外を編集</summary>
             {(["trigger", "rule", "exception"] as const).map((key, i) => (
@@ -629,7 +717,7 @@ export function KnowledgeExplorer({
               </label>
             ))}
           </details>
-          <h3>個別作業 / Task</h3>
+          <h3>具体的に行うこと（個別作業）</h3>
           <ol>
             {(asset.detailSteps ?? []).map((t) => (
               <li key={t.id}>
@@ -648,12 +736,12 @@ export function KnowledgeExplorer({
       )}
       {focus.kind === "systems" && (
         <>
-          <h2>会社を支えるSystem / Tool / Platform</h2>
+          <h2>会社を支えるシステム・道具</h2>
           <p>
-            件数は現在の条件での直接関連業務。基盤依存を介した影響はSystemを選ぶと確認できます。
+            業務システムだけでなく、Teams・Excel・認証・ネットワークも会社を動かす道具です。ひとつ選ぶと、誰がどの仕事で使い、何と情報をやり取りしているかがわかります。
           </p>
           <label>
-            System分類
+            道具の種類
             <select
               value={category}
               onChange={(e) => {
@@ -752,8 +840,16 @@ export function KnowledgeExplorer({
       {focus.kind === "asset" && asset && impact && (
         <>
           <h2>{asset.label}</h2>
+          {termExplanation(asset.label) && (
+            <p className="kg-term">{termExplanation(asset.label)}</p>
+          )}
           <p>{impact.profile?.purpose ?? asset.description}</p>
           <p>管理部署: {impact.profile?.owner ?? "未登録"}</p>
+          <p className="kg-context">
+            {asset.kind === "data"
+              ? "これは業務で受け取り、参照・更新する情報です。下で、その情報を使う仕事と、受渡し先を確かめられます。"
+              : "直接は、その道具を使う業務。間接は、その道具に頼る別のシステムを通じて支えられる業務です。件数は登録された関係の範囲です。"}
+          </p>
           {asset.kind === "system" && graph.knowledge && (
             <label>
               分類
@@ -789,7 +885,7 @@ export function KnowledgeExplorer({
               </select>
             </label>
           )}
-          <h3>支えているActivity / Capability</h3>
+          <h3>会社のどの活動を支えているか</h3>
           <div className="kg-toolbar">
             {view.activities
               .filter((a) =>
@@ -847,7 +943,7 @@ export function KnowledgeExplorer({
             </p>
           )}
           <h3>
-            入出力Data・前後のSystem・Integration / Export（
+            情報はどこから来て、どこへ渡るか（
             {impact.flows.length}）
           </h3>
           <div className="kg-links">
@@ -861,7 +957,16 @@ export function KnowledgeExplorer({
                     assetButton(view.nodeById.get(f.targetSystemId)!)}
                   <span>
                     {" "}
-                    · {f.transferType} / {f.automation}
+                    ·{" "}
+                    {(
+                      {
+                        manual: "人が転記・受渡し",
+                        email: "メール",
+                        api: "システム間連携",
+                        file: "ファイル",
+                      } as Record<string, string>
+                    )[f.transferType] ?? f.transferType}{" "}
+                    / {mode[f.automation]}
                   </span>
                 </div>
                 <div>
@@ -888,7 +993,7 @@ export function KnowledgeExplorer({
               先頭30受渡しを表示。レポートにはこの条件の全受渡しを出力します。
             </p>
           )}
-          <h3>基盤への依存</h3>
+          <h3>動くために必要な仕組み</h3>
           {impact.profile?.dependsOn.length ? (
             impact.profile.dependsOn.map((d) => (
               <p key={d.systemId}>
@@ -1021,7 +1126,7 @@ export function KnowledgeExplorer({
               ))}
             </details>
           )}
-          <h3>この基盤に依存するSystem</h3>
+          <h3>この仕組みを必要とするシステム</h3>
           {impact.dependents.map(assetButton)}
           <p>
             間接影響: {impact.indirect.length}
@@ -1056,7 +1161,7 @@ export function KnowledgeExplorer({
                 </article>
               ))}
           </div>
-          <h3>直接関連する業務</h3>
+          <h3>このシステム・情報を使う業務</h3>
           {list(impact.direct)}
         </>
       )}

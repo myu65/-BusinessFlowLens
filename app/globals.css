@@ -3156,3 +3156,27 @@ button:disabled { cursor:not-allowed; opacity:.45; }
 .kg-view h2 { margin-top: 26px; }
 .kg-view h3 { margin-top: 24px; }
 .kg-view p { line-height: 1.75; }
+/* Read one relationship or step at a time; keep deeper information optional. */
+.kg-orientation { background: #edf4f8; border: 1px solid #c8dbe6; border-radius: 16px; padding: 22px; margin: 24px 0; }
+.kg-orientation h2 { margin-top: 0; }
+.kg-start-options, .kg-information-path { display: grid; grid-template-columns: repeat(auto-fit,minmax(220px,1fr)); gap: 14px; }
+.kg-start-options button { display: grid; gap: 10px; }
+.kg-start-options span { line-height: 1.7; font-size: 13px; }
+.kg-view .kg-primary { background: #1f526d; color: white; border-color: #1f526d; }
+.kg-reading-path, .kg-context { padding: 14px 18px; background: #eaf2fa; border-left: 4px solid #427c9b; line-height: 1.8; }
+.kg-term { font-size: 14px; color: #40596b; background: #f1f6f9; padding: 10px 14px; border-radius: 6px; }
+.kg-map-selector, .kg-chapters { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0; }
+.kg-view button[aria-pressed="true"] { border: 2px solid #286782; background: #dcecf5; color: #173f58; }
+.kg-map-flow { display: grid; grid-template-columns: 1fr 1.2fr 1fr; gap: 16px; align-items: start; }
+.kg-map-flow > section, .kg-step-focus, .kg-information-path > section { border: 1px solid #cbdbe5; background: white; border-radius: 12px; padding: 18px; min-width: 0; }
+.kg-map-flow h4, .kg-information-path h4 { margin-top: 0; }
+.kg-map-flow article { padding: 12px 0; border-top: 1px solid #d9e5eb; }
+.kg-map-center { border: 2px solid #3a7995 !important; }
+.kg-chapters button { display: grid; gap: 8px; flex: 1 1 140px; }
+.kg-chapters small, .kg-chapters span { font-size: 12px; }
+.kg-step-navigation { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 18px 0; }
+.kg-reader { margin: 22px 0; }
+.kg-information-path { margin: 18px 0; }
+.kg-information-path span { display: block; margin: 8px 0; line-height: 1.6; }
+.kg-secondary { margin: 12px 0; }
+@media(max-width: 900px) { .kg-map-flow { grid-template-columns: 1fr; } .kg-orientation { padding: 16px; } }

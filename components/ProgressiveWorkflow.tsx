@@ -8,6 +8,8 @@ import {
   type LensGraph,
   type LensNode,
 } from "@/lib/graph";
+import { CompanyMap } from "./CompanyMap";
+import { WorkflowReading } from "./WorkflowReading";
 import { BusinessOverview } from "./BusinessOverview";
 import { mergeAssets } from "@/lib/refinement";
 
@@ -273,7 +275,7 @@ export function WorkflowExplorer({
           {(
             [
               ["overview", "鳥瞰"],
-              ["business", "業務通常"],
+              ["business", "手順と情報"],
               ["detail", "詳細"],
             ] as const
           ).map(([id, label]) => (
@@ -294,7 +296,9 @@ export function WorkflowExplorer({
       </div>
       {level === "business" ? (
         <>
-          {children}
+          <section className="page-view kg-view"><h1>{workflow?.name}</h1><p>{workflow?.description}</p>
+          <WorkflowReading key={workflowId} initialStepId={stepId ?? undefined} graph={graph} workflowId={workflowId} onDetail={id => {setStepId(id);setLevel("detail");}} />
+          <details><summary>業務を切り替える・全手順のフロー図と関連情報を見る</summary>{children}</details></section>
           <div className="drill-footer">
             <p>操作や技術情報まで確認する場合は、詳細へ進めます。</p>
             <button
@@ -308,7 +312,8 @@ export function WorkflowExplorer({
           </div>
         </>
       ) : null}
-      {level === "overview" ? (
+      {level === "overview" && graph.knowledge ? <section className="page-view kg-view"><h1>会社の仕事を鳥瞰する</h1><CompanyMap graph={graph} workflowIds={graph.workflows.filter(w => (w.scenario ?? "current") === (workflow?.scenario ?? "current")).map(w=>w.id)} onWorkflow={id=>{onSelectWorkflow(id);setLevel("business");}} /><details><summary>条件で絞り込む・詳しい関係図を開く</summary><BusinessOverview graph={graph} onEdit={onEdit} onGraphApply={onGraphApply} onOpen={id=>{onSelectWorkflow(id);setLevel("business");}} /></details></section> : null}
+      {level === "overview" && !graph.knowledge ? (
         <BusinessOverview graph={graph} onEdit={onEdit} onGraphApply={onGraphApply} onOpen={(id) => {
           onSelectWorkflow(id);
           setStepId(null);
@@ -318,7 +323,7 @@ export function WorkflowExplorer({
       {level === "detail" ? (
         <section className="page-view">
           <button className="back-link" onClick={() => setLevel("business")}>
-            ← 業務通常に戻る
+            ← 手順と情報に戻る
           </button>
           <div className="eyebrow">必要なところを、具体的に</div>
           <h1>{workflow?.name}の詳細</h1>
