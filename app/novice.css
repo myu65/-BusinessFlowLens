@@ -1264,3 +1264,10 @@
 .continuous-reader {
   scroll-margin-top: 96px;
 }
+.input-processing {
+  padding: 12px 16px;
+  margin-bottom: 14px;
+  border-left: 3px solid #87a7ba;
+  background: #edf5fa;
+}
+.input-processing p { margin: 5px 0 0; font-size: 13px; }

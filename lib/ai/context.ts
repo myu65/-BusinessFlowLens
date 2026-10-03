@@ -1,4 +1,28 @@
-import type { LensGraph, LensNode, Workflow } from "../graph";
+import type { ExtractionReview, LensGraph, LensNode, Workflow } from "../graph";
+
+// Keep stable identities and explicit human corrections for re-reading. Old AI
+// descriptions and empty fields are not new evidence and need not be repeated.
+export function buildPreviousReviewContext(review: ExtractionReview) {
+  return {
+    organization: review.organization,
+    steps: review.steps.map(step => ({
+      stepKey: step.stepKey,
+      order: step.order,
+      name: step.name,
+      actor: step.actor,
+      systems: step.systems.map(system => system.name),
+      data: step.data.map(data => ({ name: data.name, operation: data.operation })),
+      result: step.meaning?.result,
+      detailSteps: step.detailSteps?.map(detail => ({ id: detail.id, action: detail.action, condition: detail.condition })),
+      humanEdits: step.humanEdits?.map(edit => ({ field: edit.field, after: edit.after, evidence: edit.evidence })),
+    })),
+    protectedDetails: review.protectedDetails,
+    transitions: review.transitions,
+    excludedSteps: review.excludedSteps?.map(step => ({ stepKey: step.stepKey, name: step.name, evidence: step.evidence })),
+    handoffs: review.handoffs?.filter(h => h.origin === "human" || (!review.extraction && h.certainty === "confirmed")),
+    incomingHandoffs: review.incomingHandoffs?.filter(h => h.origin === "human"),
+  };
+}
 
 const ASSET_LIMIT = 30;
 const WORKFLOW_LIMIT = 12;

@@ -411,6 +411,47 @@ test("an AI stop cannot become a self-loop, while an explicitly quoted retry sta
   );
 });
 
+test("a conditional hold needs a grounded release to resume, while a stated notification can still follow the hold", () => {
+  const review = extractGroundedLocal("班長が製造を保留する。班長がMESで実績を確定する。");
+  review.steps[0].meaning = {
+    purpose: "", basis: "逸脱", result: "製造保留", next: "",
+    condition: "条件逸脱時", halt: true, certainty: "confirmed", evidence: "製造を保留する",
+  };
+  const edge = {
+    fromStepKey: review.steps[0].stepKey, toStepKey: review.steps[1].stepKey,
+    condition: "逸脱がない", evidence: "逸脱がなければ実績を確定する", certainty: "confirmed" as const,
+  };
+  review.transitions = [edge];
+  const checked = validateAITransitions(review, "条件逸脱時は製造を保留する。逸脱がなければ実績を確定する。");
+  assert.equal(checked.transitions.length, 0);
+  assert(checked.questions.some(q => q.target === "exception"));
+  assert.equal(checked.steps[0].meaning?.halt, true);
+  const released = { ...review, transitions: [{ ...edge, evidence: "課長が保留を解除したら実績を確定する" }] };
+  assert.equal(validateAITransitions(released, "課長が保留を解除したら実績を確定する。").transitions.length, 1);
+  const notice = structuredClone(review);
+  notice.steps[1].action = "Teamsで品質管理へ連絡する";
+  notice.transitions = [{ ...edge, evidence: "Teamsで品質管理へ連絡する" }];
+  assert.equal(validateAITransitions(notice, "保留後、Teamsで品質管理へ連絡する。").transitions.length, 1);
+});
+
+test("an AI handoff cannot send product results from a raw-material check, and the human correction remains authoritative", () => {
+  const { review } = first();
+  const check = review.steps[0];
+  check.data = [{ name: "原料ロット", operation: "read", evidence: "原料ロットを確認" }];
+  const send = { ...structuredClone(check), stepKey: "send-product", name: "製品検査へ渡す", order: 2,
+    data: [{ name: "製品ロット", operation: "send" as const, evidence: "製品ロットを渡す" }] };
+  review.steps.push(send);
+  const handoff = { fromStepKey: check.stepKey, targetWorkflowId: "inspection", data: ["製品ロット"],
+    description: "検査へ渡す", evidence: "製品ロットを渡す", certainty: "confirmed" as const, origin: "ai" as const };
+  review.handoffs = [handoff];
+  const checked = validateAITransitions(review, "原料ロットを確認し、製造後に製品ロットを渡す。");
+  assert.equal(checked.handoffs?.length, 0);
+  assert(checked.questions.some(q => q.target === "handoff"));
+  assert.equal(validateAITransitions({ ...review, handoffs: [{ ...handoff, fromStepKey: send.stepKey }] }, "製品ロットを渡す。").handoffs?.length, 1);
+  const previous = { ...review, handoffs: [{ ...handoff, origin: "human" as const }] };
+  assert.equal(preserveRefinements(checked, previous).handoffs?.[0].origin, "human");
+});
+
 test("human grouping and receiving corrections survive AI refinement while source-derived handoffs can be corrected", () => {
   const { review } = first();
   review.extraction = {
