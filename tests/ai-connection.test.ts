@@ -102,7 +102,7 @@ test("provider failure, timeout and malformed output do not become a local extra
         AI_MODEL: "mock",
         AI_API_KEY: "secret-key",
         AI_BASE_URL: `http://127.0.0.1:${address.port}`,
-        AI_TIMEOUT_MS: "100",
+        AI_TIMEOUT_MS: "5000",
       },
       async () => {
         for (const [mode, code] of [
@@ -112,6 +112,9 @@ test("provider failure, timeout and malformed output do not become a local extra
           ["malformed", "invalid_response"],
         ]) {
           behavior = mode;
+          // Only the stalled response uses a short deadline. Under parallel CI
+          // load, a valid local 401 must not race an unrelated timeout assertion.
+          process.env.AI_TIMEOUT_MS = mode === "timeout" ? "100" : "5000";
           await assert.rejects(
             extractWorkflowReviewWithAI({
               interview: "注文が届く",
@@ -177,4 +180,51 @@ test("saving confirmed exact assets needs no model call, while preserving origin
       );
     }
   });
+});
+
+test("a model cannot reuse a future-only asset omitted from the current comparison scope", async () => {
+  let compared: string[] = [];
+  const graph: LensGraph = {
+    workflows: [{ id: "current", name: "現在" }, { id: "future", name: "将来", scenario: "future" }],
+    nodes: [
+      { id: "now", canonicalKey: "data:now", kind: "data", label: "現在の注文記録", description: "", status: "confirmed" },
+      { id: "later", canonicalKey: "data:future", kind: "data", label: "将来の注文メモ", description: "", status: "confirmed" },
+    ],
+    edges: [
+      { id: "now", source: "p-now", target: "now", relation: "reads", workflowIds: ["current"] },
+      { id: "future", source: "p-future", target: "later", relation: "reads", workflowIds: ["future"] },
+    ],
+    dataFlows: [],
+  };
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+    const context = JSON.parse(body.messages.at(-1).content.split("\n")[1]);
+    compared = context.catalog.map((n: { canonicalKey: string }) => n.canonicalKey);
+    const resolutions = context.candidates.map((c: { candidateId: string; kind: string; name: string }) => ({
+      candidateId: c.candidateId,
+      decision: c.kind === "data" ? "reuse" : "create",
+      existingCanonicalKey: c.kind === "data" ? "data:future" : null,
+      canonicalLabel: c.name,
+      reason: "mock attempt to cross the scope",
+    }));
+    response.setHeader("Content-Type", "application/json");
+    response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ resolutions }) } }] }));
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as { port: number };
+  try {
+    await withConfig({ AI_MODEL: "mock", AI_API_KEY: "test-only", AI_BASE_URL: `http://127.0.0.1:${address.port}` }, async () => {
+      const review = extractGroundedLocal('担当者がExcelに「注文メモ」を記録する。');
+      const result = await resolveWorkflowReviewWithAI({ review, workflow, graph });
+      assert(!compared.includes("data:future"));
+      assert(!result.patch.nodes.some(n => n.canonicalKey === "data:future"));
+      assert(result.patch.nodes.some(n => n.kind === "data" && n.status === "unknown"));
+      assert(result.review.warnings.some(w => w.includes("同一性を要確認")));
+    });
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
 });

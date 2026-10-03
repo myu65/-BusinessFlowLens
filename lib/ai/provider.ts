@@ -1,6 +1,7 @@
 import { findConfirmedAsset, preserveRefinements } from "../refinement";
 import { existsSync, readFileSync } from "node:fs";
-import { buildExtractionContext } from "./context";
+import { buildExtractionContext, buildPreviousReviewContext } from "./context";
+import { buildAssetResolutionContext, scopedAssetNodes } from "./asset-context";
 import type { AIConfigurationStatus } from "./status";
 import { AIProviderError } from "./errors";
 import { callCodexModel } from "./codex";
@@ -714,6 +715,8 @@ Rules:
 8b. A condition for a later action must not become a prerequisite of the preceding check. 'Compare the quantity; if it matches, record receipt' => the comparison runs without that condition, and only recording receipt is conditional. A judgment's possible result is not its execution condition.
 8c. Keep distinct exceptions distinct. An unusable raw-material lot causes a request to confirm that lot; a process-temperature deviation causes a product-inspection request. A shared recipient or the word 'hold' does not connect those different exceptions. Emit a separate exception step when the source states a separate action. Never route a branch to a step whose stated triggering condition is incompatible with that branch. Unknown restart points stay unconnected and become questions.
 8d. Never use a self-loop to represent a conditional action, a child operation, or a stop inside the same step. A transition to the same step is allowed only when the source explicitly states repeating that action, with the literal repeat clause as evidence. A hold with an unknown restart has no outgoing restart transition. A separate confirmation request before production and a product inspection after production are separate branch steps, even if both go to quality control.
+8e. A step executed only when a deviation occurs cannot be the source of the no-deviation path. Both alternatives branch from the preceding check or detection step. Never connect a conditional hold to normal completion unless the source explicitly describes releasing that hold and resuming. Unknown release authority is not evidence of a release.
+8f. Preserve the described normal path as well as exceptions. Narrative order and a stated result enabling the next action can support a transition with certainty=inferred; do not omit the normal path solely because there is no literal 'then'. Quote the relevant source clause as evidence, and ask if the order is actually ambiguous. The previous topology helps stable-key comparison but never overrides a correction in the latest source.
 8a. meaning captures business changes: purpose (why), basis (evidence used for judgment), result (what is decided/changed), next (what work this result triggers), condition and halt. Leave unmentioned strings empty, certainty=unknown or inferred; use null if nothing is known. Do not repeat a generic record name as a business outcome, invent a credit/ATP rule, or assume that checking inventory means shipment is allowed. Keep the exact supporting source in evidence.
 9. Capture system-to-system dataFlows ONLY when the transcript explicitly describes information moving from one named system/tool to another, including human transcription. Examples: "ERPからWMSへCSVを送る", "Excelを見ながらERPへ手入力". Do NOT infer an API or integration merely because two systems appear in adjacent steps.
 10. For each dataFlow record source system, target system, transferred business data, transferType, direction, automation, frequency if stated, evidence, and relatedStepKeys. Use unknown rather than guessing a transfer method.
@@ -732,6 +735,7 @@ Rules:
 18a. Emit handoffs only to IDs in the provided workflow catalog. Keep the source step, transferred Data and interview evidence. A targetStepKey must be null unless a specific receiving step is known. Workflow name similarity alone cannot establish a handoff; ask a question instead. Unknown destinations must become questions.
 18b. When this new story receives an output from an existing workflow, emit incomingHandoffs with the catalog sourceWorkflowId, sourceStepKey (null if unknown), this draft's toStepKey, the transferred data and source evidence. Use both the interview and the catalog's result/data to identify the source; a similar name alone is insufficient. Do not create fake IDs for unregistered work. Keep ambiguous matches unconnected with a question. An incoming connection is distinct from an outgoing handoff.
 18c. Mentioning a workflow as outside the scope or something to explain later is not a handoff. An outgoing handoff needs an actual described transfer or triggering result. incomingHandoffs may be via=handoff for a described receipt, or via=reference for an explicitly stated read of a named output from a specific existing workflow. Referencing a shared record is not a notification, API or file delivery; preserve that distinction in the description. Use the causal clause as evidence, not just a workflow name. Ask a question rather than linking work based only on a mention or name similarity.
+18d. An outgoing handoff's fromStepKey must be the draft step that actually creates, updates or sends its named data, with the stated condition. Product lot/results delivered after production belong to the final delivery step, never to an earlier raw-material check. An existing receiver does not imply that every earlier request goes to that receiver. Leave a source step unknown rather than assigning an unrelated step.
 18. Existing System/Data/Workflow context may be provided as reference candidates. Use it to understand aliases, shorthand, and handoffs, but NEVER treat a candidate as confirmed solely because it exists in the catalog.
 19. "ERP" may plausibly refer to an existing SAP system, and "いつもの出荷処理" may plausibly refer to an existing shipping workflow. Preserve the interview wording/evidence and surface uncertainty rather than inventing or silently canonicalizing.
 20. Follow-up answers are additional interview evidence. Incorporate them into steps, ownership, execution mode, executing System, data flows, trigger/outcome, warnings, and questions. Remove questions that are answered.
@@ -767,7 +771,7 @@ function extractionUserPrompt(args: {
   );
 
   return `Workflow being interviewed:
-${JSON.stringify(args.workflow, null, 2)}
+${JSON.stringify({ id: args.workflow.id, name: args.workflow.name, scenario: args.workflow.scenario ?? "current", basedOnWorkflowId: args.workflow.basedOnWorkflowId })}
 
 Interview transcript:
 ---
@@ -775,12 +779,12 @@ ${args.interview}
 ---
 
 Existing company context (REFERENCE CANDIDATES ONLY):
-${JSON.stringify(existingContext, null, 2)}
+${JSON.stringify(existingContext)}
 
 ${
   args.previousReview
     ? `Previous review draft, for comparison and stable keys. The interview above is the latest source and replaces earlier interview text: reflect additions, corrections and removals. The previous draft is not additional source evidence. Preserve specifically recorded human edits and surface new contradictions as warnings; do not freeze unedited fields:
-${JSON.stringify(args.previousReview, null, 2)}
+${JSON.stringify(buildPreviousReviewContext(args.previousReview))}
 `
     : ""
 }
@@ -788,7 +792,7 @@ ${JSON.stringify(args.previousReview, null, 2)}
 ${
   answered.length > 0
     ? `Follow-up Q&A. Treat the answers as additional interview evidence:
-${JSON.stringify(answered, null, 2)}
+${JSON.stringify(answered)}
 `
     : ""
 }
@@ -801,7 +805,7 @@ Use existing company context to interpret shorthand and references such as "ERP"
 - If a follow-up answer resolves a question, update the draft and remove that question.
 - Ask new questions only for remaining material gaps.
 
-Return a revised, reviewable workflow draft.`;
+Return a revised, reviewable workflow draft as compact JSON without indentation. Use null for unstated technicalDetails, executionContext and meaning, and [] for unstated child operations; do not fill those structures with empty strings. Preserve the full meaning of stated actions, conditions and evidence.`;
 }
 
 function normalizeName(value: string) {
@@ -873,18 +877,6 @@ function collectCandidates(draft: WorkflowDraft): AssetCandidate[] {
   return [...map.values()];
 }
 
-function existingAssets(graph: LensGraph) {
-  return graph.nodes
-    .filter((node) => node.kind === "system" || node.kind === "data")
-    .map((node) => ({
-      canonicalKey: node.canonicalKey,
-      kind: node.kind,
-      label: node.label,
-      aliases: node.aliases ?? [],
-      description: node.description,
-    }));
-}
-
 function resolutionSystemPrompt() {
   return `You resolve extracted system/data mentions against an existing canonical asset catalog.
 
@@ -904,13 +896,15 @@ Rules:
 async function resolveAssets(
   candidates: AssetCandidate[],
   graph: LensGraph,
+  workflow: Workflow,
 ): Promise<AssetResolution[]> {
   if (candidates.length === 0) return [];
 
-  const catalog = existingAssets(graph);
+  const scopedNodes = scopedAssetNodes(graph, workflow);
+  const scopedGraph = { ...graph, nodes: scopedNodes };
   const exact = new Map<string, AssetResolution>();
   for (const candidate of candidates) {
-    const confirmed = findConfirmedAsset(graph, candidate.kind, candidate.name);
+    const confirmed = findConfirmedAsset(scopedGraph, candidate.kind, candidate.name);
     if (confirmed?.status === "confirmed")
       exact.set(candidate.candidateId, {
         candidateId: candidate.candidateId,
@@ -926,7 +920,7 @@ async function resolveAssets(
   if (!unresolved.length)
     return candidates.map((candidate) => exact.get(candidate.candidateId)!);
 
-  if (catalog.length === 0) {
+  if (scopedNodes.length === 0) {
     return candidates.map((candidate) => ({
       candidateId: candidate.candidateId,
       decision: "create" as const,
@@ -936,17 +930,15 @@ async function resolveAssets(
     }));
   }
 
+  const context = buildAssetResolutionContext(scopedNodes, unresolved);
+  const catalog = context.catalog;
   const result = await structuredCall<{ resolutions: AssetResolution[] }>({
     schemaName: "asset_resolution",
     schema: ASSET_RESOLUTION_SCHEMA,
     system: resolutionSystemPrompt(),
-    user: `Existing canonical assets:
-${JSON.stringify(catalog, null, 2)}
-
-New extracted candidates:
-${JSON.stringify(unresolved, null, 2)}
-
-Resolve every candidate exactly once.`,
+    user: `Compare these retrieved candidates in the current workflow's scope:
+${JSON.stringify(context)}
+Resolve every candidate exactly once. REUSE only a supplied same-kind comparisonKey when evidence establishes identity. This catalog is a subset, so absence does not prove a generic name is new. Use UNCERTAIN for unproven aliases, inferred identity or ambiguity. Return compact JSON without indentation.`,
   });
 
   if (!Array.isArray(result?.resolutions)) {
@@ -978,11 +970,14 @@ Resolve every candidate exactly once.`,
     }
 
     if (resolution.decision === "reuse") {
+      const comparisonKeys = context.candidates.find(c =>
+        c.candidateId === candidate.candidateId,
+      )?.comparisonKeys ?? [];
       const valid = catalog.some(
         (asset) =>
           asset.canonicalKey === resolution.existingCanonicalKey &&
           asset.kind === candidate.kind,
-      );
+      ) && comparisonKeys.includes(resolution.existingCanonicalKey ?? "");
       if (!valid) {
         return {
           ...resolution,
@@ -1445,7 +1440,7 @@ export async function resolveWorkflowReviewWithAI(args: {
   });
 
   const candidates = collectCandidates(draft);
-  const resolutions = await resolveAssets(candidates, args.graph);
+  const resolutions = await resolveAssets(candidates, args.graph, args.workflow);
   const patch = buildGraphPatch(
     draft,
     args.workflow,

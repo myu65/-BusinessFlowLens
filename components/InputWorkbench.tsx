@@ -90,6 +90,15 @@ export function InputWorkbench({
   const [stepKey, setStepKey] = useState("");
   const [stepPage, setStepPage] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [operation, setOperation] = useState<"organize" | "save">("organize");
+  const [waitingSeconds, setWaitingSeconds] = useState(0);
+  useEffect(() => {
+    if (!busy) return;
+    setWaitingSeconds(0);
+    const started = Date.now();
+    const timer = setInterval(() => setWaitingSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [busy]);
   const [error, setError] = useState("");
   const [aiConfig, setAIConfig] = useState<AIConfigurationStatus | null>(null);
   const [aiResponse, setAIResponse] = useState<
@@ -266,6 +275,7 @@ export function InputWorkbench({
     };
     const requestKey = key,
       before = review;
+    setOperation("organize");
     setBusy(true);
     setError("");
     setEdit(null);
@@ -334,6 +344,7 @@ export function InputWorkbench({
   }
   async function save() {
     if (!draft || stale || busy) return;
+    setOperation("save");
     setBusy(true);
     setError("");
     try {
@@ -509,6 +520,20 @@ export function InputWorkbench({
           </p>
         </details>
       </aside>
+      {busy && (
+        <aside className="input-processing" role="status">
+          <strong>
+            {operation === "save"
+              ? "道具・情報を既存の構造と照合して保存しています"
+              : "話を読み取り、人・道具・情報の流れを整理しています"}
+          </strong>
+          <span aria-hidden="true"> · {waitingSeconds}秒</span>
+          <p>メモと前の候補を保ったまま、結果を待っています。</p>
+          {waitingSeconds >= 20 && operation === "organize" && aiConfig?.configured && (
+            <p>AIの応答を待っています。結果が届いたら、保存前に内容を確かめられます。</p>
+          )}
+        </aside>
+      )}
       <nav className="input-mobile-tabs" aria-label="メモと流れの表示切替">
         <button
           aria-pressed={mobilePane === "note"}
@@ -778,7 +803,7 @@ export function InputWorkbench({
                 onClick={save}
               >
                 {busy
-                  ? "処理中…"
+                  ? operation === "save" ? "道具・情報を照合して保存中…" : "話を整理中…"
                   : edit
                     ? "訂正を反映してから保存"
                     : draft
