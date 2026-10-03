@@ -2,9 +2,9 @@ import type { ExtractionReview, LensGraph, Workflow } from "./graph";
 import { normalizeAssetName } from "./refinement";
 import { sourceEvidence } from "./source-evidence";
 
-// Cover a model omission only when one source clause names the work, receipt and
-// Data, and one recorded output step matches. This remains an inferred candidate.
-export function suggestMissingReceipts<T extends ExtractionReview>(
+// Cover a model omission only when one clause names the work, receipt/reference
+// and Data, and one recorded output matches. This remains an inferred candidate.
+export function suggestMissingSourceConnections<T extends ExtractionReview>(
   review: T, graph: LensGraph, workflow: Workflow, source: string,
 ): T {
   const incoming = [...(review.incomingHandoffs ?? [])];
@@ -13,6 +13,7 @@ export function suggestMissingReceipts<T extends ExtractionReview>(
   const literal = (text: string) => text.normalize("NFKC").replace(/[\s「」『』。]/g, "");
   const nodes = new Map(graph.nodes.map(n => [n.id, n]));
   const writers = new Map<string, Set<string>>();
+  const creators = new Map<string, Set<string>>();
   const senders = new Map<string, Set<string>>();
   for (const edge of graph.edges) {
     if (!["writes", "sends"].includes(edge.relation) || edge.status === "unknown") continue;
@@ -21,6 +22,11 @@ export function suggestMissingReceipts<T extends ExtractionReview>(
     const outputs = writers.get(process.id) ?? new Set<string>();
     outputs.add(normalizeAssetName(data.label));
     writers.set(process.id, outputs);
+    if (edge.relation === "writes") {
+      const written = creators.get(process.id) ?? new Set<string>();
+      written.add(normalizeAssetName(data.label));
+      creators.set(process.id, written);
+    }
     if (edge.relation === "sends") {
       const sent = senders.get(process.id) ?? new Set<string>();
       sent.add(normalizeAssetName(data.label));
@@ -31,20 +37,25 @@ export function suggestMissingReceipts<T extends ExtractionReview>(
     (w.scenario ?? "current") === (workflow.scenario ?? "current"));
   for (const step of review.steps) {
     if (incoming.some(h => h.toStepKey === step.stepKey)) continue;
-    const received = step.data.filter(d => d.operation === "receive").map(d => d.name);
-    if (!received.length || !/受け取|受領|受信/.test(step.evidence)) continue;
+    const isReceipt = step.data.some(d => d.operation === "receive");
+    const received = step.data.filter(d => d.operation === (isReceipt ? "receive" : "read")).map(d => d.name);
+    const verb = isReceipt ? /受け取|受領|受信/ : /読み込|読む|読ん|参照|確認/;
+    const denied = isReceipt
+      ? /受け取ら|受領しない|受信しない|受け取るか|受領するか|受信するか/
+      : /読まな|読みません|読んでいな|読んでいません|読み込まな|読み込みません|読み込んでいな|読み込んでいません|(?:参照|確認)し(?:ない|ません|ていない|ていません|ておら)|(?:参照|確認)でき(?:ない|ません|ていない|ていません)|(?:読む|読み込む|参照する|参照できる|確認する|確認できる)か/;
+    if (!received.length || !verb.test(step.evidence)) continue;
     const matches: Array<{ workflow: Workflow; processId: string; evidence: string }> = [];
     const named = new Map<string, string>();
     for (const candidate of candidates) {
       const evidence = clauses.find(clause =>
-        clause.includes(candidate.name) && /受け取|受領|受信/.test(clause) &&
+        clause.includes(candidate.name) && verb.test(clause) &&
         (literal(clause).includes(literal(step.evidence)) || literal(step.evidence).includes(literal(clause))) &&
-        !/受け取ら|受領しない|受信しない|受け取るか|受領するか|受信するか|後で説明|あとで説明/.test(clause) &&
+        !denied.test(clause) && !/後で説明|あとで説明|未確認|不明|分から/.test(clause) &&
         received.every(name => normalizeAssetName(clause).includes(normalizeAssetName(name))),
       );
       if (!evidence) continue;
       named.set(candidate.id, candidate.name);
-      for (const [processId, outputs] of writers) {
+      for (const [processId, outputs] of isReceipt ? writers : creators) {
         if (nodes.get(processId)?.workflowId !== candidate.id ||
           !received.every(name => outputs.has(normalizeAssetName(name)))) continue;
         matches.push({ workflow: candidate, processId, evidence });
@@ -54,20 +65,22 @@ export function suggestMissingReceipts<T extends ExtractionReview>(
     // Receipt can identify a unique send even when an earlier step created the
     // same record. Two conditional sends remain ambiguous.
     const sentMatches = matches.filter(m => received.every(name => senders.get(m.processId)?.has(normalizeAssetName(name))));
-    const preferred = sentMatches.length ? sentMatches : matches;
+    const preferred = isReceipt && sentMatches.length ? sentMatches : matches;
     if (preferred.length === 1 && named.size === 1) {
       const match = preferred[0];
       incoming.push({
         sourceWorkflowId: match.workflow.id,
         sourceStepKey: nodes.get(match.processId)!.canonicalKey.split(":").at(-1),
-        toStepKey: step.stepKey, data: received, via: "handoff", origin: "ai",
+        toStepKey: step.stepKey, data: received, via: isReceipt ? "handoff" : "reference", origin: "ai",
         certainty: "inferred", evidence: match.evidence,
-        description: "原文の受取記述と、登録済み業務の出力を照らした接続候補です。作成元と送り出す手順を確認してください。",
+        description: isReceipt
+          ? "原文の受取記述と、登録済み業務の出力を照らした接続候補です。作成元と送り出す手順を確認してください。"
+          : "原文の参照記述と、登録済み業務で情報を作成・更新する手順を照らした参照候補です。作成元を確認してください。",
       });
     } else {
       questions.push({
-        question: `${received.join("・")}は、${[...new Set(named.values())].join("／")}のどの手順から受け取りますか？`,
-        reason: "受取元が原文にありますが、対応する送り出す出力を一つに絞れません。名称だけで接続を確定していません。",
+        question: `${received.join("・")}は、${[...new Set(named.values())].join("／")}のどの手順${isReceipt ? "から受け取りますか" : "で作成・更新された情報を参照しますか"}？`,
+        reason: `原文に${isReceipt ? "受取" : "参照"}元がありますが、対応する出力を一つに絞れません。名称だけで接続を確定していません。`,
         target: "handoff",
       });
     }

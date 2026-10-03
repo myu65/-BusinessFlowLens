@@ -542,6 +542,7 @@ for (const protocol of ["openai", "anthropic"] as const) {
       );
       assert.ok(schema.properties.steps.items.required.includes("detailSteps"));
       assert.ok(schema.properties.steps.items.required.includes("meaning"));
+      assert.equal(schema.properties.steps.items.properties.meaning.type, "object");
       assert.ok(
         schema.properties.steps.items.properties.meaning.required.includes(
           "result",

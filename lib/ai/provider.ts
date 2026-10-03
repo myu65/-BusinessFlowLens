@@ -8,7 +8,7 @@ import { callCodexModel } from "./codex";
 import {
   validateReviewConnections,
   validateAITransitions,
-  suggestMissingReceipts,
+  suggestMissingSourceConnections,
 } from "../review-connections";
 import { retainRegisteredGrouping } from "../input-knowledge";
 import { effectiveFollowUpAnswers, scopeReferenceDataFlows, groundedReferenceReading, referencePromptAnswer, referenceSourceClauses } from "../question-evidence";
@@ -134,7 +134,7 @@ const WORKFLOW_DRAFT_SCHEMA = {
           },
           evidence: { type: "string" },
           meaning: {
-            type: ["object", "null"],
+            type: "object",
             additionalProperties: false,
             properties: {
               purpose: { type: "string" },
@@ -720,7 +720,7 @@ Rules:
 8d. Never use a self-loop to represent a conditional action, a child operation, or a stop inside the same step. A transition to the same step is allowed only when the source explicitly states repeating that action, with the literal repeat clause as evidence. A hold with an unknown restart has no outgoing restart transition. A separate confirmation request before production and a product inspection after production are separate branch steps, even if both go to quality control.
 8e. A step executed only when a deviation occurs cannot be the source of the no-deviation path. Both alternatives branch from the preceding check or detection step. Never connect a conditional hold to normal completion unless the source explicitly describes releasing that hold and resuming. Unknown release authority is not evidence of a release.
 8f. Preserve the described normal path as well as exceptions. Narrative order and a stated result enabling the next action can support a transition with certainty=inferred; do not omit the normal path solely because there is no literal 'then'. Quote the relevant source clause as evidence, and ask if the order is actually ambiguous. The previous topology helps stable-key comparison but never overrides a correction in the latest source.
-8a. meaning captures business changes: purpose (why), basis (evidence used for judgment), result (what is decided/changed), next (what work this result triggers), condition and halt. Leave unmentioned strings empty, certainty=unknown or inferred; use null if nothing is known. Do not repeat a generic record name as a business outcome, invent a credit/ATP rule, or assume that checking inventory means shipment is allowed. Keep the exact supporting source in evidence.
+8a. Every step must have a meaning object. It captures business changes: purpose (why), basis (evidence used for judgment), result (what is decided/changed), next (what work this result triggers), condition and halt. Keep each unmentioned string empty. If no business meaning is stated, use empty strings, halt=false and certainty=unknown. A stated calculation, save, update, notification or decision has a result even when its purpose or decision rule is unknown: describe only that stated change, for example a calculated lot cost or a file made available for reference. Do not leave a stated result empty merely because other fields are unknown. Do not repeat a generic record name as a business outcome, invent a credit/ATP rule, or assume that checking inventory means shipment is allowed. Mark a modest interpretation inferred; keep explicit outcomes confirmed. Evidence must quote the exact source supporting the nonempty fields. Never fill unknown fields to complete the object.
 8g. An explicit stop/hold is a known business change even if its owner or release is unknown. Always give that step meaning with halt=true, result describing what remains stopped, and condition when stated. Leave release authority and restart unknown instead of returning meaning=null or silently completing the flow.
 9. Capture system-to-system dataFlows ONLY when the transcript explicitly describes information moving from one named system/tool to another, including human transcription. Examples: "ERPからWMSへCSVを送る", "Excelを見ながらERPへ手入力". Do NOT infer an API or integration merely because two systems appear in adjacent steps.
 10. For each dataFlow record source system, target system, transferred business data, transferType, direction, automation, frequency if stated, evidence, and relatedStepKeys. Use unknown rather than guessing a transfer method.
@@ -1413,7 +1413,7 @@ export async function extractWorkflowReviewWithAI(args: {
   const draft = normalizeDraft(
     retainRegisteredGrouping(
       validateReviewConnections(
-        suggestMissingReceipts(
+        suggestMissingSourceConnections(
           preserveRefinements(sourceDraft, args.previousReview),
           args.graph, args.workflow,
           evidenceSource,
