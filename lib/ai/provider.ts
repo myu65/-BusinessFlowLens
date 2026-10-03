@@ -810,7 +810,7 @@ Use existing company context to interpret shorthand and references such as "ERP"
 - If a follow-up answer resolves a question, update the draft and remove that question.
 - Ask new questions only for remaining material gaps.
 
-Return a revised, reviewable workflow draft as compact JSON without indentation. Use null for unstated technicalDetails, executionContext and meaning, and [] for unstated child operations; do not fill those structures with empty strings. Preserve the full meaning of stated actions, conditions and evidence.`;
+Return a revised, reviewable workflow draft as compact JSON without indentation. Use [] for unstated technicalDetails and child operations, and null for an unstated executionContext. Always include the meaning object; keep its unmentioned strings empty, halt=false unless a stop is stated, and certainty=unknown when no meaning is known. Preserve the full meaning of stated actions, conditions and evidence.`;
 }
 
 function normalizeName(value: string) {
