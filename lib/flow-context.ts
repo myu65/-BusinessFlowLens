@@ -13,6 +13,25 @@ export function stepContext(
   const steps = getWorkflowProcesses(graph, workflowId);
   const index = steps.findIndex((s) => s.id === stepId);
   const step = steps[index];
+  const byId = new Map(steps.map((s) => [s.id, s]));
+  const outgoing = graph.edges
+    .filter(
+      (e) =>
+        e.relation === "next" &&
+        e.source === stepId &&
+        e.workflowIds.includes(workflowId) &&
+        byId.has(e.target),
+    )
+    .map((edge) => ({ edge, step: byId.get(edge.target)! }));
+  const incoming = graph.edges
+    .filter(
+      (e) =>
+        e.relation === "next" &&
+        e.target === stepId &&
+        e.workflowIds.includes(workflowId) &&
+        byId.has(e.source),
+    )
+    .map((edge) => ({ edge, step: byId.get(edge.source)! }));
   const links = step ? getProcessAssetLinks(graph, step.id) : [];
   const unique = (nodes: LensNode[]) => [
     ...new Map(nodes.map((n) => [n.id, n])).values(),
@@ -21,8 +40,13 @@ export function stepContext(
     steps,
     step,
     index,
-    previous: steps[index - 1],
-    next: steps[index + 1],
+    previous: incoming.length === 1 ? incoming[0].step : undefined,
+    next:
+      outgoing.length === 1 && !step?.meaning?.halt
+        ? outgoing[0].step
+        : undefined,
+    outgoing,
+    incoming,
     systems: unique(
       links.filter((l) => l.asset.kind === "system").map((l) => l.asset),
     ),
@@ -47,6 +71,85 @@ export function stepContext(
       .filter((e) => e.target === stepId && e.relation === "executes")
       .map((e) => graph.nodes.find((n) => n.id === e.source)!)
       .filter(Boolean),
+  };
+}
+
+export type FlowJourney = {
+  workflowId: string;
+  stepId?: string;
+  dataId?: string;
+  trail: Array<{
+    workflowId: string;
+    stepId: string;
+    dataId?: string;
+    description: string;
+    evidence: string;
+  }>;
+  entryKnown: boolean;
+};
+export type WorkflowHandoff = NonNullable<
+  NonNullable<LensGraph["knowledge"]>["handoffs"]
+>[number];
+export function handoffEntry(
+  graph: LensGraph,
+  handoff: WorkflowHandoff,
+  preferredDataId?: string,
+) {
+  const dataId =
+    preferredDataId && handoff.dataIds.includes(preferredDataId)
+      ? preferredDataId
+      : handoff.dataIds[0];
+  const steps = getWorkflowProcesses(graph, handoff.targetWorkflowId);
+  const specified = steps.find((s) => s.id === handoff.targetProcessId);
+  const receivers = dataId
+    ? steps.filter((s) =>
+        getProcessAssetLinks(graph, s.id).some(
+          (l) => l.asset.id === dataId && l.relation === "reads",
+        ),
+      )
+    : [];
+  return {
+    stepId:
+      specified?.id ?? (receivers.length === 1 ? receivers[0].id : undefined),
+    dataId,
+    entryKnown: !!specified || receivers.length === 1,
+  };
+}
+
+export function handoffJourney(
+  graph: LensGraph,
+  handoff: WorkflowHandoff,
+  fromWorkflowId: string,
+  fromStepId: string,
+  previous?: FlowJourney,
+  preferredDataId?: string,
+): FlowJourney {
+  const forward = handoff.sourceWorkflowId === fromWorkflowId;
+  const entry = forward
+    ? handoffEntry(graph, handoff, preferredDataId)
+    : {
+        stepId: handoff.sourceProcessId,
+        dataId:
+          preferredDataId && handoff.dataIds.includes(preferredDataId)
+            ? preferredDataId
+            : handoff.dataIds[0],
+        entryKnown:
+          !!handoff.sourceProcessId &&
+          graph.nodes.some((n) => n.id === handoff.sourceProcessId),
+      };
+  return {
+    workflowId: forward ? handoff.targetWorkflowId : handoff.sourceWorkflowId,
+    ...entry,
+    trail: [
+      ...(previous?.workflowId === fromWorkflowId ? previous.trail : []),
+      {
+        workflowId: fromWorkflowId,
+        stepId: fromStepId,
+        dataId: entry.dataId,
+        description: handoff.description,
+        evidence: handoff.evidence,
+      },
+    ].slice(-10),
   };
 }
 

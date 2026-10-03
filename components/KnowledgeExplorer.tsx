@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { LensGraph, LensNode } from "@/lib/graph";
+import { handoffJourney, type FlowJourney } from "@/lib/flow-context";
 import {
   compareWorkflow,
   knowledgeIndex,
@@ -10,6 +11,7 @@ import {
 } from "@/lib/knowledge";
 import { ProcessContextEditor } from "./ProcessContextEditor";
 import { WorkflowReading } from "./WorkflowReading";
+import { USAGE_DEFINITION } from "./ScopedExplorers";
 import { CompanyOrientation } from "./CompanyOrientation";
 import { termExplanation } from "@/lib/knowledge-guide";
 import { KnowledgeEditor } from "./KnowledgeEditor";
@@ -34,12 +36,14 @@ export function KnowledgeExplorer({
   onGraphApply,
   onOpenWorkflow,
   onWorkflowFocus,
+  onFocusStep,
 }: {
   projectId: string;
   graph: LensGraph;
   onGraphApply: (g: LensGraph) => void;
   onOpenWorkflow: (id: string) => void;
   onWorkflowFocus: (id: string) => void;
+  onFocusStep?: (workflowId: string, stepId: string) => void;
 }) {
   const [report, setReport] = useState<{ text: string; url: string } | null>(
     null,
@@ -60,6 +64,7 @@ export function KnowledgeExplorer({
   const [category, setCategory] = useState("");
   const [page, setPage] = useState(0);
   const [readStepId, setReadStep] = useState("");
+  const [readerJourney, setReaderJourney] = useState<FlowJourney>();
   const [readDataId, setReadData] = useState("");
   const [editingStep, setEditingStep] = useState("");
   const [categoryName, setCategoryName] = useState("");
@@ -78,7 +83,7 @@ export function KnowledgeExplorer({
     setEditingStep("");
     if (next.kind === "workflow") onWorkflowFocus(next.id);
     if (next.kind === "process") {
-      const process = graph.nodes.find(n => n.id === next.id);
+      const process = graph.nodes.find((n) => n.id === next.id);
       if (process?.workflowId) onWorkflowFocus(process.workflowId);
     }
     window.scrollTo({ top: 0, behavior: "instant" });
@@ -283,9 +288,12 @@ export function KnowledgeExplorer({
           onClick={() => {
             const previous = history.at(-1)!;
             setFocus(previous.focus);
-            if (previous.focus.kind === "workflow") onWorkflowFocus(previous.focus.id);
+            if (previous.focus.kind === "workflow")
+              onWorkflowFocus(previous.focus.id);
             if (previous.focus.kind === "process") {
-              const process = graph.nodes.find(n => n.id === (previous.focus as {id: string}).id);
+              const process = graph.nodes.find(
+                (n) => n.id === (previous.focus as { id: string }).id,
+              );
               if (process?.workflowId) onWorkflowFocus(process.workflowId);
             }
             setEditingStep("");
@@ -532,7 +540,7 @@ export function KnowledgeExplorer({
         <>
           <h2>{row.workflow.name}</h2>
           <p className="kg-context">
-            ひとつの業務を、上から順番に読んでください。手順を押すと判断や個別作業が、青いラベルを押すとシステムの役割が、緑のラベルを押すと情報の使われ方がわかります。
+            手順と条件のつながりを辿ってください。手順を押すと判断や個別作業が、青いラベルを押すとシステムの役割が、緑のラベルを押すと情報の使われ方がわかります。
           </p>
           <p>{row.workflow.description}</p>
           <p>
@@ -574,8 +582,20 @@ export function KnowledgeExplorer({
             initialDataId={readDataId || undefined}
             initialLens={readDataId ? "data" : "work"}
             onGraphApply={onGraphApply}
-            onStepChange={id => {setReadStep(id);setEditingStep("");}}
-            onNavigateWorkflow={(id) => {
+            onStepChange={(id) => {
+              setReadStep(id);
+              setEditingStep("");
+              onFocusStep?.(row.workflow.id, id);
+            }}
+            journey={
+              readerJourney?.workflowId === row.workflow.id
+                ? readerJourney
+                : undefined
+            }
+            onNavigateWorkflow={(id, journey) => {
+              setReaderJourney(journey);
+              setReadStep(journey.stepId ?? "");
+              setReadData(journey.dataId ?? "");
               setQuery("");
               setDepartment("");
               go({ kind: "workflow", id });
@@ -590,7 +610,16 @@ export function KnowledgeExplorer({
               go({ kind: "asset", id: n.id });
             }}
           />
-          {editingStep && graph.nodes.some(n => n.id === editingStep && n.workflowId === row.workflow.id) && <ProcessContextEditor graph={graph} stepId={editingStep} onApply={onGraphApply} />}
+          {editingStep &&
+            graph.nodes.some(
+              (n) => n.id === editingStep && n.workflowId === row.workflow.id,
+            ) && (
+              <ProcessContextEditor
+                graph={graph}
+                stepId={editingStep}
+                onApply={onGraphApply}
+              />
+            )}
           <h3>前後の業務・活動</h3>
           <div className="kg-links">
             {(graph.knowledge?.handoffs ?? [])
@@ -608,7 +637,29 @@ export function KnowledgeExplorer({
                   <article key={h.id}>
                     {h.sourceWorkflowId === row.workflow.id ? "次へ" : "前へ"} (
                     {h.kind === "information" ? "情報受渡し" : "物の受渡し"}):{" "}
-                    {workflowButton(target)}
+                    <button
+                      onClick={() => {
+                        const journey = handoffJourney(
+                          graph,
+                          h,
+                          row.workflow.id,
+                          h.sourceWorkflowId === row.workflow.id
+                            ? h.sourceProcessId ||
+                                readStepId ||
+                                row.processes[0]?.id
+                            : readStepId || row.processes[0]?.id,
+                          readerJourney,
+                          readDataId,
+                        );
+                        setReaderJourney(journey);
+                        setReadStep(journey.stepId ?? "");
+                        setReadData(journey.dataId ?? "");
+                        go({ kind: "workflow", id: target });
+                      }}
+                    >
+                      {graph.workflows.find((w) => w.id === target)?.name ??
+                        target}
+                    </button>
                     <p>{h.description}</p>
                     {h.dataIds
                       .map((id) => view.nodeById.get(id))
@@ -620,10 +671,11 @@ export function KnowledgeExplorer({
               })}
           </div>
           <details>
-            <summary>改善すると何が変わるか（現状と将来案）</summary>
+            <summary>現状と将来案の違いを確認する</summary>
             {compareWorkflow(graph, row.workflow.id).length ? (
               compareWorkflow(graph, row.workflow.id).map((c) => (
                 <article key={c.workflow.id}>
+                  <p>比較の向き：{row.workflow.name} → {c.workflow.name}</p>
                   <button
                     onClick={() => {
                       setScope(c.workflow.scenario ?? "current");
@@ -650,6 +702,29 @@ export function KnowledgeExplorer({
                     System: {c.beforeSystems.map((n) => n.label).join(" / ")} →{" "}
                     {c.afterSystems.map((n) => n.label).join(" / ")}
                   </p>
+                  <p>
+                    完了する状態：{c.beforeOutcome || "未確認"} →{" "}
+                    {c.afterOutcome || "未確認"}
+                  </p>
+                  {c.resultChanges.map((x) => (
+                    <p key={x.before.id}>
+                      {x.before.label}：
+                      {x.before.meaning?.result || "結果未確認"} →{" "}
+                      {x.after.meaning?.result || "結果未確認"} / 次の仕事：
+                      {x.after.meaning?.next || "未確認"} / 根拠：
+                      {x.after.meaning?.evidence || "未登録"}
+                    </p>
+                  ))}
+                  {c.added.map(
+                    (n) =>
+                      n.meaning?.result && (
+                        <p key={`result:${n.id}`}>
+                          追加する処理の結果：{n.meaning.result} →{" "}
+                          {n.meaning.next || "次の仕事は未確認"} /{" "}
+                          {n.meaning.evidence}
+                        </p>
+                      ),
+                  )}
                 </article>
               ))
             ) : (
@@ -672,7 +747,10 @@ export function KnowledgeExplorer({
             workflowId={processRow.workflow.id}
             initialStepId={asset.id}
             initialDepth="detail"
-            onStepChange={id => {setReadStep(id);setEditingStep("");}}
+            onStepChange={(id) => {
+              setReadStep(id);
+              setEditingStep("");
+            }}
             onGraphApply={onGraphApply}
             onDetail={setEditingStep}
             onAsset={(n, id) => {
@@ -680,7 +758,17 @@ export function KnowledgeExplorer({
               if (n.kind === "data") setReadData(n.id);
               go({ kind: "asset", id: n.id });
             }}
-            onNavigateWorkflow={(id) => go({ kind: "workflow", id })}
+            journey={
+              readerJourney?.workflowId === processRow.workflow.id
+                ? readerJourney
+                : undefined
+            }
+            onNavigateWorkflow={(id, journey) => {
+              setReaderJourney(journey);
+              setReadStep(journey.stepId ?? "");
+              setReadData(journey.dataId ?? "");
+              go({ kind: "workflow", id });
+            }}
           />
           {editingStep && (
             <ProcessContextEditor
@@ -810,7 +898,12 @@ export function KnowledgeExplorer({
           <p className="kg-context">
             {asset.kind === "data"
               ? "これは業務で受け取り、参照・更新する情報です。下で、その情報を使う仕事と、受渡し先を確かめられます。"
-              : "直接は、その道具を使う業務。間接は、その道具に頼る別のシステムを通じて支えられる業務です。件数は登録された関係の範囲です。"}
+              : USAGE_DEFINITION}
+          </p>
+          <p aria-label="集計の内訳">
+            直接関連 {impact.direct.length}業務（手順で利用{" "}
+            {impact.stepUse.length} / 連携で関連 {impact.flowUse.length} ·
+            重複あり） / 間接影響 {impact.indirect.length}業務
           </p>
           {asset.kind === "system" && graph.knowledge && (
             <label>

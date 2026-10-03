@@ -142,6 +142,27 @@ export function knowledgeIndex(
     ]
       .map((id) => nodeById.get(id))
       .filter((n): n is LensNode => !!n && n.kind !== "process");
+  const flowsByWorkflow = new Map<string, LensGraph["dataFlows"]>();
+  for (const f of graph.dataFlows)
+    for (const id of f.workflowIds) {
+      const list = flowsByWorkflow.get(id) ?? [];
+      list.push(f);
+      flowsByWorkflow.set(id, list);
+    }
+  const assetEdgesByWorkflow = new Map<string, string[]>();
+  for (const e of graph.edges)
+    if (
+      nodeById.get(e.source)?.kind !== "process" &&
+      nodeById.get(e.target)?.kind !== "process"
+    )
+      for (const id of e.workflowIds) {
+        const list = assetEdgesByWorkflow.get(id) ?? [];
+        list.push(e.source, e.target);
+        assetEdgesByWorkflow.set(id, list);
+      }
+  const assetsByProcess = new Map(
+    allProcesses.map((p) => [p.id, assetsFor([p])]),
+  );
   const q = query.trim().toLocaleLowerCase();
   const profiles = new Map(
     (graph.knowledge?.systems ?? []).map((s) => [s.systemId, s]),
@@ -173,17 +194,8 @@ export function knowledgeIndex(
       const processes = (processesByWorkflow.get(workflow.id) ?? []).sort(
         (a, b) => (a.stepOrder ?? 0) - (b.stepOrder ?? 0),
       );
-      const flows = graph.dataFlows.filter((f) =>
-        f.workflowIds.includes(workflow.id),
-      );
-      const explicitAssets = graph.edges
-        .filter(
-          (e) =>
-            e.workflowIds.includes(workflow.id) &&
-            nodeById.get(e.source)?.kind !== "process" &&
-            nodeById.get(e.target)?.kind !== "process",
-        )
-        .flatMap((e) => [e.source, e.target]);
+      const flows = flowsByWorkflow.get(workflow.id) ?? [];
+      const explicitAssets = assetEdgesByWorkflow.get(workflow.id) ?? [];
       const assets = [
         ...new Map(
           [
@@ -254,8 +266,15 @@ export function knowledgeIndex(
         a.capabilities.some((c) => c.workflowIds.includes(r.workflow.id)),
       ),
     }));
-  const systemProfile = (id: string) => {
-    const direct = rows.filter((r) => r.assets.some((n) => n.id === id));
+  const rowsByAsset = new Map<string, typeof rows>();
+  for (const row of rows)
+    for (const asset of row.assets) {
+      const related = rowsByAsset.get(asset.id) ?? [];
+      related.push(row);
+      rowsByAsset.set(asset.id, related);
+    }
+  const calculateProfile = (id: string) => {
+    const direct = rowsByAsset.get(id) ?? [];
     // Platform impact follows declared dependencies; it is kept separate from direct business use.
     const dependentIds = new Set<string>();
     let frontier = [id];
@@ -277,7 +296,9 @@ export function knowledgeIndex(
         !direct.includes(r) && r.assets.some((n) => dependentIds.has(n.id)),
     );
     const processes = direct.flatMap((r) =>
-      r.processes.filter((p) => assetsFor([p]).some((n) => n.id === id)),
+      r.processes.filter((p) =>
+        assetsByProcess.get(p.id)?.some((n) => n.id === id),
+      ),
     );
     const flows = graph.dataFlows.filter(
       (f) =>
@@ -286,8 +307,20 @@ export function knowledgeIndex(
           f.dataIds.includes(id)) &&
         f.workflowIds.some((w) => activeIds.has(w)),
     );
+    const stepUse = direct.filter((r) =>
+      r.processes.some((p) =>
+        assetsByProcess.get(p.id)?.some((n) => n.id === id),
+      ),
+    );
+    const flowUse = direct.filter((r) =>
+      r.flows.some((f) =>
+        [f.sourceSystemId, f.targetSystemId, ...f.dataIds].includes(id),
+      ),
+    );
     return {
       direct,
+      stepUse,
+      flowUse,
       indirect,
       processes,
       flows,
@@ -296,6 +329,15 @@ export function knowledgeIndex(
         .filter(Boolean),
       profile: graph.knowledge?.systems.find((s) => s.systemId === id),
     };
+  };
+  const profileCache = new Map<string, ReturnType<typeof calculateProfile>>();
+  const systemProfile = (id: string) => {
+    let profile = profileCache.get(id);
+    if (!profile) {
+      profile = calculateProfile(id);
+      profileCache.set(id, profile);
+    }
+    return profile;
   };
   return {
     rows,
@@ -311,36 +353,65 @@ export function knowledgeIndex(
   };
 }
 
-export function compareWorkflow(graph: LensGraph, workflowId: string) {
+function comparisonRowsFor(graph: LensGraph) {
+  return [
+    ...new Set(graph.workflows.map((w) => w.scenario ?? "current")),
+  ].flatMap((scope) => knowledgeIndex(graph, scope).rows);
+}
+
+export function compareWorkflow(
+  graph: LensGraph,
+  workflowId: string,
+  indexedRows?: ReturnType<typeof knowledgeIndex>["rows"],
+) {
   const workflow = graph.workflows.find((w) => w.id === workflowId);
   if (!workflow) return [];
-  return graph.workflows
-    .filter(
-      (w) =>
-        w.id !== workflowId &&
-        (w.familyId ?? w.id) === (workflow.familyId ?? workflow.id),
-    )
-    .map((w) => {
-      const a = knowledgeIndex(graph, workflow.scenario ?? "current").rows.find(
-        (r) => r.workflow.id === workflowId,
-      )!;
-      const b = knowledgeIndex(graph, w.scenario ?? "current").rows.find(
-        (r) => r.workflow.id === w.id,
-      )!;
-      return {
-        workflow: w,
-        removed: a.processes.filter(
-          (p) => !b.processes.some((n) => n.label === p.label),
-        ),
-        added: b.processes.filter(
-          (p) => !a.processes.some((n) => n.label === p.label),
-        ),
-        beforeManual: a.flows.filter((f) => f.automation === "manual").length,
-        afterManual: b.flows.filter((f) => f.automation === "manual").length,
-        beforeSystems: a.assets.filter((n) => n.kind === "system"),
-        afterSystems: b.assets.filter((n) => n.kind === "system"),
-      };
-    });
+  const alternatives = graph.workflows.filter(
+    (w) =>
+      w.id !== workflowId &&
+      (w.familyId ?? w.id) === (workflow.familyId ?? workflow.id),
+  );
+  if (!alternatives.length) return [];
+  const rows = indexedRows ?? comparisonRowsFor(graph);
+  const a = rows.find((r) => r.workflow.id === workflowId)!;
+  return alternatives.map((w) => {
+    const b = rows.find((r) => r.workflow.id === w.id)!;
+    return {
+      workflow: w,
+      removed: a.processes.filter(
+        (p) => !b.processes.some((n) => n.label === p.label),
+      ),
+      added: b.processes.filter(
+        (p) => !a.processes.some((n) => n.label === p.label),
+      ),
+      beforeManual: a.flows.filter((f) => f.automation === "manual").length,
+      afterManual: b.flows.filter((f) => f.automation === "manual").length,
+      beforeSystems: a.assets.filter((n) => n.kind === "system"),
+      afterSystems: b.assets.filter((n) => n.kind === "system"),
+      beforeOutcome: a.workflow.outcome,
+      afterOutcome: b.workflow.outcome,
+      resultChanges: a.processes.flatMap((p) => {
+        const other = b.processes.find(
+          (n) =>
+            n.canonicalKey.split(":").at(-1) ===
+            p.canonicalKey.split(":").at(-1),
+        );
+        return other &&
+          JSON.stringify({
+            meaning: p.meaning,
+            mode: p.executionMode,
+            actor: p.actor,
+          }) !==
+            JSON.stringify({
+              meaning: other.meaning,
+              mode: other.executionMode,
+              actor: other.actor,
+            })
+          ? [{ before: p, after: other }]
+          : [];
+      }),
+    };
+  });
 }
 
 export function knowledgeReport(
@@ -392,7 +463,9 @@ export function knowledgeReport(
       "",
     );
   }
+  const comparisonRows = comparisonRowsFor(graph);
   for (const row of rows) {
+    const comparisons = compareWorkflow(graph, row.workflow.id, comparisonRows);
     lines.push(
       `## ${row.workflow.name}`,
       row.workflow.description ?? "",
@@ -410,10 +483,19 @@ export function knowledgeReport(
       "",
       ...row.processes.map(
         (p) =>
-          `- ${p.stepOrder}. ${p.label} (${p.executionMode ?? "unknown"})${p.executionContext ? ` / 起点: ${p.executionContext.trigger} / 判断: ${p.executionContext.rule} / 例外: ${p.executionContext.exception}` : ""}`,
+          `- ${p.stepOrder}. ${p.label} (${p.executionMode ?? "unknown"})${p.executionContext ? ` / 起点: ${p.executionContext.trigger} / 判断: ${p.executionContext.rule} / 例外: ${p.executionContext.exception}` : ""}${p.meaning ? ` / 理由: ${p.meaning.purpose || "未確認"} / 根拠: ${p.meaning.basis || "未確認"} / 結果: ${p.meaning.result || "未確認"} / 次の仕事: ${p.meaning.next || "未確認"} / ${p.meaning.halt ? "停止・保留" : ""} / 確度: ${p.meaning.certainty} / 原文: ${p.meaning.evidence}` : " / 処理結果は未確認"}`,
       ),
       "",
       "受渡し:",
+      ...graph.edges
+        .filter(
+          (e) =>
+            e.relation === "next" && e.workflowIds.includes(row.workflow.id),
+        )
+        .map(
+          (e) =>
+            `- 接続: ${view.nodeById.get(e.source)?.label} → ${view.nodeById.get(e.target)?.label} / 条件: ${e.label || "順次"} / 確度: ${e.status ?? "未確認"} / 根拠: ${e.evidence || "未登録"}`,
+        ),
       ...row.flows.map(
         (f) =>
           `- ${view.nodeById.get(f.sourceSystemId)?.label} → ${view.nodeById.get(f.targetSystemId)?.label}: ${f.dataIds.map((d) => view.nodeById.get(d)?.label).join(" / ")} (${f.transferType}, ${f.automation})`,
@@ -425,10 +507,24 @@ export function knowledgeReport(
             `次の業務: ${graph.workflows.find((w) => w.id === h.targetWorkflowId)?.name} / ${h.description} / ${h.kind}`,
         ),
       "",
-      ...compareWorkflow(graph, row.workflow.id).map(
+      ...comparisons.map(
         (c) =>
           `比較: ${c.workflow.name} / 有効日: ${c.workflow.effectiveFrom ?? "未定"} / 手動転送 ${c.beforeManual} → ${c.afterManual} / 削除: ${c.removed.map((p) => p.label).join("、")} / 追加: ${c.added.map((p) => p.label).join("、")}`,
       ),
+      ...comparisons.flatMap((c) => [
+        ...c.resultChanges.map(
+          (x) =>
+            `結果の比較: ${x.before.label} / ${x.before.meaning?.result || "未確認"} → ${x.after.meaning?.result || "未確認"} / 次の仕事: ${x.before.meaning?.next || "未確認"} → ${x.after.meaning?.next || "未確認"} / 根拠: ${x.after.meaning?.evidence || "未登録"}`,
+        ),
+        ...c.added.map(
+          (p) =>
+            `追加する処理の結果: ${p.label} / 理由: ${p.meaning?.purpose || "未確認"} / 根拠: ${p.meaning?.basis || "未確認"} / 結果: ${p.meaning?.result || "未確認"} / 次の仕事: ${p.meaning?.next || "未確認"} / 条件: ${p.meaning?.condition || "未確認"} / ${p.meaning?.halt ? "停止・保留" : ""} / 原文: ${p.meaning?.evidence || "未登録"}`,
+        ),
+        ...c.removed.map(
+          (p) =>
+            `除外する処理の結果: ${p.label} / 理由: ${p.meaning?.purpose || "未確認"} / 結果: ${p.meaning?.result || "未確認"} / 次の仕事: ${p.meaning?.next || "未確認"} / 原文: ${p.meaning?.evidence || "未登録"}`,
+        ),
+      ]),
       "",
     );
   }

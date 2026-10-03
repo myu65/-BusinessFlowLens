@@ -1,6 +1,9 @@
 import { createChemicalCompany } from "../lib/chemical-company";
 import { getBusinessFlowRepository } from "../lib/storage";
-const projectId = "chemical-demo";
+const projectId =
+  process.argv
+    .find((arg) => arg.startsWith("--project-id="))
+    ?.slice("--project-id=".length) || "chemical-demo";
 const repo = getBusinessFlowRepository();
 async function main() {
   if (
@@ -8,7 +11,7 @@ async function main() {
     !process.argv.includes("--replace")
   )
     throw new Error(
-      "chemical-demo already exists. Use --replace only to reset this synthetic sample.",
+      `${projectId} already exists. Choose a new --project-id to keep existing data.`,
     );
   const graph = createChemicalCompany();
   await repo.saveProject({

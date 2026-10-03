@@ -156,7 +156,9 @@ test("detail context retains the same step, explicit data operations and executi
   )!;
   const context = stepContext(graph, wid, credit.id);
   assert.equal(context.step, credit);
-  assert.ok(context.previous && context.next);
+  assert.equal(context.incoming.length, 2, "initial judgment and release/retry are both preserved");
+  assert.equal(context.outgoing.length, 2, "allow and hold are separate routes");
+  assert.equal(context.next, undefined, "a branch requires choosing its condition");
   assert.ok(context.inputs.some((n) => n.label.includes("与信限度")));
   assert.ok(context.executingSystems.some((n) => n.label.includes("SAP")));
   assert.ok(

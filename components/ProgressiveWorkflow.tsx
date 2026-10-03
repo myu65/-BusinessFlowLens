@@ -10,6 +10,7 @@ import {
 } from "@/lib/graph";
 import { CompanyMap } from "./CompanyMap";
 import { WorkflowReading } from "./WorkflowReading";
+import type { FlowJourney } from "@/lib/flow-context";
 import { BusinessOverview } from "./BusinessOverview";
 import { mergeAssets } from "@/lib/refinement";
 
@@ -240,6 +241,7 @@ export function WorkflowExplorer({
   initialLevel = "overview",
   workflowId,
   selectedStepId,
+  onFocusStep,
   onSelectWorkflow,
   onEdit,
   onGraphApply,
@@ -249,15 +251,15 @@ export function WorkflowExplorer({
   initialLevel?: "overview" | "business";
   workflowId: string;
   selectedStepId?: string;
+  onFocusStep?: (workflowId: string, stepId: string) => void;
   onSelectWorkflow: (id: string) => void;
   onEdit: () => void;
   onGraphApply: (graph: LensGraph) => void;
   children: ReactNode;
 }) {
-  const [level, setLevel] = useState<"overview" | "business">(
-    initialLevel,
-  );
+  const [level, setLevel] = useState<"overview" | "business">(initialLevel);
   const [stepId, setStepId] = useState<string | null>(null);
+  const [readerJourney, setReaderJourney] = useState<FlowJourney>();
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
   }, [level, workflowId]);
@@ -291,18 +293,97 @@ export function WorkflowExplorer({
       </div>
       {level === "business" ? (
         <>
-          <section className="page-view kg-view"><h1>{workflow?.name}</h1><p>{workflow?.description}</p>
-          <WorkflowReading key={workflowId} initialStepId={stepId ?? selectedStepId} onStepChange={setStepId} onGraphApply={onGraphApply} onNavigateWorkflow={onSelectWorkflow} graph={graph} workflowId={workflowId} onDetail={() => onEdit()} />
-          <details><summary>業務を切り替える・全手順のフロー図と関連情報を見る</summary>{children}</details></section>
+          <section className="page-view kg-view">
+            <h1>{workflow?.name}</h1>
+            <p>{workflow?.description}</p>
+            <WorkflowReading
+              key={workflowId}
+              journey={
+                readerJourney?.workflowId === workflowId
+                  ? readerJourney
+                  : undefined
+              }
+              initialStepId={
+                readerJourney?.workflowId === workflowId
+                  ? readerJourney.stepId
+                  : (stepId ?? selectedStepId)
+              }
+              initialDataId={
+                readerJourney?.workflowId === workflowId
+                  ? readerJourney.dataId
+                  : undefined
+              }
+              initialLens={
+                readerJourney?.workflowId === workflowId && readerJourney.dataId
+                  ? "data"
+                  : "work"
+              }
+              onStepChange={(id) => {
+                setStepId(id);
+                onFocusStep?.(workflowId, id);
+              }}
+              onGraphApply={onGraphApply}
+              onNavigateWorkflow={(id, journey) => {
+                setReaderJourney(journey);
+                setStepId(journey.stepId ?? null);
+                if (journey.stepId) onFocusStep?.(id, journey.stepId);
+                onSelectWorkflow(id);
+              }}
+              graph={graph}
+              workflowId={workflowId}
+              onDetail={() => onEdit()}
+            />
+            <details>
+              <summary>
+                業務を切り替える・全手順のフロー図と関連情報を見る
+              </summary>
+              {children}
+            </details>
+          </section>
         </>
       ) : null}
-      {level === "overview" && graph.knowledge ? <section className="page-view kg-view"><h1>会社の仕事を鳥瞰する</h1><CompanyMap graph={graph} workflowIds={graph.workflows.filter(w => (w.scenario ?? "current") === (workflow?.scenario ?? "current")).map(w=>w.id)} onWorkflow={id=>{onSelectWorkflow(id);setLevel("business");}} /><details><summary>条件で絞り込む・詳しい関係図を開く</summary><BusinessOverview graph={graph} onEdit={onEdit} onGraphApply={onGraphApply} onOpen={id=>{onSelectWorkflow(id);setLevel("business");}} /></details></section> : null}
+      {level === "overview" && graph.knowledge ? (
+        <section className="page-view kg-view">
+          <h1>会社の仕事を鳥瞰する</h1>
+          <CompanyMap
+            graph={graph}
+            workflowIds={graph.workflows
+              .filter(
+                (w) =>
+                  (w.scenario ?? "current") ===
+                  (workflow?.scenario ?? "current"),
+              )
+              .map((w) => w.id)}
+            onWorkflow={(id) => {
+              onSelectWorkflow(id);
+              setLevel("business");
+            }}
+          />
+          <details>
+            <summary>条件で絞り込む・詳しい関係図を開く</summary>
+            <BusinessOverview
+              graph={graph}
+              onEdit={onEdit}
+              onGraphApply={onGraphApply}
+              onOpen={(id) => {
+                onSelectWorkflow(id);
+                setLevel("business");
+              }}
+            />
+          </details>
+        </section>
+      ) : null}
       {level === "overview" && !graph.knowledge ? (
-        <BusinessOverview graph={graph} onEdit={onEdit} onGraphApply={onGraphApply} onOpen={(id) => {
-          onSelectWorkflow(id);
-          setStepId(null);
-          setLevel("business");
-        }} />
+        <BusinessOverview
+          graph={graph}
+          onEdit={onEdit}
+          onGraphApply={onGraphApply}
+          onOpen={(id) => {
+            onSelectWorkflow(id);
+            setStepId(null);
+            setLevel("business");
+          }}
+        />
       ) : null}
     </div>
   );
@@ -328,12 +409,19 @@ export function AssetMergePanel({
   const candidates = graph.nodes.filter(
     (node) => node.kind === source.kind && node.id !== source.id,
   );
+  const affectedProcessIds = new Set(
+    target
+      ? graph.edges
+          .filter(
+            (e) =>
+              [source.id, targetId].includes(e.source) ||
+              [source.id, targetId].includes(e.target),
+          )
+          .flatMap((e) => [e.source, e.target])
+      : [],
+  );
   const affectedSteps = graph.nodes.filter(
-    (node) =>
-      node.kind === "process" &&
-      getProcessAssetLinks(graph, node.id).some(
-        (link) => link.asset.id === source.id || link.asset.id === targetId,
-      ),
+    (node) => node.kind === "process" && affectedProcessIds.has(node.id),
   );
   const affectedFlows = graph.dataFlows.filter((flow) =>
     [flow.sourceSystemId, flow.targetSystemId, ...flow.dataIds].some(
@@ -377,7 +465,7 @@ export function AssetMergePanel({
             データフローが影響範囲
           </p>
           <ul>
-            {affectedSteps.map((node) => (
+            {affectedSteps.slice(0, 8).map((node) => (
               <li key={node.id}>
                 {
                   graph.workflows.find((item) => item.id === node.workflowId)

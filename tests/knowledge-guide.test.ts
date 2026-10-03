@@ -11,7 +11,7 @@ test('reading chapters preserve every ordered step and only combine the same exe
     assert.deepEqual(chapters.flatMap(c=>c.steps.map(s=>s.id)), getWorkflowProcesses(graph, workflow.id).map(s=>s.id));
     for (const chapter of chapters) assert.ok(chapter.steps.every(s => (s.department ?? '担当部署未登録') === chapter.department));
   }
-  assert.ok(workflowChapters(graph, 'chemical-1-0-0').length <= 5);
+  assert.ok(workflowChapters(graph, 'chemical-1-0-0').some(c=>c.steps.some(s=>s.meaning?.halt)), 'exception chapters remain part of the complete reading structure');
 });
 test('company bird view shows only actual cross-activity handoffs inside the chosen scenario and scope', () => {
   const ids = graph.workflows.filter(w=>w.scenario === 'current').map(w=>w.id);

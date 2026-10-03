@@ -24,6 +24,7 @@ type DraftTransition = {
   toStepKey: string;
   condition: string | null;
   evidence: string;
+  certainty?: Confidence;
 };
 
 type WorkflowDraft = ExtractionReview & {
@@ -77,6 +78,33 @@ const WORKFLOW_DRAFT_SCHEMA = {
             enum: ["explicit", "inferred"],
           },
           evidence: { type: "string" },
+          meaning: {
+            type: ["object", "null"],
+            additionalProperties: false,
+            properties: {
+              purpose: { type: "string" },
+              basis: { type: "string" },
+              result: { type: "string" },
+              next: { type: "string" },
+              condition: { type: "string" },
+              halt: { type: "boolean" },
+              certainty: {
+                type: "string",
+                enum: ["confirmed", "inferred", "unknown"],
+              },
+              evidence: { type: "string" },
+            },
+            required: [
+              "purpose",
+              "basis",
+              "result",
+              "next",
+              "condition",
+              "halt",
+              "certainty",
+              "evidence",
+            ],
+          },
           technicalDetails: {
             type: "array",
             items: {
@@ -167,6 +195,7 @@ const WORKFLOW_DRAFT_SCHEMA = {
           "action",
           "certainty",
           "evidence",
+          "meaning",
           "technicalDetails",
           "detailSteps",
           "systems",
@@ -184,8 +213,46 @@ const WORKFLOW_DRAFT_SCHEMA = {
           toStepKey: { type: "string" },
           condition: { type: ["string", "null"] },
           evidence: { type: "string" },
+          certainty: {
+            type: "string",
+            enum: ["confirmed", "inferred", "unknown"],
+          },
         },
-        required: ["fromStepKey", "toStepKey", "condition", "evidence"],
+        required: [
+          "fromStepKey",
+          "toStepKey",
+          "condition",
+          "evidence",
+          "certainty",
+        ],
+      },
+    },
+    handoffs: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          fromStepKey: { type: "string" },
+          targetWorkflowId: { type: "string" },
+          targetStepKey: { type: ["string", "null"] },
+          data: { type: "array", items: { type: "string" } },
+          description: { type: "string" },
+          evidence: { type: "string" },
+          certainty: {
+            type: "string",
+            enum: ["confirmed", "inferred", "unknown"],
+          },
+        },
+        required: [
+          "fromStepKey",
+          "targetWorkflowId",
+          "targetStepKey",
+          "data",
+          "description",
+          "evidence",
+          "certainty",
+        ],
       },
     },
     dataFlows: {
@@ -282,6 +349,7 @@ const WORKFLOW_DRAFT_SCHEMA = {
     "outcome",
     "steps",
     "transitions",
+    "handoffs",
     "dataFlows",
     "questions",
     "warnings",
@@ -354,8 +422,8 @@ function resolveToken() {
 export function hasAIConfig() {
   return Boolean(
     resolveBaseURL() &&
-    env("AI_MODEL") &&
-    (runtimeTokenAvailable() || env("AI_API_KEY")),
+      env("AI_MODEL") &&
+      (runtimeTokenAvailable() || env("AI_API_KEY")),
   );
 }
 
@@ -478,7 +546,8 @@ Rules:
 5. Do not invent integrations, APIs, databases, owners, approval rules, automation, or master-data sources.
 6. Evidence must be a short phrase grounded in the interview. Do not paraphrase invented detail into evidence.
 7. Separate actor, department/team, responsible person, and system. "営業部の田中さんがERPに入力" => department=営業部; responsiblePerson=田中さん; actor may be 営業担当; system=ERP. Do not infer department/person when not stated.
-8. Capture branches and conditions as transitions. Do not force a single linear flow when the interview describes alternatives.
+8. Capture branches and conditions as transitions. Do not force a single linear flow when the interview describes alternatives. Stops, holds, returns and release/resume points must have explicit evidence. If a destination is missing, ask a handoff/exception question and leave it unconnected.
+8a. meaning captures business changes: purpose (why), basis (evidence used for judgment), result (what is decided/changed), next (what work this result triggers), condition and halt. Leave unmentioned strings empty, certainty=unknown or inferred; use null if nothing is known. Do not repeat a generic record name as a business outcome, invent a credit/ATP rule, or assume that checking inventory means shipment is allowed. Keep the exact supporting source in evidence.
 9. Capture system-to-system dataFlows ONLY when the transcript explicitly describes information moving from one named system/tool to another, including human transcription. Examples: "ERPからWMSへCSVを送る", "Excelを見ながらERPへ手入力". Do NOT infer an API or integration merely because two systems appear in adjacent steps.
 10. For each dataFlow record source system, target system, transferred business data, transferType, direction, automation, frequency if stated, evidence, and relatedStepKeys. Use unknown rather than guessing a transfer method.
 11. Manual re-entry is a legitimate dataFlow: transferType=manual and automation=manual.
@@ -492,6 +561,7 @@ Rules:
    - unknown: execution mode is not clear
 16. Set executingSystem ONLY when the interview explicitly says or very clearly describes a named System performing the step automatically. Example: "SAPが自動で在庫を引き当てる" => executionMode=automatic, executingSystem=SAP. "SAPで在庫を確認する" does NOT imply SAP executes the business step; that is usually a manual step using SAP.
 17. Automatic internal System execution is NOT a dataFlow. "ERP automatically assigns an order number" is an automatic Process step. "ERP sends the order to WMS" is a dataFlow and may also cause a later automatic Process step in WMS if explicitly described.
+18a. Emit handoffs only to IDs in the provided workflow catalog. Keep the source step, transferred Data and interview evidence. A targetStepKey must be null unless a specific receiving step is known. Workflow name similarity alone is inferred, not confirmed. Unknown destinations must become questions.
 18. Existing System/Data/Workflow context may be provided as reference candidates. Use it to understand aliases, shorthand, and handoffs, but NEVER treat a candidate as confirmed solely because it exists in the catalog.
 19. "ERP" may plausibly refer to an existing SAP system, and "いつもの出荷処理" may plausibly refer to an existing shipping workflow. Preserve the interview wording/evidence and surface uncertainty rather than inventing or silently canonicalizing.
 20. Follow-up answers are additional interview evidence. Incorporate them into steps, ownership, execution mode, executing System, data flows, trigger/outcome, warnings, and questions. Remove questions that are answered.
@@ -671,16 +741,8 @@ function collectCandidates(draft: WorkflowDraft): AssetCandidate[] {
     for (const system of step.systems) {
       add("system", system.name, system.evidence, step.certainty);
     }
-    if (
-      step.executingSystem?.trim() &&
-      step.executionMode !== "manual"
-    ) {
-      add(
-        "system",
-        step.executingSystem,
-        step.evidence,
-        step.certainty,
-      );
+    if (step.executingSystem?.trim() && step.executionMode !== "manual") {
+      add("system", step.executingSystem, step.evidence, step.certainty);
     }
     for (const data of step.data) {
       add("data", data.name, data.evidence, step.certainty);
@@ -919,12 +981,11 @@ function buildGraphPatch(
       technicalDetails: step.technicalDetails ?? [],
       detailSteps: step.detailSteps ?? [],
       executionContext: step.executionContext,
+      meaning: step.meaning,
+      humanEdits: step.humanEdits,
     });
 
-    if (
-      step.executingSystem?.trim() &&
-      step.executionMode !== "manual"
-    ) {
+    if (step.executingSystem?.trim() && step.executionMode !== "manual") {
       const id = candidateId("system", step.executingSystem);
       const executingSystemKey =
         assetKeyByCandidate.get(id) ??
@@ -988,6 +1049,9 @@ function buildGraphPatch(
       targetKey: processKey(transition.toStepKey),
       relation: "next",
       label: transition.condition ?? undefined,
+      evidence: transition.evidence,
+      status:
+        transition.certainty ?? (transition.evidence ? "inferred" : "unknown"),
     });
   }
 
@@ -1058,12 +1122,10 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
         ),
         executionMode: step.executionMode ?? "unknown",
         executingSystem: step.executingSystem ?? null,
-        systems: (step.systems ?? []).filter(
-          (system) => Boolean(system.name?.trim()),
+        systems: (step.systems ?? []).filter((system) =>
+          Boolean(system.name?.trim()),
         ),
-        data: (step.data ?? []).filter(
-          (data) => Boolean(data.name?.trim()),
-        ),
+        data: (step.data ?? []).filter((data) => Boolean(data.name?.trim())),
       };
     })
     .sort((a, b) => a.order - b.order);
@@ -1091,9 +1153,9 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
       .filter((flow) =>
         Boolean(
           flow.sourceSystem &&
-          flow.targetSystem &&
-          flow.sourceSystem !== flow.targetSystem &&
-          flow.evidence,
+            flow.targetSystem &&
+            flow.sourceSystem !== flow.targetSystem &&
+            flow.evidence,
         ),
       )
       .map((flow) => ({
@@ -1108,6 +1170,21 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
         Boolean(item?.question && item?.reason && item?.target),
     ),
     warnings: (raw.warnings ?? []).filter(Boolean),
+    handoffs: raw.handoffs
+      ?.filter(
+        (h) =>
+          validKeys.has(normalizeName(h.fromStepKey)) &&
+          h.targetWorkflowId &&
+          h.evidence,
+      )
+      .map((h) => ({
+        ...h,
+        fromStepKey: normalizeName(h.fromStepKey),
+        targetStepKey: h.targetStepKey
+          ? normalizeName(h.targetStepKey)
+          : undefined,
+      })),
+    excludedSteps: raw.excludedSteps,
   };
 }
 
@@ -1139,6 +1216,8 @@ export async function extractWorkflowReviewWithAI(args: {
       dataFlows: draft.dataFlows,
       questions: draft.questions,
       warnings: draft.warnings,
+      handoffs: draft.handoffs,
+      excludedSteps: draft.excludedSteps,
     },
     provider: `${protocol()}-compatible:${env("AI_MODEL")}`,
   };

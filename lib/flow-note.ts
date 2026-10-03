@@ -329,6 +329,8 @@ export function planFlowAddition(
       detailSteps: step.detailSteps,
       technicalDetails: step.technicalDetails,
       executionContext: step.executionContext,
+      meaning: step.meaning,
+      humanEdits: step.humanEdits,
     };
     plan.nodes.push(node);
     plan.stepIds.push(node.id);
