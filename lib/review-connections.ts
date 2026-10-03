@@ -101,9 +101,11 @@ export function validateAITransitions<T extends ExtractionReview>(
       !/不可|不許可|不承認|否認|不合格|不一致|失敗|未完了|不明|分から|未確認/.test(evidence);
     const continuedHold = target?.meaning?.halt && evidence && original.includes(evidence) &&
       /保留|停止/.test(evidence) && !/不明|分から|未確認/.test(evidence);
+    const isHandoff = (text: string) =>
+      /通知|連絡|依頼|渡す|引き継|照会|問い?合わせ|inform|request|handoff/i.test(text) &&
+      !/(?:通知|連絡|依頼|照会)(?:は|を)?しない|渡さない|引き継がない|問い?合わせない/.test(text);
     const handover = evidence && original.includes(evidence) &&
-      /通知|連絡|依頼|渡す|引き継|inform|request|handoff/i.test(evidence) &&
-      /通知|連絡|依頼|渡す|引き継|inform|request|handoff/i.test(target?.action ?? "");
+      isHandoff(evidence) && isHandoff(target?.action ?? "");
     // A conditional check may have a normal path and a hold inside it. A step
     // executed only on the hold condition needs an explicit release to proceed.
     if (step?.meaning?.halt && step.meaning.condition && !restart && !statedContinuation && !continuedHold && !handover) {
