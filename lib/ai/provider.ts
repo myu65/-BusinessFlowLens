@@ -1422,6 +1422,7 @@ export async function extractWorkflowReviewWithAI(args: {
         ),
         args.graph,
         args.workflow,
+        evidenceSource,
       ),
       args.graph,
       args.workflow,
