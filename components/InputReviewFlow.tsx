@@ -307,7 +307,9 @@ export function InputReviewFlow({
         })}
         {!transitions.length && !handoffs.length && (
           <p className="input-unconfirmed">
-            次の接続は未確認です。完了なのか、誰に渡すのかを補足できます。
+            {selected.meaning?.halt
+              ? "再開条件と再開先は未確認です。分かっている範囲で、解除の判断や担当を補足できます。"
+              : "次の接続は未確認です。完了なのか、誰に渡すのかを補足できます。"}
           </p>
         )}
       </section>
