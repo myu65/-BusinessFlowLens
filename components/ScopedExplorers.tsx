@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   getProcessAssetLinks,
   type LensGraph,
@@ -33,20 +33,25 @@ function ScopeControl({
     </label>
   );
 }
+export type AssetExploration = { id: string; scope: WorkflowScenario; department: string };
 export function AssetExplorer({
   graph,
   onGraphApply,
   onEdit,
+  exploration,
+  onExplorationChange,
 }: {
   graph: LensGraph;
   onGraphApply: (graph: LensGraph) => void;
   onEdit: (id: string) => void;
+  exploration?: AssetExploration;
+  onExplorationChange?: (value: AssetExploration) => void;
 }) {
-  const [scope, setScope] = useState<WorkflowScenario>("current"),
+  const [scope, setScope] = useState<WorkflowScenario>(exploration?.scope ?? "current"),
     [query, setQuery] = useState(""),
     [kind, setKind] = useState("all"),
-    [department, setDepartment] = useState("");
-  const [selectedId, setSelectedId] = useState(""),
+    [department, setDepartment] = useState(exploration?.department ?? "");
+  const [selectedId, setSelectedId] = useState(exploration?.id ?? ""),
     [page, setPage] = useState(0),
     [assetPage, setAssetPage] = useState(0),
     [reading, setReading] = useState<{
@@ -72,7 +77,12 @@ export function AssetExplorer({
       .map((node) => ({ node, impact: view.systemProfile(node.id) }))
       .sort((a, b) => b.impact.direct.length - a.impact.direct.length);
   }, [graph, view, query, kind]);
-  const selected = assets.find((a) => a.node.id === selectedId) ?? assets[0];
+  const selectedNode = graph.nodes.find(n => n.id === selectedId && n.kind !== "process");
+  const selected = selectedNode ? { node: selectedNode, impact: view.systemProfile(selectedNode.id) } : assets[0];
+  const activeId = selected?.node.id ?? "";
+  useEffect(() => {
+    if (activeId) onExplorationChange?.({ id: activeId, scope, department });
+  }, [activeId, scope, department, onExplorationChange]);
   const impact = selected?.impact;
   const activeRows = impact?.direct ?? [];
   function reset() {
