@@ -25,6 +25,8 @@ import {
   transcriptsForSave,
 } from "@/lib/review-workbench";
 import { InputReviewFlow } from "./InputReviewFlow";
+import { InputStripConnection } from "./InputStripConnection";
+import { reviewStripConnection } from "@/lib/review-paths";
 import { aiStatusLabel, type AIConfigurationStatus } from "@/lib/ai/status";
 import { reviewedWorkflowName } from "@/lib/input-knowledge";
 import { InputOrganization } from "./InputOrganization";
@@ -973,45 +975,10 @@ export function InputWorkbench({
                         )}
                       </button>
                       {i < visible.length - 1 && (
-                        <span className="input-strip-connection">
-                          {review.transitions.some(
-                            (t) =>
-                              t.fromStepKey === s.stepKey &&
-                              t.toStepKey === visible[i + 1].stepKey,
-                          ) ? (
-                            <>
-                              <span>
-                                {review.transitions.find(
-                                  (t) =>
-                                    t.fromStepKey === s.stepKey &&
-                                    t.toStepKey === visible[i + 1].stepKey,
-                                )?.condition
-                                  ? "条件つき"
-                                  : "次へ"}
-                                {review.transitions.find(
-                                  (t) =>
-                                    t.fromStepKey === s.stepKey &&
-                                    t.toStepKey === visible[i + 1].stepKey,
-                                )?.certainty !== "confirmed" && (
-                                  <>
-                                    <br />
-                                    要確認
-                                  </>
-                                )}
-                              </span>
-                              <strong>→</strong>
-                            </>
-                          ) : (
-                            <>
-                              <span>
-                                接続は
-                                <br />
-                                未確認
-                              </span>
-                              <strong>···</strong>
-                            </>
-                          )}
-                        </span>
+                        <InputStripConnection
+                          connection={reviewStripConnection(review, s.stepKey, visible[i + 1].stepKey)}
+                          choose={choose}
+                        />
                       )}
                     </Fragment>
                   ))}

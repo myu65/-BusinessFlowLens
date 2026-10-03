@@ -335,6 +335,16 @@
   font-weight: 500;
   color: #597663;
 }
+.input-strip-connection[data-kind="branches"] { flex-basis: 72px; }
+.input-step-strip .input-strip-connection button {
+  flex: 0 0 auto;
+  min-height: 0;
+  max-width: 72px;
+  padding: 5px 8px;
+  background: #edf3ef;
+  font-size: 11px;
+  line-height: 1.4;
+}
 .input-workbench .input-diff {
   background: none !important;
   padding: 12px 0;
