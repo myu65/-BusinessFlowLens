@@ -263,6 +263,13 @@ export type ExtractionQuestion = {
 export type FollowUpAnswer = {
   question: string;
   answer: string;
+  reference?: { workflowId: string; workflowName: string; usedAt: string };
+  referenceReading?: {
+    version?: number;
+    model: string; completedAt: string;
+    facts: Array<{ text: string; evidence: string[]; certainty: "explicit" | "inferred" }>;
+    unanswered: string[];
+  };
 };
 
 export type ExtractionReviewStep = {

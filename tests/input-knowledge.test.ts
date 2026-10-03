@@ -432,6 +432,19 @@ test("a conditional hold needs a grounded release to resume, while a stated noti
   notice.steps[1].action = "Teamsで品質管理へ連絡する";
   notice.transitions = [{ ...edge, evidence: "Teamsで品質管理へ連絡する" }];
   assert.equal(validateAITransitions(notice, "保留後、Teamsで品質管理へ連絡する。").transitions.length, 1);
+  const answer = { ...review, transitions: [{ ...edge, condition: "調達可能との回答後", evidence: "調達可能と回答されたら計画を確定する" }] };
+  assert.equal(validateAITransitions(answer, "調達可能と回答されたら計画を確定する。").transitions.length, 1);
+  const abbreviated = { ...review, transitions: [{ ...edge, condition: "調達可能との回答後", evidence: "「調達可能と回答されたら…製造指図案を確認して確定」" }] };
+  const literal = "調達可能と回答されたら生産計画の担当が製造指図案を確認して確定します。";
+  const restored = validateAITransitions(abbreviated, literal);
+  assert.equal(restored.transitions.length, 1);
+  assert.equal(restored.transitions[0].evidence, literal.replace(/します。$/, ""));
+  const rejectedAnswer = { ...review, transitions: [{ ...edge, evidence: "調達不可と回答された後に実績を確定する" }] };
+  assert.equal(validateAITransitions(rejectedAnswer, "調達不可と回答された後に実績を確定する。").transitions.length, 0);
+  const remainingHold = structuredClone(review);
+  remainingHold.steps[1].meaning = { ...review.steps[0].meaning!, result: "回答後も計画を保留" };
+  remainingHold.transitions = [{ ...edge, condition: "調達不可の回答", evidence: "調達不可の回答で計画を保留のままにする" }];
+  assert.equal(validateAITransitions(remainingHold, "調達不可の回答で計画を保留のままにする。").transitions.length, 1);
 });
 
 test("an AI handoff cannot send product results from a raw-material check, and the human correction remains authoritative", () => {

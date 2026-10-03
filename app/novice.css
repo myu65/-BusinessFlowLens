@@ -167,6 +167,10 @@
 }
 .input-note-pane {
   top: 96px;
+  max-height: calc(100dvh - 112px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 .input-note-heading,
 .input-focus-heading {
@@ -1041,6 +1045,7 @@
   }
   .input-note-pane {
     top: 148px;
+    max-height: calc(100dvh - 164px);
   }
   .input-structure-header {
     top: 126px;
@@ -1068,6 +1073,8 @@
   }
   .input-note-pane {
     position: static;
+    max-height: none;
+    overflow: visible;
   }
   .input-mobile-tabs {
     display: flex;
@@ -1281,3 +1288,6 @@
   background: #edf5fa;
 }
 .input-processing p { margin: 5px 0 0; font-size: 13px; }
+.input-question-reference { padding: 12px; margin: 8px 0 16px; background: #f1f5f1; }
+.input-question-reference blockquote { margin: 10px 0; font-size: 13px; line-height: 1.8; }
+.input-questions { scroll-margin-top: 96px; }

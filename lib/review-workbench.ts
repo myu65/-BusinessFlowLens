@@ -376,6 +376,7 @@ const comparable = (s: ExtractionReviewStep) =>
 export function diffReviews(
   before: ExtractionReview | null,
   after: ExtractionReview,
+  graph?: LensGraph,
 ) {
   const old = before?.steps ?? [];
   const added = after.steps.filter(
@@ -420,32 +421,52 @@ export function diffReviews(
         ]
       : [];
   });
-  const relations = (r: ExtractionReview | null) => [
+  const workflows = new Map(graph?.workflows.map(w => [w.id, w.name]));
+  const peerSteps = new Map(graph?.nodes.filter(n => n.kind === "process").map(n =>
+    [`${n.workflowId}:${n.canonicalKey.split(":").at(-1)}`, n.label]));
+  const workflowName = (id: string) => workflows.get(id) ?? "相手の業務（名称未確認）";
+  const peerStep = (id: string, key?: string) => key ? peerSteps.get(`${id}:${key}`) ?? "手順は未確認" : "手順は未確認";
+  const certainty = (value?: string) => value === "confirmed" ? "原文・訂正の根拠あり" : value === "inferred" ? "推定・要確認" : "接続は未確認";
+  const relations = (r: ExtractionReview | null) => {
+    const names = new Map(r?.steps.map(s => [s.stepKey, s.name]));
+    const name = (key: string) => names.get(key) ?? "手順は未確認";
+    return [
     ...(r?.transitions ?? []).map(
-      (t) =>
-        `${t.fromStepKey} → ${t.toStepKey}${t.condition ? `（${t.condition}）` : ""} / ${t.certainty ?? "unknown"}`,
+      (t) => ({
+        key: `${t.fromStepKey} → ${t.toStepKey}${t.condition ? `（${t.condition}）` : ""} / ${t.certainty ?? "unknown"}`,
+        label: `${name(t.fromStepKey)} → ${name(t.toStepKey)}${t.condition ? `（${t.condition}）` : ""} · ${certainty(t.certainty)}`,
+      }),
     ),
     ...(r?.handoffs ?? []).map(
-      (h) =>
-        `${h.fromStepKey} → 業務:${h.targetWorkflowId} / ${h.via === "reference" ? "参照" : "受渡し"} / 受取:${h.targetStepKey ?? "未確認"} / ${h.data.join("、")} / ${h.description}`,
+      (h) => ({
+        key: `${h.fromStepKey} → 業務:${h.targetWorkflowId} / ${h.via === "reference" ? "参照" : "受渡し"} / 受取:${h.targetStepKey ?? "未確認"} / ${h.data.join("、")} / ${h.description} / ${h.certainty}`,
+        label: `${name(h.fromStepKey)} → ${workflowName(h.targetWorkflowId)}：${peerStep(h.targetWorkflowId, h.targetStepKey)} · ${h.via === "reference" ? "情報を参照" : "情報を渡す"}「${h.data.join("・")}」 · ${certainty(h.certainty)} · ${h.description}`,
+      }),
     ),
     ...(r?.incomingHandoffs ?? []).map(
-      (h) =>
-        `業務:${h.sourceWorkflowId} / ${h.via === "reference" ? "参照" : "受渡し"} / 送元:${h.sourceStepKey ?? "未確認"} → ${h.toStepKey} / ${h.data.join("、")} / ${h.description}`,
+      (h) => ({
+        key: `業務:${h.sourceWorkflowId} / ${h.via === "reference" ? "参照" : "受渡し"} / 送元:${h.sourceStepKey ?? "未確認"} → ${h.toStepKey} / ${h.data.join("、")} / ${h.description} / ${h.certainty}`,
+        label: `${workflowName(h.sourceWorkflowId)}：${peerStep(h.sourceWorkflowId, h.sourceStepKey)} → ${name(h.toStepKey)} · ${h.via === "reference" ? "情報を参照" : "情報を受け取る"}「${h.data.join("・")}」 · ${certainty(h.certainty)} · ${h.description}`,
+      }),
     ),
     ...(r?.dataFlows ?? []).map(
-      (f) =>
-        `${f.sourceSystem} → ${f.targetSystem} / ${f.data.join("、")} / ${f.transferType} / ${f.automation} / ${f.direction} / ${f.frequency ?? "頻度未確認"}`,
+      (f) => ({
+        key: `${f.sourceSystem} → ${f.targetSystem} / ${f.data.join("、")} / ${f.transferType} / ${f.automation} / ${f.direction} / ${f.frequency ?? "頻度未確認"}`,
+        label: `${f.sourceSystem} → ${f.targetSystem} · 「${f.data.join("・")}」 · ${{ api: "API", file: "ファイル", database: "データベース", message: "メッセージ", email: "メール", manual: "手で転記", unknown: "方法は未確認" }[f.transferType]} · ${{ automatic: "自動", manual: "人の操作", mixed: "人の操作と自動処理", unknown: "実行方法は未確認" }[f.automation]} · ${{ push: "送り側から渡す", pull: "受取側が取り込む", bidirectional: "双方向", unknown: "方向は未確認" }[f.direction]} · ${f.frequency ?? "頻度は未確認"}`,
+      }),
     ),
-  ];
+  ]; };
   const a = relations(before),
     b = relations(after);
+  const aKeys = new Set(a.map(r => r.key)), bKeys = new Set(b.map(r => r.key));
   return {
     added,
     removed,
     changed,
-    addedConnections: b.filter((x) => !a.includes(x)),
-    removedConnections: a.filter((x) => !b.includes(x)),
+    addedConnections: b.filter(x => !aKeys.has(x.key)).map(x => x.label),
+    removedConnections: a.filter(x => !bKeys.has(x.key)).map(x => x.label),
+    removedQuestions: (before?.questions ?? []).filter(q => !after.questions.some(n => n.question === q.question)),
+    addedQuestions: after.questions.filter(q => !before?.questions.some(p => p.question === q.question)),
   };
 }
 
@@ -554,6 +575,7 @@ export function describeHumanEdit(edit: import("./graph").HumanEdit): string[] {
     responsiblePerson: "責任者",
     executionMode: "実行方法",
     executingSystem: "実行するSystem",
+    executionContext: "開始条件・ルール・例外",
     systems: "使う道具",
     data: "情報",
     order: "順序",
@@ -589,8 +611,14 @@ export function describeHumanEdit(edit: import("./graph").HumanEdit): string[] {
           : typeof v === "object"
             ? "詳細を更新"
             : String(v);
-  const fieldValue = (v: unknown) =>
-    edit.field === "executionMode"
+  const fieldValue = (v: unknown) => {
+    if (["data", "systems"].includes(edit.field) && Array.isArray(v)) {
+      const actions: Record<string, string> = edit.field === "data"
+        ? { read: "参照する", receive: "受け取る", create: "新しく作る", update: "更新する", send: "渡す" }
+        : { view: "見る", search: "探す", input: "入力する", approve: "承認する", send: "送る", receive: "受け取る", other: "使う" };
+      return v.map(item => `${item.name} · ${actions[item.operation ?? item.interaction] ?? "使い方は未確認"}`).join("、") || "未確認";
+    }
+    return edit.field === "executionMode"
       ? ({
           manual: "人が行う",
           automatic: "システムが自動で行う",
@@ -598,6 +626,7 @@ export function describeHumanEdit(edit: import("./graph").HumanEdit): string[] {
           unknown: "未確認",
         }[String(v)] ?? value(v))
       : value(v);
+  };
   if (edit.field === "meaning")
     return Object.entries(edit.after as Record<string, unknown>)
       .filter(

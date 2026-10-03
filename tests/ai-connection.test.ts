@@ -228,3 +228,44 @@ test("a model cannot reuse a future-only asset omitted from the current comparis
     await new Promise<void>(resolve => server.close(() => resolve()));
   }
 });
+
+test("a referenced answer is read for its question before extracting the workflow; source history stays literal", async () => {
+  const source = "購買担当がExcelへCSVを出す。購買担当がTeamsで回答する。";
+  const quote = "購買担当がTeamsで回答する";
+  const answer = { question: "誰がどの方法で回答しますか？", answer: source,
+    reference: { workflowId: "purchase", workflowName: "原料の購買", usedAt: "2026-10-04T00:00:00Z" } };
+  const calls: Array<{ response_format: { json_schema: { name: string } }; messages: Array<{ content: string }> }> = [];
+  const draft = extractGroundedLocal("生産計画担当がSAPへ必要量を登録する。");
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+    calls.push(body);
+    const output = body.response_format.json_schema.name === "reference_question_reading"
+      ? { facts: [{ text: "購買担当がTeamsで回答する。", evidenceIds: [1], certainty: "explicit" }], unanswered: [] }
+      : draft;
+    response.setHeader("Content-Type", "application/json");
+    response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(output) } }] }));
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as { port: number };
+  try {
+    await withConfig({ AI_MODEL: "mock", AI_API_KEY: "test-only", AI_BASE_URL: `http://127.0.0.1:${address.port}` }, async () => {
+      const result = await extractWorkflowReviewWithAI({ interview: "生産計画担当がSAPへ必要量を登録する。", workflow, graph: empty, followUpAnswers: [answer] });
+      assert.deepEqual(calls.map(call => call.response_format.json_schema.name), ["reference_question_reading", "workflow_draft"]);
+      assert(calls[0].messages.at(-1)!.content.includes("CSV"));
+      assert(!calls[1].messages.at(-1)!.content.includes("CSV"));
+      assert(calls[1].messages.at(-1)!.content.includes(quote));
+      assert.equal(result.followUpAnswers![0].answer, source);
+      assert.deepEqual(result.followUpAnswers![0].reference, answer.reference);
+      assert.equal(result.followUpAnswers![0].referenceReading!.model, "mock");
+      assert(!("referenceReading" in answer));
+      await extractWorkflowReviewWithAI({ interview: "生産計画担当がSAPへ必要量を登録する。", workflow, graph: empty, followUpAnswers: result.followUpAnswers });
+      assert.equal(calls.length, 3);
+      assert.equal(calls[2].response_format.json_schema.name, "workflow_draft");
+    });
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
