@@ -71,6 +71,13 @@ const badReport = await fetch(`http://127.0.0.1:${regressionPort}/api/report?sco
 check('report_validation', badReport.status === 400);
 const missingReport = await fetch(`http://127.0.0.1:${regressionPort}/api/report?projectId=missing-report-project`);
 check('report_project_not_found', missingReport.status === 404);
+const invalidNote=await api('/api/flow-note','POST',{});
+check('flow_note_validation',invalidNote.status===400);
+const anchorNote=graph.nodes.find(n=>n.kind==='process');
+const notePlan=await api('/api/flow-note','POST',{graph,workflowId:workflow.id,afterStepId:anchorNote.id,note:'確認担当が検証ERPから「確認記録」を検証WMSへ手動で転記する。',id:'api-note'});
+check('flow_note_context_and_transfer',notePlan.status===200 && notePlan.body.plan.stepIds.length===1 && notePlan.body.plan.dataFlows.length===1 && notePlan.body.plan.workflowId===workflow.id && notePlan.body.plan.afterStepId===anchorNote.id);
+const invalidAnchor=await api('/api/flow-note','POST',{graph,workflowId:workflow.id,afterStepId:'not-found',note:'確認する',id:'missing-anchor'});
+check('flow_note_anchor_validation',invalidAnchor.status===400);
 await fs.writeFile('.data/review-remaining-results.json',JSON.stringify(cases,null,2));
 console.log(JSON.stringify(cases,null,2));
 if (cases.some(item => !item.ok)) process.exitCode = 1;

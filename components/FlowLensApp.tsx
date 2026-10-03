@@ -1,6 +1,7 @@
 "use client";
 
 import { scopedDataFlows, aggregateDataFlows, scenarioGraph } from "@/lib/knowledge";
+import { DataFlowExplorer } from "./DataFlowExplorer";
 import { KnowledgeExplorer } from "./KnowledgeExplorer";
 
 import { AssetMergePanel, StepDetailEditor, TechnicalDetails, WorkflowExplorer } from "./ProgressiveWorkflow";
@@ -3463,7 +3464,7 @@ function Workspace() {
         </div>
       </header>
 
-      <div hidden={section !== "company"}>{hydrated ? <KnowledgeExplorer projectId={projectId} graph={graph} onGraphApply={setGraph} onOpenWorkflow={id => { setSelectedWorkflowId(id); setSection("workflow"); }} /> : <section className="page-view"><h1>{saveStatus === "error" ? "会社の情報を読み込めませんでした" : "会社の情報を読み込んでいます"}</h1>{saveStatus === "error" && <button onClick={() => window.location.reload()}>もう一度読み込む</button>}</section>}</div>
+      <div hidden={section !== "company"}>{hydrated ? <KnowledgeExplorer projectId={projectId} graph={graph} onGraphApply={setGraph} onWorkflowFocus={setSelectedWorkflowId} onOpenWorkflow={id => { setSelectedWorkflowId(id); setSection("workflow"); }} /> : <section className="page-view"><h1>{saveStatus === "error" ? "会社の情報を読み込めませんでした" : "会社の情報を読み込んでいます"}</h1>{saveStatus === "error" && <button onClick={() => window.location.reload()}>もう一度読み込む</button>}</section>}</div>
 
       {section === "interviews" ? (
         <InterviewsView
@@ -3491,7 +3492,7 @@ function Workspace() {
         />
       ) : null}
 
-      {section === "dataflow" ? <DataFlowView graph={graph} initialWorkflowId={selectedWorkflowId} /> : null}
+      {section === "dataflow" ? <DataFlowExplorer graph={graph} initialWorkflowId={selectedWorkflowId} onSelectWorkflow={setSelectedWorkflowId} onGraphApply={setGraph} onEdit={id => {setSelectedWorkflowId(id);setSection("interviews");}}><DataFlowView graph={graph} initialWorkflowId={selectedWorkflowId} /></DataFlowExplorer> : null}
 
       {section === "assets" ? <AssetsView graph={graph} onGraphApply={setGraph} /> : null}
       {section === "overview" ? <OverviewView graph={graph} /> : null}
