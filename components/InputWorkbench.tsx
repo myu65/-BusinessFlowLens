@@ -14,6 +14,7 @@ import {
   type ExtractionReviewStep,
   type LensGraph,
   type Workflow,
+  type FollowUpAnswer,
 } from "@/lib/graph";
 import {
   diffReviews,
@@ -30,6 +31,7 @@ import { reviewStripConnection } from "@/lib/review-paths";
 import { aiStatusLabel, type AIConfigurationStatus } from "@/lib/ai/status";
 import { reviewedWorkflowName } from "@/lib/input-knowledge";
 import { InputOrganization } from "./InputOrganization";
+import { createQuestionReferenceFinder, referenceAnswer } from "@/lib/question-evidence";
 
 const REVIEW_PAGE_SIZE = 3;
 
@@ -113,6 +115,9 @@ export function InputWorkbench({
   const stripRef = useRef<HTMLElement>(null);
   const [lastSavedId, setLastSavedId] = useState("");
   const [advanced, setAdvanced] = useState(false);
+  const [questionsOpen, setQuestionsOpen] = useState(false);
+  const [questionDestination, setQuestionDestination] = useState("");
+  const questionsRef = useRef<HTMLDetailsElement>(null);
   const [mobilePane, setMobilePane] = useState<"note" | "flow">("note");
   const [noteQuery, setNoteQuery] = useState("");
   const [addition, setAddition] = useState("");
@@ -134,7 +139,7 @@ export function InputWorkbench({
     revisionNumber: number;
     sourceNotes: string;
     review: ExtractionReview;
-    followUpAnswers: Array<{ question: string; answer: string }>;
+    followUpAnswers: FollowUpAnswer[];
   } | null>(null);
   const latest = useRef({
     graph,
@@ -170,10 +175,17 @@ export function InputWorkbench({
     setEdit(null);
     setError("");
     setAdvanced(false);
+    setQuestionsOpen(false);
     setTarget("");
     setAddition("");
     setRevisionDetail(null);
   }, [key]);
+  useEffect(() => {
+    if (!questionDestination || questionDestination !== key) return;
+    setQuestionsOpen(true);
+    setQuestionDestination("");
+    requestAnimationFrame(() => questionsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }, [key, questionDestination]);
   useEffect(() => {
     if (edit) {
       editorRef.current?.scrollIntoView({
@@ -212,9 +224,9 @@ export function InputWorkbench({
   );
   const steps = [...(review?.steps ?? [])].sort((a, b) => a.order - b.order);
   const selected = steps.find((s) => s.stepKey === stepKey) ?? steps[0];
-  const diff = review
-    ? diffReviews(draft?.baseline ?? currentReview, review)
-    : null;
+  const diff = useMemo(() => review
+    ? diffReviews(draft?.baseline ?? currentReview, review, graph)
+    : null, [draft?.baseline, currentReview, review, graph]);
   const stale = draft
     ? draft.sourceNotes !== memo
     : !!saved && (savedTranscripts[key] ?? "") !== memo;
@@ -223,6 +235,13 @@ export function InputWorkbench({
       (w.scenario ?? "current") === (workflow?.scenario ?? "current") &&
       w.id !== workflow?.id,
   );
+  const findQuestionReferences = useMemo(() => createQuestionReferenceFinder(graph, savedTranscripts), [graph, savedTranscripts]);
+  const relatedQuestions = useMemo(() => saved ? graph.workflows.flatMap(w =>
+    (w.reviewContext?.questions ?? []).flatMap(q =>
+      findQuestionReferences(w.id, q).some(r => r.workflow.id === saved.id)
+        ? [{ workflow: w, question: q }] : [],
+    ),
+  ).slice(0, 3) : [], [graph, saved, findQuestionReferences]);
   const ensureDraft = (nextReview: ExtractionReview): InputDraft =>
     draft
       ? { ...draft, review: nextReview }
@@ -311,7 +330,7 @@ export function InputWorkbench({
         sourceNotes: text,
         baseline: before,
         answers: {},
-        answerHistory: answers,
+        answerHistory: payload.followUpAnswers ?? answers,
       };
       onDraft(requestKey, next);
       setMobilePane("flow");
@@ -891,6 +910,9 @@ export function InputWorkbench({
                     {diff.changed.length}件 · 除外 {diff.removed.length}件
                   </summary>
                   <div className="input-diff-items">
+                    {(diff.removedQuestions.length > 0 || diff.addedQuestions.length > 0) && (
+                      <p>確認事項：{(draft.baseline ?? currentReview)?.questions.length ?? 0}件 → {review.questions.length}件</p>
+                    )}
                     {diff.added.slice(0, 5).map((s) => (
                       <button key={s.stepKey} onClick={() => choose(s)}>
                         ＋ {s.name}
@@ -917,6 +939,8 @@ export function InputWorkbench({
                     {diff.removedConnections.map((s, i) => (
                       <p key={`r${i}`}>− {s}</p>
                     ))}
+                    {diff.removedQuestions.map((q, i) => <p key={`rq${i}`}>候補から外れた確認事項：{q.question}</p>)}
+                    {diff.addedQuestions.map((q, i) => <p key={`aq${i}`}>新しい確認事項：{q.question}</p>)}
                     <p>
                       {diff.added.length +
                         diff.changed.length +
@@ -1095,7 +1119,7 @@ export function InputWorkbench({
                     />
                   </label>
                   <details>
-                    <summary>部署・道具・判断の条件も訂正する</summary>
+                    <summary>部署・道具・情報・判断の条件も訂正する</summary>
                     <label className="kg-edit-field">
                       部署
                       <input
@@ -1139,6 +1163,24 @@ export function InputWorkbench({
                         <option value="mixed">人とシステムが行う</option>
                       </select>
                     </label>
+                    {edit.data.map((data, i) => (
+                      <label className="kg-edit-field" key={i}>
+                        {data.name}の使い方
+                        <select aria-label={`${i + 1}番目の情報・${data.name}の使い方`}
+                          value={data.operation} onChange={e => setEdit({ ...edit,
+                            data: edit.data.map((d, index) => index === i ? { ...d,
+                              operation: e.target.value as typeof d.operation,
+                            } : d),
+                          })}>
+                          <option value="read">参照する</option>
+                          <option value="receive">受け取る</option>
+                          <option value="create">新しく作る</option>
+                          <option value="update">更新する</option>
+                          <option value="send">渡す</option>
+                        </select>
+                        <small>根拠：{data.evidence}</small>
+                      </label>
+                    ))}
                     {(
                       [
                         ["purpose", "この作業が必要な理由"],
@@ -1407,7 +1449,8 @@ export function InputWorkbench({
                   </button>
                 </details>
               )}
-              <details className="input-questions">
+              <details className="input-questions" ref={questionsRef} open={questionsOpen}
+                onToggle={e => setQuestionsOpen(e.currentTarget.open)}>
                 <summary>
                   未確認・矛盾を確かめる · {review.questions.length}質問 /{" "}
                   {review.warnings.length}注意
@@ -1416,10 +1459,12 @@ export function InputWorkbench({
                   <p key={i}>{w}</p>
                 ))}
                 {review.questions.map((q, i) => (
-                  <label className="kg-edit-field" key={i}>
+                  <article key={i} aria-label={`確認事項：${q.question}`}>
+                  <label className="kg-edit-field">
                     {q.question}
                     <small>{q.reason}</small>
                     <textarea
+                      disabled={busy}
                       value={draft?.answers[q.question] ?? ""}
                       onChange={(e) =>
                         onDraft(key, {
@@ -1432,6 +1477,23 @@ export function InputWorkbench({
                       }
                     />
                   </label>
+                  {!!saved && findQuestionReferences(saved.id, q).length > 0 && (
+                    <details className="input-question-reference">
+                      <summary>この確認に関係する、保存済みの話</summary>
+                      <p>接続と情報の記録から見つけた候補です。回答が含まれるかを、読み直した流れで確認できます。</p>
+                      {findQuestionReferences(saved.id, q).map(reference => (
+                        <article key={reference.workflow.id}>
+                          <strong>{reference.workflow.name}</strong>
+                          <blockquote>{reference.sourceNotes}</blockquote>
+                          <button disabled={busy || !!edit} onClick={() => organize([
+                            ...(draft?.answerHistory ?? saved.reviewContext?.followUpAnswers ?? []),
+                            referenceAnswer(q.question, reference),
+                          ])}>{reference.workflow.name}を補足にして読み直す</button>
+                        </article>
+                      ))}
+                    </details>
+                  )}
+                  </article>
                 ))}
                 <button
                   disabled={
@@ -1443,11 +1505,32 @@ export function InputWorkbench({
                 >
                   回答を追加して読み直す
                 </button>
-                {draft?.answerHistory.map((a, i) => (
-                  <p key={i}>
-                    補足の根拠：{a.question} / {a.answer}
-                  </p>
-                ))}
+                {!!(draft?.answerHistory ?? saved?.reviewContext?.followUpAnswers)?.length && (
+                  <details>
+                    <summary>補足に使った根拠 · {(draft?.answerHistory ?? saved?.reviewContext?.followUpAnswers)!.length}件</summary>
+                    {(draft?.answerHistory ?? saved?.reviewContext?.followUpAnswers)!.map((a, i) => (
+                      <article key={i}>
+                        <p>確認事項：{a.question}</p>
+                        {a.reference && <p>補足元：{a.reference.workflowName} · 補足当時の本文を保持
+                          {savedTranscripts[a.reference.workflowId] !== a.answer && <strong> · 元の話はその後更新されています</strong>}
+                          {graph.workflows.some(w => w.id === a.reference!.workflowId) && (
+                            <button disabled={busy} onClick={() => onSelect(a.reference!.workflowId)}>補足元の現在の話を開く</button>
+                          )}
+                        </p>}
+                        <blockquote>{a.answer}</blockquote>
+                        {a.referenceReading && <details>
+                          <summary>AIによる補足の読み取り · {a.referenceReading.model}</summary>
+                          <p>この確認事項についての読み取りです。元の話の事実とは区別して確認できます。</p>
+                          {a.referenceReading.facts.map((fact, j) => <article key={j}>
+                            <p>{fact.text} · {fact.certainty === "inferred" ? "推定・要確認" : "原文の記述"}</p>
+                            <blockquote>{fact.evidence.join(" / ")}</blockquote>
+                          </article>)}
+                          {a.referenceReading.unanswered.map((text, j) => <p key={j}>未確認：{text}</p>)}
+                        </details>}
+                      </article>
+                    ))}
+                  </details>
+                )}
               </details>
               <details onToggle={(e) => setAdvanced(e.currentTarget.open)}>
                 <summary>システム・情報・接続を詳しく編集する</summary>
@@ -1471,6 +1554,17 @@ export function InputWorkbench({
                 </p>
                 {!draft && onExplore && (
                   <button onClick={onExplore}>会社の全体像で見る →</button>
+                )}
+                {!draft && relatedQuestions.length > 0 && (
+                  <aside className="input-question-reference">
+                    <strong>この話を、以前の未確認事項の補足にも使えます</strong>
+                    {relatedQuestions.map(({ workflow: w, question: q }, i) => (
+                      <p key={i}><button disabled={busy} onClick={() => {
+                        setQuestionDestination(w.id);
+                        onSelect(w.id);
+                      }}>{w.name}の確認事項を開く</button><br />{q.question}</p>
+                    ))}
+                  </aside>
                 )}
               </div>
             </>

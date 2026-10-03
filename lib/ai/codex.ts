@@ -18,13 +18,15 @@ export async function callCodexModel<T>(args: {
 }): Promise<T> {
   const started = Date.now(),
     callId = randomUUID();
+  const task = ["asset_resolution", "workflow_draft", "reference_question_reading"].includes(args.task ?? "")
+    ? args.task : "structured_inference";
   const record = (phase: string, value?: number) => {
     if (process.env.AI_DIAGNOSTICS !== "1") return;
     // Opt-in local timings only. Never record prompts, provider bodies,
     // credentials, model output, thread IDs or filesystem paths.
     void appendFile(
       join(process.cwd(), ".data", "ai-calls.jsonl"),
-      `${JSON.stringify({ callId, model: args.model, task: args.task === "asset_resolution" ? "asset_resolution" : "workflow_draft", phase, elapsedMs: Date.now() - started, value, at: new Date().toISOString() })}\n`,
+      `${JSON.stringify({ callId, model: args.model, task, phase, elapsedMs: Date.now() - started, value, at: new Date().toISOString() })}\n`,
     ).catch(() => {});
   };
   record("start", args.user.length);
