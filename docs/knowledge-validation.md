@@ -30,3 +30,13 @@ Validated the production build in the Codex in-app browser at `http://localhost:
 - `npm run test:regression`: 24 passing API/persistence checks, including report scope, invalid scenario, missing project, and empty workflow selection.
 
 CI runs the same checks on Node 22 / Ubuntu. Local checks used Node 24 / Windows. Implementation PR tracks CI and merge results.
+
+## First-time reading revision
+
+The company entry now explains the reading path and provides a concrete first-workflow example. The bird view focuses on one activity with incoming handoffs, responsible departments, and outgoing handoffs, instead of presenting every edge at once. Selecting a neighboring activity continues the exploration. Only registered handoffs inside the current scope are shown.
+
+The company and workflow pages share a reader that groups consecutive steps by execution mode and department. It initially exposes at most five groups and one selected step. That step shows information received → action/tools → information produced, alongside its explicit system transfers. Additional data items, full diagrams, comparison and technical details are disclosed on demand. Business acronyms receive plain Japanese explanations.
+
+Production browser verification confirmed company bird-view selection, incoming delivery records and outgoing planning/accounting handoffs, order registration's five groups, credit inputs and rule explanation, detail → return to the same step, SAP impact → return to the same step, workflow-page integrated reading, and SAP → Excel manual transfer displayed beside the selected adjustment step. The workflow bird-view toggle showed the same activity-centered view. Narrow in-app layout rendered the three information regions vertically in readable order. No independent human usability study is claimed.
+
+The revised suite has 43 passing tests, including ordered-step preservation in groups, scope-safe cross-activity aggregation, and acronym explanation. Typecheck, production build and all 24 API regressions pass.
