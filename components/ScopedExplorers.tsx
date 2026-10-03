@@ -91,7 +91,7 @@ export function AssetExplorer({
     setReading(null);
   }
   return (
-    <section className="page-view">
+    <section className="page-view kg-view asset-explorer">
       <header className="page-header">
         <div>
           <h1>蓄積したシステム・情報から仕事を調べる</h1>
@@ -197,7 +197,8 @@ export function AssetExplorer({
           {selected && impact ? (
             <>
               <h2>{selected.node.label}</h2>
-              <p>{impact.profile?.purpose ?? selected.node.description}</p>
+              {!activeRows.length && <p className="kg-context">この表示範囲で直接関連する仕事はありません。状態・部署を変えて同じ道具を調べられます。</p>}
+              <p>{impact.profile?.sourceWorkflowId ? "入力で分かった役割の一例：" : ""}{impact.profile?.purpose ?? selected.node.description}</p>
               <p className="kg-context" aria-label="集計の内訳">
                 直接関連 {impact.direct.length}業務（手順で利用{" "}
                 {impact.stepUse.length} / 連携で関連 {impact.flowUse.length} ·
