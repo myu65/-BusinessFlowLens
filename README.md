@@ -250,13 +250,15 @@ An optional local transport uses the installed [Codex App Server](https://develo
 ```bash
 AI_RUNTIME=codex
 AI_MODEL=gpt-6-luna
-AI_REASONING_EFFORT=medium
+AI_REASONING_EFFORT=low
 AI_TIMEOUT_MS=120000
 ```
 
 Restart the server after changing configuration. `AI_CODEX_COMMAND` can point to the installed executable if PATH does not contain it. This local transport requires that exact model to be available to the signed-in account; it stops if the model is unavailable, without choosing another model. It creates ephemeral inference sessions with tools and environment access disabled, and never reads or copies login credentials. It requires a local Node server and is not a Snowflake deployment configuration.
 
 The input screen distinguishes configuration from a successful model response and records the model used for each extracted structure. An AI failure leaves the source and previous candidate intact; it does not silently replace the result with the simple extractor. Automated adapter tests use mocks; real AI input testing is recorded separately in [the input growth audit](docs/ai-input-growth-validation.md).
+
+`AI_DIAGNOSTICS=1` optionally records local call timings in the ignored `.data/ai-calls.jsonl`. These records contain phase, elapsed time, model, task and character counts, without prompt text, model output or credentials. The real UI audit observed a 120-second timeout at medium effort and approximately 76–77 seconds for a complex eight-step draft at low effort; model access alone does not establish practical latency or extraction quality.
 
 ## Canonical model
 

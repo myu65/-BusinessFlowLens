@@ -16,6 +16,15 @@
 .input-ai-status details { max-width: 480px; }
 .input-ai-status summary { cursor: pointer; }
 .input-extraction-origin { font-size: 13px; color: #596457; margin: 8px 0; }
+.input-organization { border-left: 3px solid #adc3b6; padding: 10px 14px; margin: 12px 0; background: #f1f5f2; border-radius: 0 8px 8px 0; }
+.input-organization > div { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.input-organization small { color: #596457; }
+.input-organization p { font-size: 13px; margin: 5px 0; }
+.input-organization summary { font-size: 13px; cursor: pointer; }
+.input-incoming { border: 1px solid #cbd9d1; border-radius: 8px; padding: 10px; margin: 12px 0; background: #f4f8f5; }
+.input-incoming h4 { margin: 0 0 8px; }
+.input-incoming p { margin: 5px 0; }
+.input-incoming button { display: block; margin: 6px 0; }
 .input-ai-status[data-mode="success"] { background: #f1f7ee; border-color: #bcd0b0; }
 .input-ai-status[data-mode="failure"] { background: #fff3ef; border-color: #e4c3b5; }
 .app-shell {
@@ -1251,4 +1260,7 @@
     padding: 7px 10px;
     font-size: 13px;
   }
+}
+.continuous-reader {
+  scroll-margin-top: 96px;
 }

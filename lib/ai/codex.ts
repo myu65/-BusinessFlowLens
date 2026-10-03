@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { mkdtemp, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative } from "node:path";
 import { AIProviderError } from "./errors";
@@ -13,7 +14,20 @@ export async function callCodexModel<T>(args: {
   system: string;
   user: string;
   timeoutMs: number;
+  task?: string;
 }): Promise<T> {
+  const started = Date.now(),
+    callId = randomUUID();
+  const record = (phase: string, value?: number) => {
+    if (process.env.AI_DIAGNOSTICS !== "1") return;
+    // Opt-in local timings only. Never record prompts, provider bodies,
+    // credentials, model output, thread IDs or filesystem paths.
+    void appendFile(
+      join(process.cwd(), ".data", "ai-calls.jsonl"),
+      `${JSON.stringify({ callId, model: args.model, task: args.task === "asset_resolution" ? "asset_resolution" : "workflow_draft", phase, elapsedMs: Date.now() - started, value, at: new Date().toISOString() })}\n`,
+    ).catch(() => {});
+  };
+  record("start", args.user.length);
   const cwd = await mkdtemp(join(tmpdir(), "business-flow-ai-"));
   const child = spawn(
     process.env.AI_CODEX_COMMAND || "codex",
@@ -57,6 +71,8 @@ export async function callCodexModel<T>(args: {
   >();
   let nextId = 1;
   let resultText = "";
+  let responseReceived = false,
+    failureRecorded = false;
   let completed: (value: unknown) => void;
   let failed: (error: Error) => void;
   const completion = new Promise<unknown>((resolve, reject) => {
@@ -66,6 +82,10 @@ export async function callCodexModel<T>(args: {
   // Observe the rejection even if a transport failure happens before turn/start.
   void completion.catch(() => {});
   const fail = (error: AIProviderError) => {
+    if (!responseReceived && !failureRecorded) {
+      record(`error_${error.code}`);
+      failureRecorded = true;
+    }
     for (const call of pending.values()) call.reject(error);
     pending.clear();
     failed(error);
@@ -172,6 +192,7 @@ export async function callCodexModel<T>(args: {
     ) {
       const item = message.params.item;
       if (item.phase !== "commentary") resultText = item.text;
+      record("response_received", resultText.length);
     }
     if (message.method === "turn/completed") {
       const turn = message.params?.turn;
@@ -185,7 +206,10 @@ export async function callCodexModel<T>(args: {
         return;
       }
       try {
-        completed(JSON.parse(resultText));
+        const parsed = JSON.parse(resultText);
+        responseReceived = true;
+        record("completed", resultText.length);
+        completed(parsed);
       } catch {
         fail(
           new AIProviderError(
@@ -206,6 +230,7 @@ export async function callCodexModel<T>(args: {
       capabilities: { experimentalApi: true },
     });
     write({ method: "initialized" });
+    record("initialized");
     const thread = await request("thread/start", {
       model: args.model,
       allowProviderModelFallback: false,
@@ -235,6 +260,7 @@ export async function callCodexModel<T>(args: {
         "指定したAIモデルを利用できませんでした。別のモデルへ自動で切り替えず停止しました。",
       );
     }
+    record("thread_created");
     await request("turn/start", {
       threadId: thread.thread.id,
       model: args.model,
@@ -243,6 +269,7 @@ export async function callCodexModel<T>(args: {
       input: [{ type: "text", text: args.user }],
       outputSchema: args.schema,
     });
+    record("turn_accepted");
     return (await completion) as T;
   } finally {
     clearTimeout(timer);

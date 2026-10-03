@@ -170,5 +170,11 @@ test("saving confirmed exact assets needs no model call, while preserving origin
       result.patch.nodes.some((n) => n.canonicalKey === "system:excel"),
     );
     assert.deepEqual(result.review.extraction, review.extraction);
+    for (const status of ["inferred", "unknown"] as const) {
+      graph.nodes[0].status = status;
+      await assert.rejects(
+        resolveWorkflowReviewWithAI({ review, workflow, graph }),
+      );
+    }
   });
 });

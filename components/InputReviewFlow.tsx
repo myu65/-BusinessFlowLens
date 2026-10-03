@@ -20,6 +20,7 @@ export function InputReviewFlow({
   review,
   selected,
   graph,
+  workflowId,
   busy,
   choose,
   onOverview,
@@ -30,6 +31,7 @@ export function InputReviewFlow({
   review: ExtractionReview;
   selected: ExtractionReviewStep;
   graph: LensGraph;
+  workflowId?: string;
   busy: boolean;
   choose: (step: ExtractionReviewStep) => void;
   onOverview?: () => void;
@@ -46,9 +48,63 @@ export function InputReviewFlow({
   const transitions = review.transitions.filter(
     (t) => t.fromStepKey === selected.stepKey,
   );
-  const handoffs = (review.handoffs ?? []).filter(
-    (h) => h.fromStepKey === selected.stepKey,
+  const inherited = (graph.knowledge?.handoffs ?? []).filter(
+    (h) => h.reviewedWorkflowId && h.reviewedWorkflowId !== workflowId,
   );
+  const handoffs = [
+    ...(review.handoffs ?? []),
+    ...inherited
+      .filter(
+        (h) =>
+          h.sourceWorkflowId === workflowId &&
+          graph.nodes
+            .find((n) => n.id === h.sourceProcessId)
+            ?.canonicalKey.split(":")
+            .at(-1) === selected.stepKey,
+      )
+      .map((h) => ({
+        fromStepKey: selected.stepKey,
+        targetWorkflowId: h.targetWorkflowId,
+        targetStepKey: graph.nodes
+          .find((n) => n.id === h.targetProcessId)
+          ?.canonicalKey.split(":")
+          .at(-1),
+        data: h.dataIds.map(
+          (id) => graph.nodes.find((n) => n.id === id)?.label ?? id,
+        ),
+        description: h.description,
+        evidence: h.evidence,
+        certainty: h.status ?? "unknown",
+        via: h.via,
+      })),
+  ].filter((h) => h.fromStepKey === selected.stepKey);
+  const incoming = [
+    ...(review.incomingHandoffs ?? []),
+    ...inherited
+      .filter(
+        (h) =>
+          h.targetWorkflowId === workflowId &&
+          graph.nodes
+            .find((n) => n.id === h.targetProcessId)
+            ?.canonicalKey.split(":")
+            .at(-1) === selected.stepKey,
+      )
+      .map((h) => ({
+        sourceWorkflowId: h.sourceWorkflowId,
+        sourceStepKey: graph.nodes
+          .find((n) => n.id === h.sourceProcessId)
+          ?.canonicalKey.split(":")
+          .at(-1),
+        toStepKey: selected.stepKey,
+        data: h.dataIds.map(
+          (id) => graph.nodes.find((n) => n.id === id)?.label ?? id,
+        ),
+        description: h.description,
+        evidence: h.evidence,
+        certainty: h.status ?? "unknown",
+        via: h.via,
+      })),
+  ].filter((h) => h.toStepKey === selected.stepKey);
   const mode = {
     manual: "人が行う",
     automatic: "システムが自動で行う",
@@ -100,15 +156,67 @@ export function InputReviewFlow({
           <details key={name}>
             <summary>{name}</summary>
             <p>
-              {termExplanation(name) ??
-                "この手順で使う道具。役割の説明はまだありません。"}
+              {review.systemProfiles?.find((s) => s.name === name)?.purpose ||
+                (termExplanation(name) ??
+                  "この手順で使う道具。役割の説明はまだありません。")}
             </p>
+            {review.systemProfiles
+              ?.filter((s) => s.name === name)
+              .map((s) => (
+                <p key={s.name}>
+                  {s.category || "分類は未確認"} ·{" "}
+                  {s.certainty === "confirmed"
+                    ? "原文に明示"
+                    : "整理案・要確認"}
+                  <br />
+                  根拠：{s.evidence}
+                </p>
+              ))}
           </details>
         ))}
         {!selected.systems.length && !selected.executingSystem && (
           <span className="input-unconfirmed">まだ分かっていません</span>
         )}
       </div>
+      {incoming.length > 0 && (
+        <section
+          className="input-incoming"
+          aria-label="前の業務から受け取る情報"
+        >
+          <h4>
+            {incoming.every((h) => h.via === "reference")
+              ? "この仕事が使う情報をつくる仕事"
+              : "この仕事は、ここから受け取る"}
+          </h4>
+          {incoming.map((h, i) => {
+            const source = graph.workflows.find(
+              (w) => w.id === h.sourceWorkflowId,
+            );
+            return (
+              <div key={i}>
+                <p>
+                  {h.description} ·{" "}
+                  {h.certainty === "confirmed" ? "原文に明示" : "接続は要確認"}
+                </p>
+                <span>{h.data.join(" / ")}</span>
+                {source && (
+                  <button
+                    onClick={() => onWorkflow(source.id, h.sourceStepKey)}
+                  >
+                    {h.via === "reference" ? "情報の作成元：" : "受取元："}
+                    {source.name} ←
+                  </button>
+                )}
+                {!h.sourceStepKey && <small>送り出す手順は未確認</small>}
+                <details>
+                  <summary>接続の根拠を見る</summary>
+                  <blockquote>{h.evidence}</blockquote>
+                </details>
+              </div>
+            );
+          })}
+        </section>
+      )}
       <div className="input-information-change">
         <section>
           <h4>受け取る・判断の根拠</h4>
@@ -152,7 +260,11 @@ export function InputReviewFlow({
       </div>
       <section className="input-next-work" aria-label="条件と次の仕事">
         <h4>
-          {selected.meaning?.halt ? "ここで停止・保留する" : "その後の仕事"}
+          {selected.meaning?.halt
+            ? transitions.length > 1
+              ? "条件ごとの進み方・保留"
+              : "ここで停止・保留する"
+            : "その後の仕事"}
         </h4>
         {selected.meaning?.condition && (
           <p className="input-condition">条件：{selected.meaning.condition}</p>
@@ -179,10 +291,14 @@ export function InputReviewFlow({
           return (
             <div className="input-handoff" key={i}>
               <p>{h.description}</p>
+              <small>
+                {h.certainty === "confirmed" ? "原文に明示" : "接続は要確認"}
+              </small>
               <span>{h.data.join(" / ")}</span>
               {target && (
                 <button onClick={() => onWorkflow(target.id, h.targetStepKey)}>
-                  次の業務：{target.name} →
+                  {h.via === "reference" ? "情報を使う業務：" : "次の業務："}
+                  {target.name} →
                 </button>
               )}
               {!h.targetStepKey && <small>受取手順は未確認</small>}

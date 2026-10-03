@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   getProcessExecutionMode,
   getWorkflowProcesses,
@@ -8,7 +8,8 @@ import {
 } from "@/lib/graph";
 import { termExplanation, workflowChapters } from "@/lib/knowledge-guide";
 import {
-  handoffEntry,
+  handoffJourney,
+  type WorkflowHandoff,
   stepContext,
   traceData,
   type FlowJourney,
@@ -57,7 +58,11 @@ export function WorkflowReading({
   journey?: FlowJourney;
 }) {
   const [journey, setJourney] = useState(initialJourney);
+  const readerRef = useRef<HTMLElement>(null);
   const workflowId = journey?.workflowId ?? parentWorkflowId;
+  useEffect(() => {
+    if (journey) readerRef.current?.scrollIntoView({ block: "start" });
+  }, [journey?.workflowId]);
   useEffect(() => {
     if (journey && parentWorkflowId !== journey.workflowId)
       setJourney(initialJourney);
@@ -76,7 +81,7 @@ export function WorkflowReading({
         : (initialStepId ?? ""))
     );
   });
-  const [depth, setDepth] = useState<Depth>(initialDepth);
+  const [depth, setDepth] = useState<Depth>(initialJourney?.depth ?? initialDepth);
   const [lens, setLens] = useState<"work" | "data">(initialLens);
   const [dataId, setData] = useState(
     initialJourney?.dataId ?? initialDataId ?? "",
@@ -148,6 +153,69 @@ export function WorkflowReading({
   const trace = focusData ? traceData(graph, workflowId, focusData.id) : [];
   const focusSystem = graph.nodes.find(
     (n) => n.id === systemId && n.kind === "system",
+  );
+  const followHandoff = (h: WorkflowHandoff) => {
+    const next = handoffJourney(
+      graph,
+      h,
+      workflowId,
+      (h.sourceWorkflowId === workflowId
+        ? h.sourceProcessId
+        : h.targetProcessId) ?? selected.id,
+      journey,
+      focusData?.id,
+    );
+    next.depth = depth;
+    setJourney(next);
+    setStepId(next.stepId ?? "");
+    setData(next.dataId ?? "");
+    setTracePage(0);
+    setSystem("");
+    if (next.dataId) setLens("data");
+    onNavigateWorkflow?.(next.workflowId, next);
+  };
+  const connection = (h: WorkflowHandoff, incoming = false) => {
+    const otherId = incoming ? h.sourceWorkflowId : h.targetWorkflowId;
+    return (
+      <article key={h.id}>
+        <p>{h.description}</p>
+        <p>
+          {h.dataIds.map(label).join(" / ") || "情報は未確認"} ·{" "}
+          {h.status === "confirmed" ? "原文に明示" : "接続は要確認"}
+        </p>
+        <button onClick={() => followHandoff(h)}>
+          {incoming
+            ? h.via === "reference"
+              ? "情報の作成元："
+              : "受取元："
+            : h.via === "reference"
+              ? "情報を使う業務："
+              : "次の業務："}
+          {graph.workflows.find((w) => w.id === otherId)?.name}{" "}
+          {incoming ? "←" : "→"}
+        </button>
+        <details>
+          <summary>接続の根拠を見る</summary>
+          <blockquote>{h.evidence}</blockquote>
+        </details>
+      </article>
+    );
+  };
+  const connections = (items: WorkflowHandoff[], incoming = false) => (
+    <>
+      {items.slice(0, 3).map((h) => connection(h, incoming))}
+      {items.length > 3 && (
+        <details>
+          <summary>ほか{items.length - 3}件の業務との接続</summary>
+          {items.slice(3, 20).map((h) => connection(h, incoming))}
+          {items.length > 20 && (
+            <p>
+              ここでは20件まで表示しています。業務全体の受渡しから続きを確認できます。
+            </p>
+          )}
+        </details>
+      )}
+    </>
   );
   const systemProfile = graph.knowledge?.systems.find(
     (s) => s.systemId === systemId,
@@ -269,6 +337,7 @@ export function WorkflowReading({
   );
   return (
     <section
+      ref={readerRef}
       className="kg-reader continuous-reader"
       aria-label="業務と情報を一緒に読む"
     >
@@ -289,6 +358,7 @@ export function WorkflowReading({
                     workflowId: j.workflowId,
                     stepId: j.stepId,
                     dataId: j.dataId,
+                    depth,
                     trail: journey.trail.slice(
                       0,
                       Math.max(0, journey.trail.length - 4) + i,
@@ -311,8 +381,9 @@ export function WorkflowReading({
           ))}
           <p>
             辿る情報：
-            {journey.dataId ? label(journey.dataId) : "受渡す情報は未確認"} →{" "}
-            {workflow?.name}
+            {journey.dataId
+              ? label(journey.dataId)
+              : "受渡す情報は未確認"} → {workflow?.name}
           </p>
           {!journey.entryKnown && (
             <p>
@@ -448,12 +519,19 @@ export function WorkflowReading({
                     : "根拠を確認"}
               </button>
             ))}
-            {!context.outgoing.length && (
+            {connections(context.outgoingHandoffs)}
+            {!context.outgoing.length && !context.outgoingHandoffs.length && (
               <p>
                 {selected.meaning?.halt
                   ? "解除後の再開先は未確認です。"
                   : "次の接続は未登録です。完了または受渡し先を確認してください。"}
               </p>
+            )}
+            {context.incomingHandoffs.length > 0 && (
+              <section aria-label="前の業務からつながる情報">
+                <strong>この手順で受け取る・参照する情報の作成元</strong>
+                {connections(context.incomingHandoffs, true)}
+              </section>
             )}
           </aside>
           <div className="flow-neighbors" aria-label="前後の仕事">
@@ -840,31 +918,7 @@ export function WorkflowReading({
                       ? "接続は推定"
                       : "接続の根拠を確認"}
                 </p>
-                <button
-                  onClick={() => {
-                    const entry = handoffEntry(graph, h, focusData?.id);
-                    const next: FlowJourney = {
-                      workflowId: h.targetWorkflowId,
-                      ...entry,
-                      trail: [
-                        ...(journey?.trail ?? []),
-                        {
-                          workflowId,
-                          stepId: selected.id,
-                          dataId: focusData?.id,
-                          description: h.description,
-                          evidence: h.evidence,
-                        },
-                      ].slice(-10),
-                    };
-                    setJourney(next);
-                    setStepId(entry.stepId ?? "");
-                    setData(entry.dataId ?? "");
-                    setTracePage(0);
-                    if (entry.dataId) setLens("data");
-                    onNavigateWorkflow?.(h.targetWorkflowId, next);
-                  }}
-                >
+                <button onClick={() => followHandoff(h)}>
                   {
                     graph.workflows.find((w) => w.id === h.targetWorkflowId)
                       ?.name

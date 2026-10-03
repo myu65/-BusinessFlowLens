@@ -324,7 +324,11 @@ export function preserveRefinements(
   const keys = new Set(steps.map((s) => s.stepKey));
   const handoffs = [...(review.handoffs ?? [])];
   for (const confirmed of previous.handoffs ?? []) {
-    if (confirmed.certainty !== "confirmed" || !keys.has(confirmed.fromStepKey))
+    if (
+      confirmed.certainty !== "confirmed" ||
+      (previous.extraction && confirmed.origin !== "human") ||
+      !keys.has(confirmed.fromStepKey)
+    )
       continue;
     const proposed = handoffs.findIndex(
       (h) =>
@@ -344,8 +348,34 @@ export function preserveRefinements(
       );
     }
   }
+  const incomingHandoffs = [...(review.incomingHandoffs ?? [])];
+  for (const handoff of previous.incomingHandoffs ?? []) {
+    if (handoff.origin !== "human" || !keys.has(handoff.toStepKey)) continue;
+    const index = incomingHandoffs.findIndex(
+      (h) =>
+        h.sourceWorkflowId === handoff.sourceWorkflowId &&
+        h.toStepKey === handoff.toStepKey,
+    );
+    if (index >= 0) incomingHandoffs[index] = handoff;
+    else incomingHandoffs.push(handoff);
+  }
+  const organization = ["human", "existing"].includes(
+    previous.organization?.origin ?? "",
+  )
+    ? previous.organization
+    : review.organization;
+  if (
+    ["human", "existing"].includes(previous.organization?.origin ?? "") &&
+    JSON.stringify(previous.organization) !==
+      JSON.stringify(review.organization)
+  )
+    warnings.push(
+      "登録された話のまとまりを保持しました。最新の説明と合うか確認できます。",
+    );
   return {
     ...review,
+    organization,
+    incomingHandoffs: incomingHandoffs.filter((h) => keys.has(h.toStepKey)),
     steps: [...steps]
       .sort((a, b) => a.order - b.order)
       .map((s, i) => ({ ...s, order: i + 1 })),
