@@ -37,6 +37,7 @@ export function KnowledgeExplorer({
   onOpenWorkflow,
   onWorkflowFocus,
   onFocusStep,
+  onInput,
 }: {
   projectId: string;
   graph: LensGraph;
@@ -44,6 +45,7 @@ export function KnowledgeExplorer({
   onOpenWorkflow: (id: string) => void;
   onWorkflowFocus: (id: string) => void;
   onFocusStep?: (workflowId: string, stepId: string) => void;
+  onInput?: (workflowId?: string) => void;
 }) {
   const [report, setReport] = useState<{ text: string; url: string } | null>(
     null,
@@ -175,6 +177,18 @@ export function KnowledgeExplorer({
       setImporting(false);
     }
   };
+  const namedSystems = new Set(
+    graph.nodes
+      .filter(
+        (n) =>
+          n.kind === "system" &&
+          query &&
+          `${n.label} ${n.description} ${(n.aliases ?? []).join(" ")}`
+            .toLowerCase()
+            .includes(query.toLowerCase()),
+      )
+      .map((n) => n.id),
+  );
   const systems = graph.nodes
     .filter((n) => n.kind === "system")
     .filter(
@@ -183,10 +197,9 @@ export function KnowledgeExplorer({
           graph.knowledge?.systems.find((s) => s.systemId === n.id)
             ?.categoryId === category) &&
         (!query ||
-          `${n.label} ${n.description} ${(n.aliases ?? []).join(" ")}`
-            .toLowerCase()
-            .includes(query.toLowerCase()) ||
-          view.systemProfile(n.id).direct.length),
+          (namedSystems.size
+            ? namedSystems.has(n.id)
+            : view.systemProfile(n.id).direct.length)),
     )
     .filter(
       (n) =>
@@ -231,7 +244,7 @@ export function KnowledgeExplorer({
             <p>{r.workflow.description}</p>
             <span>
               {r.departments.join(" / ")} · {r.processes.length}工程 ·{" "}
-              {r.assets.filter((n) => n.kind === "system").length} System
+              {r.assets.filter((n) => n.kind === "system").length}道具
             </span>
             {graph.knowledge?.criticalWorkflows.some(
               (w) => w.workflowId === r.workflow.id,
@@ -253,78 +266,80 @@ export function KnowledgeExplorer({
     </>
   );
   return (
-    <section className="page-view kg-view">
-      <div className="eyebrow">会社のしくみを知る</div>
-      <h1>{graph.knowledge?.name ?? "会社がどう動いているかを探索する"}</h1>
-      <p>
-        {graph.knowledge?.description ??
-          "会社の活動から業務を読み、System・Dataから支えている活動へ戻れます。未分類の業務も下の一覧から探索できます。"}
-      </p>
-      {focus.kind === "company" && (
-        <CompanyOrientation
-          graph={graph}
-          workflowIds={view.rows.map((r) => r.workflow.id)}
-          onWorkflow={(id) => go({ kind: "workflow", id })}
-          onSystems={() => go({ kind: "systems" })}
-          onActivity={(id) => go({ kind: "activity", id })}
-        />
-      )}
-      <div className="kg-toolbar">
-        <button
-          onClick={() => {
-            go({ kind: "company" });
-            setQuery("");
-            setDepartment("");
-            setCategory("");
-          }}
-        >
-          会社全体
-        </button>
-        <button onClick={() => go({ kind: "systems" })}>
-          システム・道具の全体像
-        </button>
-        <button
-          disabled={!history.length}
-          onClick={() => {
-            const previous = history.at(-1)!;
-            setFocus(previous.focus);
-            if (previous.focus.kind === "workflow")
-              onWorkflowFocus(previous.focus.id);
-            if (previous.focus.kind === "process") {
-              const process = graph.nodes.find(
-                (n) => n.id === (previous.focus as { id: string }).id,
-              );
-              if (process?.workflowId) onWorkflowFocus(process.workflowId);
-            }
-            setEditingStep("");
-            setScope(previous.scope);
-            setQuery(previous.query);
-            setDepartment(previous.department);
-            setCategory(previous.category);
-            setHistory((h) => h.slice(0, -1));
-            setPage(0);
-            window.scrollTo({ top: 0, behavior: "instant" });
-          }}
-        >
-          ひとつ戻る
-        </button>
-        <button onClick={download}>この範囲をレポート出力</button>
-      </div>
-      <details className="kg-secondary">
-        <summary>サンプル・プロジェクトの切替</summary>
-        <div className="kg-toolbar">
+    <section className="page-view kg-view" data-focus={focus.kind}>
+      <header className="company-page-header">
+        <div>
+          <span className="company-heading-kicker">
+            入力した話から、会社のしくみを知る
+          </span>
+          <h1>
+            {focus.kind === "company"
+              ? (graph.knowledge?.name ?? "会社の全体像")
+              : focus.kind === "systems"
+                ? "システム・道具の全体像"
+                : (row?.workflow.name ??
+                  asset?.label ??
+                  activity?.name ??
+                  cap?.name ??
+                  "会社の構造を探索")}
+          </h1>
+          {focus.kind === "company" && (
+            <p>
+              {graph.knowledge?.description.split("。")[0] ||
+                "保存した仕事の話を、会社のつながりとして見られます"}
+              。
+            </p>
+          )}
+        </div>
+        {onInput && (
+          <button onClick={() => onInput(row?.workflow.id)}>
+            {row ? "この仕事の話を補足する →" : "仕事の話を書く →"}
+          </button>
+        )}
+      </header>
+      {focus.kind !== "company" && (
+        <div className="kg-toolbar kg-explore-nav">
           <button
-            disabled={importing}
             onClick={() => {
-              setImporting(true);
-              void loadExample();
+              go({ kind: "company" });
+              setQuery("");
+              setDepartment("");
+              setCategory("");
             }}
           >
-            架空の化学メーカー300業務を開く
+            会社全体
           </button>
-          <a href="/?projectId=default">自分のプロジェクトへ</a>
+          <button onClick={() => go({ kind: "systems" })}>
+            システム・道具の全体像
+          </button>
+          <button
+            disabled={!history.length}
+            onClick={() => {
+              const previous = history.at(-1)!;
+              setFocus(previous.focus);
+              if (previous.focus.kind === "workflow")
+                onWorkflowFocus(previous.focus.id);
+              if (previous.focus.kind === "process") {
+                const process = graph.nodes.find(
+                  (n) => n.id === (previous.focus as { id: string }).id,
+                );
+                if (process?.workflowId) onWorkflowFocus(process.workflowId);
+              }
+              setEditingStep("");
+              setScope(previous.scope);
+              setQuery(previous.query);
+              setDepartment(previous.department);
+              setCategory(previous.category);
+              setHistory((h) => h.slice(0, -1));
+              setPage(0);
+              window.scrollTo({ top: 0, behavior: "instant" });
+            }}
+          >
+            ひとつ戻る
+          </button>
+          <button onClick={download}>この範囲をレポート出力</button>
         </div>
-      </details>
+      )}
       {error && <p role="alert">{error}</p>}
       {report && (
         <section aria-label="レポートプレビュー">
@@ -347,7 +362,7 @@ export function KnowledgeExplorer({
         </section>
       )}
 
-      <div className="kg-toolbar">
+      <div className="kg-toolbar company-filters">
         <label>
           表示する状態
           <select
@@ -359,9 +374,9 @@ export function KnowledgeExplorer({
               setPage(0);
             }}
           >
-            <option value="current">現在の仕事（Current）</option>
-            <option value="future">改善後の案（Future）</option>
-            <option value="alternative">別の案（Alternative）</option>
+            <option value="current">現在の仕事</option>
+            <option value="future">改善後の案</option>
+            <option value="alternative">別の案</option>
           </select>
         </label>
         <label>
@@ -390,10 +405,7 @@ export function KnowledgeExplorer({
             }}
           />
         </label>
-        <span>
-          検索対象：{view.rows.length}業務 ·{" "}
-          {view.rows.reduce((s, r) => s + r.processes.length, 0)}工程
-        </span>
+        <span>この範囲：{selectedRows.length}業務</span>
       </div>
       {(query || department) && (
         <button
@@ -406,20 +418,35 @@ export function KnowledgeExplorer({
           検索・部署の条件をクリア
         </button>
       )}
-      <p className="kg-trail" aria-label="現在の探索位置">
-        会社全体
-        {activity
-          ? ` → ${activity.name}`
-          : cap
-            ? ` → ${view.activities.find((a) => a.capabilities.some((c) => c.id === cap.id))?.name} → ${cap.name}`
-            : row
-              ? ` → ${row.capabilities.map((c) => `${c.activity.name} → ${c.capability.name}`).join(" / ")} → ${row.workflow.name}`
-              : asset
-                ? ` → ${asset.kind === "process" ? "ひとつの手順" : asset.kind === "system" ? "システム・道具" : "業務で使う情報"} → ${asset.label}`
-                : focus.kind === "systems"
-                  ? " → システム・道具の全体像"
-                  : ""}
-      </p>
+      {focus.kind === "company" && (
+        <CompanyOrientation
+          graph={graph}
+          scope={scope}
+          rows={view.rows}
+          workflowIds={view.rows.map((r) => r.workflow.id)}
+          onWorkflow={(id) => go({ kind: "workflow", id })}
+          onSystems={() => go({ kind: "systems" })}
+          onActivity={(id) => go({ kind: "activity", id })}
+          onSystem={(id) => go({ kind: "asset", id })}
+          onInput={onInput ? () => onInput() : undefined}
+        />
+      )}
+      {focus.kind !== "company" && (
+        <p className="kg-trail" aria-label="現在の探索位置">
+          会社全体
+          {activity
+            ? ` → ${activity.name}`
+            : cap
+              ? ` → ${view.activities.find((a) => a.capabilities.some((c) => c.id === cap.id))?.name} → ${cap.name}`
+              : row
+                ? ` → ${row.capabilities.map((c) => `${c.activity.name} → ${c.capability.name}`).join(" / ")} → ${row.workflow.name}`
+                : asset
+                  ? ` → ${asset.kind === "process" ? "ひとつの手順" : asset.kind === "system" ? "システム・道具" : "業務で使う情報"} → ${asset.label}`
+                  : focus.kind === "systems"
+                    ? " → システム・道具の全体像"
+                    : ""}
+        </p>
+      )}
       {(row || processRow || cap || activity) && (
         <nav className="kg-toolbar" aria-label="大きな視点へ戻る">
           {(row ?? processRow)?.capabilities.slice(0, 1).map((c) => (
@@ -449,40 +476,38 @@ export function KnowledgeExplorer({
       )}
       {focus.kind === "company" && (
         <>
-          <h2>会社の活動</h2>
-          <p>
-            「何のために働くか」でまとめた、大きな仕事です。気になる活動を選んでください。
-          </p>
-          <div className="kg-cards">
-            {view.activities
-              .filter((a) => a.rows.length)
-              .map((a) => (
-                <button
-                  key={a.id}
-                  onClick={() => go({ kind: "activity", id: a.id })}
-                >
-                  <strong>{a.name}</strong>
-                  <p>{a.description}</p>
-                  <span>
-                    {a.capabilities.filter((c) => c.rows.length).length}{" "}
-                    種類の仕事 · {a.rows.length}業務
-                  </span>
-                  <p>
-                    {[...new Set(a.rows.flatMap((r) => r.departments))].join(
-                      " / ",
-                    )}
-                  </p>
-                </button>
-              ))}
-          </div>
-          <h2>
-            {graph.knowledge
-              ? "対象範囲の業務"
-              : "登録済み業務（活動の分類は未登録）"}
-          </h2>
+          {view.activities.some((a) => a.rows.length) &&
+            view.rows.some((r) => !r.capabilities.length) && (
+              <>
+                <h2>保存した話</h2>
+                <p className="company-map-caption">
+                  まだ活動にまとめていない仕事も、そのまま読めます。
+                </p>
+                {list(view.rows.filter((r) => !r.capabilities.length))}
+              </>
+            )}
           <details>
             <summary>業務の一覧を直接見る（{view.rows.length}件）</summary>
             {list(view.rows)}
+          </details>
+          <details className="kg-secondary">
+            <summary>会社の説明・レポート・サンプル</summary>
+            {graph.knowledge?.description && (
+              <p>{graph.knowledge.description}</p>
+            )}
+            <div className="kg-toolbar">
+              <button onClick={download}>この範囲をレポート出力</button>
+              <button
+                disabled={importing}
+                onClick={() => {
+                  setImporting(true);
+                  void loadExample();
+                }}
+              >
+                架空の化学メーカー300業務を開く
+              </button>
+              <a href="/?projectId=default">自分のプロジェクトへ</a>
+            </div>
           </details>
           <KnowledgeEditor graph={graph} onApply={onGraphApply} />
         </>
@@ -509,7 +534,7 @@ export function KnowledgeExplorer({
                 </button>
               ))}
           </div>
-          <h3>この活動を支えるSystem</h3>
+          <h3>この活動を支えるシステム・道具</h3>
           {[
             ...new Map(
               activity.rows
@@ -675,7 +700,9 @@ export function KnowledgeExplorer({
             {compareWorkflow(graph, row.workflow.id).length ? (
               compareWorkflow(graph, row.workflow.id).map((c) => (
                 <article key={c.workflow.id}>
-                  <p>比較の向き：{row.workflow.name} → {c.workflow.name}</p>
+                  <p>
+                    比較の向き：{row.workflow.name} → {c.workflow.name}
+                  </p>
                   <button
                     onClick={() => {
                       setScope(c.workflow.scenario ?? "current");
@@ -699,7 +726,7 @@ export function KnowledgeExplorer({
                     {c.added.map((n) => n.label).join(" / ") || "なし"}
                   </p>
                   <p>
-                    System: {c.beforeSystems.map((n) => n.label).join(" / ")} →{" "}
+                    道具: {c.beforeSystems.map((n) => n.label).join(" / ")} →{" "}
                     {c.afterSystems.map((n) => n.label).join(" / ")}
                   </p>
                   <p>
@@ -790,6 +817,13 @@ export function KnowledgeExplorer({
           <p>
             業務システムだけでなく、Teams・Excel・認証・ネットワークも会社を動かす道具です。ひとつ選ぶと、誰がどの仕事で使い、何と情報をやり取りしているかがわかります。
           </p>
+          {query && (
+            <p className="kg-context">
+              {namedSystems.size
+                ? "名前・説明に一致する道具を表示しています。"
+                : "検索に合う仕事で使われる道具を表示しています。"}
+            </p>
+          )}
           <label>
             道具の種類
             <select
@@ -833,7 +867,7 @@ export function KnowledgeExplorer({
           </div>
           {graph.knowledge && (
             <details>
-              <summary>System分類を追加・変更する</summary>
+              <summary>システム・道具の分類を追加・変更する</summary>
               {graph.knowledge.categories.map((c) => (
                 <label className="kg-edit-field" key={c.id}>
                   分類名
@@ -1074,7 +1108,7 @@ export function KnowledgeExplorer({
           )}
           {asset.kind === "system" && graph.knowledge && (
             <details>
-              <summary>Systemの役割・管理部署・基盤依存を編集</summary>
+              <summary>システムの役割・管理部署・基盤依存を編集</summary>
               {(["purpose", "owner"] as const).map((key, i) => (
                 <label className="kg-edit-field" key={key}>
                   {["会社での役割", "管理部署"][i]}
@@ -1106,7 +1140,7 @@ export function KnowledgeExplorer({
                 </label>
               ))}
               <label className="kg-edit-field">
-                依存先System
+                依存先システム
                 <select
                   value={dependencyId}
                   onChange={(e) => setDependencyId(e.target.value)}
@@ -1196,7 +1230,7 @@ export function KnowledgeExplorer({
           {impact.dependents.map(assetButton)}
           <p>
             間接影響: {impact.indirect.length}
-            業務。Systemの明示的な依存を辿った範囲です。
+            業務。システムの明示的な依存を辿った範囲です。
           </p>
           {impact.indirect.length > 0 && (
             <details>

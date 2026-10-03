@@ -32,7 +32,7 @@ export function KnowledgeEditor({
     onApply({ ...graph, knowledge: next });
   return (
     <details className="kg-editor">
-      <summary>会社の活動・Capabilityを登録 / 業務を分類する</summary>
+      <summary>会社の活動・仕事の種類を登録 / 業務を分類する</summary>
       <label className="kg-edit-field">
         会社名
         <input

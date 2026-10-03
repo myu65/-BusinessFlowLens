@@ -2,14 +2,13 @@
 
 Turn business interviews into a reviewable map of **workflows, systems, and data**.
 
-BusinessFlowLens opens with a company knowledge graph and supports six concrete jobs:
+BusinessFlowLens opens with a memo. Write what you know, check the proposed flow, correct or add to it, and save what you have confirmed. A workflow name and complete understanding are not prerequisites.
 
-0. **Understand the company** — explore Activity → Capability → Workflow → Process/Task, or start from System Landscape and follow direct use and declared platform dependencies.
-1. **Business input** — create a new workflow or edit an existing workflow's name, description, source notes, and AI-derived structure.
-2. **Workflow** — understand one business workflow step-by-step, including department, responsible person, systems, and data touched at each step.
-3. **Data flow** — understand what business data moves between systems, how it moves, and whether the transfer is automatic or manual.
-4. **System / Data impact** — select a shared asset and see which workflows, departments, people, and steps depend on it.
-5. **Cross-business overview** — compare workflows through shared assets and a workflow × asset usage matrix instead of a spaghetti graph.
+The main navigation has three entry points:
+
+1. **話を入力** — write business notes, preview the structure before saving, and correct the selected step's action, person and result. Original evidence, uncertainty and human changes remain visible.
+2. **会社の全体像** — see the saved work and registered handoffs, then explore activities, types of work, workflows and the people, tools and information they involve. Unclassified stories are visible too.
+3. **詳しく調べる** — read workflows and information flows, investigate system/data dependencies, or compare workflows in a bounded usage matrix. These views use the structure accumulated through input.
 
 ## Why this model
 
@@ -90,24 +89,29 @@ The resolver prefers `uncertain` over a false merge. Uncertain assets remain vis
 
 ### Save semantics
 
-`/api/extract` proposes an updated working model; it never modifies the canonical graph directly. When the user chooses **業務構造を保存**, `/api/apply` performs canonical System/Data resolution, updates the workflow structure, persists current state, and appends a workflow Revision.
+`/api/extract` proposes an updated working model; it never modifies the canonical graph directly. When the user chooses **この流れを保存**, `/api/apply` performs canonical System/Data resolution, updates the workflow structure, persists current state, and appends a workflow Revision.
 
 ## UI
 
-### 業務入力
+### 話を入力
 
 This is the create/update workspace for business workflows.
 
-- create a new workflow
-- select an existing workflow
-- edit its workflow name and description
+- start with an unnamed, incomplete business memo
+- return to a saved story or draft through the optional picker
+- adjust its workflow name and scenario when needed
 - edit or replace the source interview/business notes
 - see the already-saved workflow structure immediately
-- edit the current structure directly
+- see three steps at a time and read one person's action, tools, evidence and information change
+- correct the current structure directly, with technical fields behind a disclosure
+- append a continuation after a step without rewriting the earlier source
+- review added, corrected and excluded steps before saving
 - ask AI to update the current structure from new notes
 - answer follow-up questions and refine the current model
 - save the result back to the same Workflow ID
 - browse historical revisions with original notes, summary, structure, follow-up Q&A, update time, and updater
+
+On narrow screens, writing and reviewing are separate tabs; the memo is preserved when switching. Unknown actors, outcomes and connections remain unconfirmed. Without an AI connection, the simple extractor's proposed flow and extraction limits are labelled explicitly. See [the novice experience validation](docs/novice-experience-validation.md) for the tested inputs, operations and limits.
 
 Updating an existing workflow replaces that workflow's Process structure and workflow-scoped relationships while preserving shared canonical System/Data assets and other workflows.
 

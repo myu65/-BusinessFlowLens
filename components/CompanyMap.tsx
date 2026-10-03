@@ -1,145 +1,277 @@
 "use client";
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { LensGraph } from "@/lib/graph";
-import { companyConnections } from "@/lib/knowledge-guide";
+import { knowledgeIndex, type KnowledgeScope } from "@/lib/knowledge";
+import { companyConnections, overviewPath } from "@/lib/knowledge-guide";
 
 export function CompanyMap({
   graph,
+  scope = "current",
   workflowIds,
   onWorkflow,
   onActivity,
+  onSystem,
 }: {
   graph: LensGraph;
+  scope?: KnowledgeScope;
   workflowIds: string[];
   onWorkflow: (id: string) => void;
   onActivity?: (id: string) => void;
+  onSystem?: (id: string) => void;
 }) {
-  const activities = (graph.knowledge?.activities ?? []).filter((a) =>
-    a.capabilities.some((c) =>
-      c.workflowIds.some((id) => workflowIds.includes(id)),
-    ),
+  const index = useMemo(() => knowledgeIndex(graph, scope), [graph, scope]);
+  const visible = new Set(workflowIds);
+  const activities = index.activities.filter((a) =>
+    a.rows.some((r) => visible.has(r.workflow.id)),
   );
-  const [selectedId, setSelected] = useState(
-    activities.find((a) => a.name.includes("受注"))?.id ?? activities[0]?.id,
+  const [selectedId, setSelected] = useState("");
+  const detail = useRef<HTMLDivElement>(null);
+  const connections = useMemo(
+    () => companyConnections(graph, workflowIds),
+    [graph, workflowIds],
   );
-  const selected =
-    activities.find((a) => a.id === selectedId) ??
-    activities.find((a) => a.name.includes("受注")) ??
-    activities[0];
-  if (!selected) return <p>活動と業務の関係はまだ登録されていません。</p>;
-  const connections = companyConnections(graph, workflowIds);
-  const incoming = connections.filter((c) => c.target === selected.name);
-  const outgoing = connections.filter((c) => c.source === selected.name);
-  const sampleIds = selected.capabilities
-    .flatMap((c) => c.workflowIds)
-    .filter((id) => workflowIds.includes(id));
-  const samples = graph.workflows.filter((w) => sampleIds.includes(w.id));
-  const departmentNames = [
-    ...new Set(
-      graph.nodes
-        .filter(
-          (n) => n.kind === "process" && sampleIds.includes(n.workflowId!),
-        )
-        .map((n) => n.department)
-        .filter(Boolean),
-    ),
+  const example =
+    graph.workflows.find(
+      (w) => visible.has(w.id) && w.name.includes("受注登録"),
+    ) ?? graph.workflows.find((w) => visible.has(w.id));
+  const start = activities.find((a) =>
+    a.rows.some((r) => r.workflow.id === example?.id),
+  );
+  const path = overviewPath(connections, start?.id);
+  const pathIds = path.length
+    ? [path[0].sourceId, ...path.map((e) => e.targetId)]
+    : [];
+  const others = activities.filter((a) => !pathIds.includes(a.id));
+  const selected = activities.find((a) => a.id === selectedId);
+  const rows = selected?.rows.filter((r) => visible.has(r.workflow.id)) ?? [];
+  const systems = [
+    ...new Map(
+      rows.flatMap((r) =>
+        r.assets
+          .filter((n) => n.kind === "system")
+          .map((n) => [n.id, n] as const),
+      ),
+    ).values(),
   ];
-  const related = (
-    items: typeof connections,
-    direction: "source" | "target",
-  ) => (
-    <>
-      {items.slice(0, 3).map((c) => (
-        <article key={`${c.source}:${c.target}`}>
-          <button
-            onClick={() =>
-              setSelected(activities.find((a) => a.name === c[direction])!.id)
-            }
-          >
-            {c[direction]} {direction === "target" ? "→" : "←"}
-          </button>
-          <p>{c.description}</p>
-          <button onClick={() => onWorkflow(c.workflowId)}>
-            受渡しの実例を見る
-          </button>
-        </article>
-      ))}
-      {!items.length && <p>この範囲では受渡し未登録</p>}
-      {items.length > 3 && (
-        <details>
-          <summary>ほか{items.length - 3}件のつながり</summary>
-          {items.slice(3).map((c) => (
-            <p key={`${c.source}:${c.target}`}>
-              <button
-                onClick={() =>
-                  setSelected(
-                    activities.find((a) => a.name === c[direction])!.id,
-                  )
-                }
-              >
-                {c[direction]}
-              </button>{" "}
-              · {c.description}
-            </p>
-          ))}
-        </details>
-      )}
-    </>
-  );
-  return (
-    <section className="kg-company-map" aria-label="会社の鳥瞰図">
-      <h3>会社の鳥瞰：ひとつの活動と、その前後を見る</h3>
-      <p>
-        すべての線を一度に読む必要はありません。活動を一つ選ぶと、何を受け取り、誰が働き、次に何を渡すかが見えます。
-      </p>
-      <div
-        className="kg-map-selector"
-        role="group"
-        aria-label="鳥瞰で注目する活動"
+  const choose = (id: string) => {
+    setSelected(id);
+    requestAnimationFrame(() =>
+      detail.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }),
+    );
+  };
+  const card = (id: string, compact = false) => {
+    const a = activities.find((a) => a.id === id)!;
+    const rows = a.rows.filter((r) => visible.has(r.workflow.id));
+    const departments = [...new Set(rows.flatMap((r) => r.departments))];
+    return (
+      <button
+        className={
+          compact
+            ? "company-activity company-activity--compact"
+            : "company-activity"
+        }
+        aria-pressed={selectedId === id}
+        onClick={() => choose(id)}
       >
-        {activities.map((a) => (
-          <button
-            key={a.id}
-            aria-pressed={selected.id === a.id}
-            onClick={() => setSelected(a.id)}
-          >
-            {a.name}
-          </button>
-        ))}
-      </div>
-      <div className="kg-map-flow">
-        <section>
-          <h4>① 前の活動から受け取る</h4>
-          {related(incoming, "source")}
-        </section>
-        <section className="kg-map-center">
-          <h4>② ここで行う仕事</h4>
-          <h3>{selected.name}</h3>
-          <p>{selected.description}</p>
-          <p>担当：{departmentNames.join(" / ") || "未登録"}</p>
-          <p>
-            {selected.capabilities.length}種類の仕事 / {samples.length}業務
-          </p>
-          {onActivity && (
+        <strong>{a.name}</strong>
+        <span>
+          {rows.length}業務 · {departments[0] ?? "担当未登録"}
+          {departments.length > 1 ? ` ほか${departments.length - 1}部署` : ""}
+        </span>
+      </button>
+    );
+  };
+  const related = (direction: "source" | "target") => {
+    const edges = connections.filter((c) =>
+      direction === "source"
+        ? c.targetId === selectedId
+        : c.sourceId === selectedId,
+    );
+    return (
+      <>
+        {edges.slice(0, 3).map((c) => (
+          <article key={`${c.sourceId}:${c.targetId}`}>
             <button
-              className="kg-primary"
-              onClick={() => onActivity(selected.id)}
+              onClick={() =>
+                choose(direction === "source" ? c.sourceId : c.targetId)
+              }
             >
-              この活動の仕事を詳しく見る →
+              {c[direction]} {direction === "target" ? "→" : "←"}
             </button>
-          )}
-          {!onActivity &&
-            samples.slice(0, 3).map((w) => (
-              <button key={w.id} onClick={() => onWorkflow(w.id)}>
-                {w.name} →
-              </button>
+            <p>{c.description}</p>
+            {c.status !== "confirmed" && <small>受渡しの根拠は要確認</small>}
+            <button
+              className="company-example-link"
+              onClick={() => onWorkflow(c.workflowId)}
+            >
+              受渡しの実例を見る →
+            </button>
+          </article>
+        ))}
+        {!edges.length && (
+          <p className="input-unconfirmed">この範囲では受渡しが未登録です。</p>
+        )}
+        {edges.length > 3 && (
+          <details>
+            <summary>ほか{edges.length - 3}件の受渡し</summary>
+            {edges.slice(3).map((c) => (
+              <p key={`${c.sourceId}:${c.targetId}`}>
+                <button
+                  onClick={() =>
+                    choose(direction === "source" ? c.sourceId : c.targetId)
+                  }
+                >
+                  {c[direction]}
+                </button>{" "}
+                · {c.description}
+              </p>
             ))}
-        </section>
-        <section>
-          <h4>③ 次の活動へ渡す</h4>
-          {related(outgoing, "target")}
-        </section>
+          </details>
+        )}
+      </>
+    );
+  };
+  if (!activities.length) return null;
+  return (
+    <section className="company-overview-map" aria-label="会社の鳥瞰図">
+      <div className="company-map-heading">
+        <div>
+          <h2>仕事は、どうつながっている？</h2>
+          <p>活動を選ぶと、前後の仕事・担当部署・使う道具が見えます。</p>
+        </div>
+        <span>{activities.length}の活動</span>
       </div>
+      {!!path.length && (
+        <>
+          <p className="company-map-caption">
+            登録された受渡しの一例{" "}
+            <span>
+              矢印は、登録された活動間の受渡しです。
+              {path.some((c) => c.status !== "confirmed") &&
+                " 点線の矢印（⇢）は要確認です。"}
+            </span>
+          </p>
+          <div
+            className="company-value-path"
+            aria-label="登録された活動間の受渡し"
+          >
+            {pathIds.map((id, i) => (
+              <div key={id} className="company-path-stop">
+                {card(id)}
+                {i < pathIds.length - 1 && (
+                  <button
+                    className="company-path-arrow"
+                    aria-label={`${path[i].source}から${path[i].target}への受渡しを見る${path[i].status !== "confirmed" ? "（要確認）" : ""}`}
+                    title={path[i].description}
+                    onClick={() => choose(id)}
+                  >
+                    {path[i].status === "confirmed" ? "→" : "⇢"}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      {!!others.length && (
+        <>
+          <h3 className="company-other-heading">
+            {path.length ? "会社を構成する、ほかの活動" : "会社の活動"}
+          </h3>
+          <div className="company-other-activities">
+            {others.map((a) => (
+              <div key={a.id}>{card(a.id, true)}</div>
+            ))}
+          </div>
+        </>
+      )}
+      {selected && (
+        <div
+          ref={detail}
+          className="company-activity-detail"
+          aria-label="選んだ活動と前後の仕事"
+        >
+          <div className="company-detail-title">
+            <h3>{selected.name}</h3>
+            <button
+              onClick={() => {
+                setSelected("");
+                window.scrollTo({ top: 0, behavior: "smooth" });
+              }}
+            >
+              全体の見渡しに戻る
+            </button>
+          </div>
+          <div className="company-detail-flow">
+            <section>
+              <h4>前の活動から受け取る</h4>
+              {related("source")}
+            </section>
+            <section className="company-detail-center">
+              <h4>ここで行う仕事</h4>
+              <p>{selected.description}</p>
+              <p>
+                担当：
+                {[...new Set(rows.flatMap((r) => r.departments))].join(" / ") ||
+                  "未登録"}
+              </p>
+              <p>
+                {rows.length}業務 ·{" "}
+                {
+                  selected.capabilities.filter((c) =>
+                    c.rows.some((r) => visible.has(r.workflow.id)),
+                  ).length
+                }
+                種類の仕事
+              </p>
+              <p className="company-tools-label">使うシステム・道具</p>
+              <div
+                className="company-system-chips"
+                aria-label="この活動を支える道具"
+              >
+                {systems.slice(0, 4).map((n) => (
+                  <button key={n.id} onClick={() => onSystem?.(n.id)}>
+                    {n.label}
+                  </button>
+                ))}
+              </div>
+              {systems.length > 4 && (
+                <details>
+                  <summary>ほか{systems.length - 4}道具も見る</summary>
+                  <div className="company-system-chips">
+                    {systems.slice(4).map((n) => (
+                      <button key={n.id} onClick={() => onSystem?.(n.id)}>
+                        {n.label}
+                      </button>
+                    ))}
+                  </div>
+                </details>
+              )}
+              {onActivity && (
+                <button
+                  className="kg-primary"
+                  onClick={() => onActivity(selected.id)}
+                >
+                  この活動の仕事を見る →
+                </button>
+              )}
+              {!onActivity &&
+                rows.slice(0, 3).map((r) => (
+                  <button
+                    key={r.workflow.id}
+                    onClick={() => onWorkflow(r.workflow.id)}
+                  >
+                    {r.workflow.name} →
+                  </button>
+                ))}
+            </section>
+            <section>
+              <h4>次の活動へ渡す</h4>
+              {related("target")}
+            </section>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

@@ -1,5 +1,12 @@
 "use client";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   buildWorkflowReviewFromGraph,
   getWorkflowProcesses,
@@ -11,12 +18,15 @@ import {
 import {
   diffReviews,
   editReviewStep,
+  insertNoteAfterEvidence,
   NEW_MEMO_ID,
   previewReviewGraph,
   type InputDraft,
   transcriptsForSave,
 } from "@/lib/review-workbench";
-import { WorkflowReading } from "./WorkflowReading";
+import { InputReviewFlow } from "./InputReviewFlow";
+
+const REVIEW_PAGE_SIZE = 3;
 
 type AdvancedActions = {
   draft: InputDraft;
@@ -41,6 +51,7 @@ export function InputWorkbench({
   renderAdvanced,
   focusedStepId,
   onFocusStep,
+  onExplore,
 }: {
   projectId: string;
   graph: LensGraph;
@@ -60,6 +71,7 @@ export function InputWorkbench({
   renderAdvanced?: (actions: AdvancedActions) => ReactNode;
   focusedStepId?: string;
   onFocusStep?: (workflowId: string, stepId: string) => void;
+  onExplore?: () => void;
 }) {
   const key = selectedId || NEW_MEMO_ID;
   const draft = drafts[key];
@@ -77,7 +89,13 @@ export function InputWorkbench({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [edit, setEdit] = useState<ExtractionReviewStep | null>(null);
+  const editorRef = useRef<HTMLFieldSetElement>(null);
+  const focusRef = useRef<HTMLDivElement>(null);
+  const stripRef = useRef<HTMLElement>(null);
+  const [lastSavedId, setLastSavedId] = useState("");
   const [advanced, setAdvanced] = useState(false);
+  const [mobilePane, setMobilePane] = useState<"note" | "flow">("note");
+  const [noteQuery, setNoteQuery] = useState("");
   const [addition, setAddition] = useState("");
   const [target, setTarget] = useState("");
   const [targetStep, setTargetStep] = useState("");
@@ -107,7 +125,11 @@ export function InputWorkbench({
   latest.current = { graph, memo, draft, transcripts, savedTranscripts, key };
   useEffect(() => {
     setStepKey(focusedStepId?.split(":").at(-1) ?? "");
-    setStepPage(0);
+    const index =
+      review?.steps.findIndex(
+        (s) => s.stepKey === focusedStepId?.split(":").at(-1),
+      ) ?? -1;
+    setStepPage(Math.floor(Math.max(0, index) / REVIEW_PAGE_SIZE));
     setEdit(null);
     setError("");
     setAdvanced(false);
@@ -115,6 +137,17 @@ export function InputWorkbench({
     setAddition("");
     setRevisionDetail(null);
   }, [key]);
+  useEffect(() => {
+    if (edit) {
+      editorRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+      editorRef.current
+        ?.querySelector("textarea")
+        ?.focus({ preventScroll: true });
+    }
+  }, [edit?.stepKey]);
   useEffect(() => {
     if (!saved) {
       setRevisions([]);
@@ -142,15 +175,12 @@ export function InputWorkbench({
   );
   const steps = [...(review?.steps ?? [])].sort((a, b) => a.order - b.order);
   const selected = steps.find((s) => s.stepKey === stepKey) ?? steps[0];
-  const process = selected
-    ? getWorkflowProcesses(preview, workflow!.id).find(
-        (n) => n.canonicalKey.split(":").at(-1) === selected.stepKey,
-      )
-    : undefined;
   const diff = review
     ? diffReviews(draft?.baseline ?? currentReview, review)
     : null;
-  const stale = !!draft && draft.sourceNotes !== memo;
+  const stale = draft
+    ? draft.sourceNotes !== memo
+    : !!saved && (savedTranscripts[key] ?? "") !== memo;
   const known = graph.workflows.filter(
     (w) =>
       (w.scenario ?? "current") === (workflow?.scenario ?? "current") &&
@@ -164,7 +194,7 @@ export function InputWorkbench({
           review: nextReview,
           baseline: currentReview,
           provider: "human-edit",
-          sourceNotes: memo,
+          sourceNotes: saved ? (savedTranscripts[key] ?? "") : memo,
           answerHistory: saved?.reviewContext?.followUpAnswers ?? [],
           answers: {},
         };
@@ -172,12 +202,15 @@ export function InputWorkbench({
     onDraft(key, ensureDraft(nextReview));
   const choose = (s: ExtractionReviewStep) => {
     setStepKey(s.stepKey);
-    setStepPage(Math.floor(steps.indexOf(s) / 7));
+    setStepPage(Math.floor(steps.indexOf(s) / REVIEW_PAGE_SIZE));
     setEdit(null);
     const p = getWorkflowProcesses(preview, workflow!.id).find(
       (n) => n.canonicalKey.split(":").at(-1) === s.stepKey,
     );
     if (p) onFocusStep?.(workflow!.id, p.id);
+    requestAnimationFrame(() =>
+      focusRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    );
   };
   async function organize(
     answers = draft?.answerHistory ??
@@ -225,14 +258,26 @@ export function InputWorkbench({
         answerHistory: answers,
       };
       onDraft(requestKey, next);
+      setMobilePane("flow");
       if (requestKey === latest.current.key) {
         const changes = diffReviews(before, next.review);
         const focus =
-          changes.added[0] ?? changes.changed[0]?.after ?? next.review.steps[0];
+          changes.added[0] ??
+          changes.changed[0]?.after ??
+          next.review.steps.find((s) => s.stepKey === selected?.stepKey) ??
+          next.review.steps[0];
         if (focus) {
           setStepKey(focus.stepKey);
-          setStepPage(Math.floor(next.review.steps.indexOf(focus) / 7));
+          setStepPage(
+            Math.floor(next.review.steps.indexOf(focus) / REVIEW_PAGE_SIZE),
+          );
         }
+        requestAnimationFrame(() =>
+          (before ? focusRef.current : stripRef.current)?.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+          }),
+        );
       }
     } catch (cause) {
       setError(
@@ -277,6 +322,13 @@ export function InputWorkbench({
       }
       onDraft(key, null);
       onSelect(draft.workflow.id);
+      setLastSavedId(draft.workflow.id);
+      requestAnimationFrame(() =>
+        stripRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        }),
+      );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "保存に失敗しました。");
     } finally {
@@ -295,6 +347,9 @@ export function InputWorkbench({
     );
     update(editReviewStep(review, selected.stepKey, patch));
     setEdit(null);
+    requestAnimationFrame(() =>
+      focusRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    );
   }
   function removeStep() {
     if (!review || !selected) return;
@@ -348,58 +403,120 @@ export function InputWorkbench({
     await organize([...draft.answerHistory, ...answers]);
   }
   return (
-    <section className="input-workbench" aria-label="話を入力して構造を育てる">
+    <section
+      className="input-workbench"
+      aria-label="話を入力して構造を育てる"
+      data-pane={mobilePane}
+    >
       <header className="page-header">
         <div>
-          <div className="eyebrow">INPUT → STRUCTURE → REFINE</div>
-          <h1>話を入力して、つながりを確かめる</h1>
+          <h1>仕事の話を、流れにする</h1>
           <p>
-            業務名や範囲が決まっていなくても始められます。自分の話がどこに反映されたか、保存前から確認できます。
+            まずは知っていることをそのまま書いてください。流れを見ながら、足したり直したりできます。
           </p>
         </div>
       </header>
+      <nav className="input-mobile-tabs" aria-label="メモと流れの表示切替">
+        <button
+          aria-pressed={mobilePane === "note"}
+          onClick={() => setMobilePane("note")}
+        >
+          1 話を書く
+        </button>
+        <button
+          aria-pressed={mobilePane === "flow"}
+          onClick={() => setMobilePane("flow")}
+        >
+          2 流れを確かめる{draft ? " · 保存前" : ""}
+        </button>
+      </nav>
       <div className="input-workbench-grid">
         <section className="input-note-pane">
-          <label className="kg-edit-field">
-            話を追加する場所
-            <select
-              value={key}
-              onChange={(e) => onSelect(e.target.value)}
-              disabled={busy}
-            >
-              <option value={NEW_MEMO_ID}>
-                新しい話から始める（業務名は後から）
-              </option>
-              {draft && !saved && key !== NEW_MEMO_ID && (
-                <option value={key}>{draft.workflow.name} · 保存前</option>
-              )}
-              {graph.workflows.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          {Object.entries(drafts)
-            .filter(([id]) => id !== key)
-            .map(([id, d]) => (
+          <div className="input-note-heading">
+            <h2>
+              <span className="input-section-number">1</span> 話を書く
+            </h2>
+            {key !== NEW_MEMO_ID && (
               <button
-                key={id}
                 className="button-secondary"
-                onClick={() => onSelect(id)}
+                disabled={busy}
+                onClick={() => {
+                  onSelect(NEW_MEMO_ID);
+                  setMobilePane("note");
+                }}
               >
-                保存前の候補へ戻る：{d.workflow.name}
+                新しい話を書く
               </button>
-            ))}
+            )}
+          </div>
+          <p className="input-note-context">
+            {key === NEW_MEMO_ID
+              ? "名前や業務の範囲は、後から決められます。"
+              : workflow?.name}
+          </p>
+          {(graph.workflows.length > 0 ||
+            Object.keys(drafts).some((id) => id !== key)) && (
+            <details className="input-switch-note">
+              <summary>保存した話・下書きに戻る</summary>
+              <label className="kg-edit-field">
+                話を探す
+                <input
+                  value={noteQuery}
+                  onChange={(e) => setNoteQuery(e.target.value)}
+                  placeholder="仕事の名前で検索"
+                />
+              </label>
+              <label className="kg-edit-field">
+                話を追加する場所
+                <select
+                  value={key}
+                  onChange={(e) => onSelect(e.target.value)}
+                  disabled={busy}
+                >
+                  <option value={NEW_MEMO_ID}>
+                    新しい話から始める（業務名は後から）
+                  </option>
+                  {draft && !saved && key !== NEW_MEMO_ID && (
+                    <option value={key}>{draft.workflow.name} · 保存前</option>
+                  )}
+                  {saved && <option value={saved.id}>{saved.name}</option>}
+                  {graph.workflows
+                    .filter(
+                      (w) => w.id !== saved?.id && w.name.includes(noteQuery),
+                    )
+                    .slice(0, 20)
+                    .map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <small>検索に合う話を20件まで表示します。</small>
+              {Object.entries(drafts)
+                .filter(([id]) => id !== key)
+                .map(([id, d]) => (
+                  <button
+                    key={id}
+                    className="button-secondary"
+                    onClick={() => onSelect(id)}
+                  >
+                    保存前の候補へ戻る：{d.workflow.name}
+                  </button>
+                ))}
+            </details>
+          )}
           <label className="kg-edit-field input-main-note">
-            業務についての話
+            仕事についてのメモ
             <textarea
               disabled={busy}
               value={memo}
               onChange={(e) =>
                 onTranscripts({ ...transcripts, [key]: e.target.value })
               }
-              placeholder="例：注文がメールで届く。担当者がExcelで確認してSAPへ入力する。不足した場合は別の部署に相談している。まだ担当や範囲は曖昧…"
+              placeholder={
+                "例えば…\n注文がメールで届く。\n担当者がExcelで確認し、SAPへ入力する。\n足りないときは、生産管理に相談する。\n\n箇条書きでも、まだ曖昧な話でも大丈夫です。"
+              }
             />
           </label>
           <button
@@ -407,15 +524,25 @@ export function InputWorkbench({
             disabled={busy || !memo.trim()}
             onClick={() => organize()}
           >
-            {busy
-              ? "処理中…"
-              : review
-                ? "本文を読み直して構造を更新"
-                : "話を構造にする"}
+            {busy ? "処理中…" : review ? "変更を流れに反映 →" : "流れを見る →"}
           </button>
           <p className="flow-explanation">
-            原文は残ります。AI未接続時は簡易抽出です。分からないことは「未確認」として補足できます。
+            保存前に確認・訂正できます。元のメモも残ります。
           </p>
+          {!memo.trim() && !review && (
+            <button
+              className="input-text-button"
+              onClick={() =>
+                onTranscripts({
+                  ...transcripts,
+                  [key]:
+                    "注文がメールで届く。\n営業担当がExcelで注文内容を確認する。\n営業担当がSAPへ受注を入力する。",
+                })
+              }
+            >
+              例文を入れて試す
+            </button>
+          )}
           {workflow && (
             <details>
               <summary>業務名・表示する状態を整える（任意）</summary>
@@ -535,32 +662,87 @@ export function InputWorkbench({
         </section>
         <section className="input-structure-pane">
           <div className="input-structure-header">
-            <h2>
-              {draft
-                ? "保存前の構造"
-                : review
-                  ? "入力から蓄積した構造"
-                  : "話を入れると、ここに構造が見えます"}
-            </h2>
+            <div>
+              <h2>
+                <span className="input-section-number">2</span> 流れを確かめる
+              </h2>
+              <p>
+                {review
+                  ? `${steps.length}手順 · ${draft ? "保存前の候補" : "保存済み"}`
+                  : "入力すると、人・道具・情報のつながりが見えます。"}
+              </p>
+            </div>
             {review && (
-              <span>
-                {steps.length}手順 · {draft?.provider ?? "保存済み"}
-              </span>
+              <button
+                className="button-primary"
+                disabled={
+                  !draft ||
+                  busy ||
+                  stale ||
+                  !!edit ||
+                  !draft.workflow.name.trim()
+                }
+                onClick={save}
+              >
+                {busy
+                  ? "処理中…"
+                  : edit
+                    ? "訂正を反映してから保存"
+                    : draft
+                      ? "3 この流れを保存"
+                      : "保存済み"}
+              </button>
             )}
           </div>
+          {error && (
+            <p role="alert" className="error-message input-mobile-error">
+              {error}
+            </p>
+          )}
+          {!draft && !stale && lastSavedId === workflow?.id && (
+            <p role="status" className="input-saved-notice">
+              保存しました。原文と流れが、会社の全体像にも加わっています。
+            </p>
+          )}
           {stale && (
             <p role="status" className="input-stale">
-              本文が変わりました。現在の候補は前の本文によるものです。「本文を読み直して構造を更新」で差分を確認してください。
+              メモに変更があります。「変更を流れに反映」で、表示中の流れを更新してください。
             </p>
           )}
           {!review && (
-            <div className="input-empty-structure">
+            <div
+              className="input-empty-structure"
+              aria-label="入力後の見え方の例"
+            >
+              <span className="input-example-label">
+                例えば、こんな流れが見えます
+              </span>
+              <ol className="input-example-flow">
+                <li>
+                  <small>メール</small>
+                  <strong>注文が届く</strong>
+                  <span>注文の内容</span>
+                </li>
+                <li>
+                  <small>担当者 · Excel</small>
+                  <strong>内容を確認する</strong>
+                  <span>確認した内容</span>
+                </li>
+                <li>
+                  <small>担当者 · SAP</small>
+                  <strong>受注を入力する</strong>
+                  <span>次の仕事へ</span>
+                </li>
+              </ol>
               <p>
-                ① 話を入力する → ② 流れとして見る → ③ その場で補足・訂正する
+                「誰が」「何を使って」「何を決めるか」を、手順ごとに確かめられます。
               </p>
-              <p>
-                手順・人・道具・情報と、判断によって何が変わるかを一緒に確認します。
-              </p>
+              <div className="input-example-hint">
+                <strong>すべてを知っていなくても大丈夫</strong>
+                <p>
+                  書かれていない担当や判断は「未確認」に。流れを見てから補足できます。
+                </p>
+              </div>
             </div>
           )}
           {review && selected && (
@@ -568,10 +750,8 @@ export function InputWorkbench({
               {draft && diff && (
                 <details className="input-diff">
                   <summary>
-                    反映箇所 · 追加{diff.added.length} / 変更
-                    {diff.changed.length} / 除外{diff.removed.length} / 接続＋
-                    {diff.addedConnections.length} −
-                    {diff.removedConnections.length}
+                    今回の反映：追加 {diff.added.length}件 · 訂正{" "}
+                    {diff.changed.length}件 · 除外 {diff.removed.length}件
                   </summary>
                   <div className="input-diff-items">
                     {diff.added.slice(0, 5).map((s) => (
@@ -609,100 +789,164 @@ export function InputWorkbench({
                   </details>
                 </details>
               )}
-              <nav className="input-step-strip" aria-label="入力が作った手順">
-                {steps.slice(stepPage * 7, (stepPage + 1) * 7).map((s) => (
-                  <button
-                    key={s.stepKey}
-                    className={
-                      draft && diff?.added.some((n) => n.stepKey === s.stepKey)
-                        ? "input-step--added"
-                        : draft &&
-                            diff?.changed.some(
-                              (n) => n.after.stepKey === s.stepKey,
-                            )
-                          ? "input-step--changed"
-                          : ""
-                    }
-                    aria-pressed={selected.stepKey === s.stepKey}
-                    onClick={() => choose(s)}
-                  >
-                    <small>
-                      {s.order} ·{" "}
-                      {draft && diff?.added.some((n) => n.stepKey === s.stepKey)
-                        ? "追加 · "
-                        : draft &&
-                            diff?.changed.some(
-                              (n) => n.after.stepKey === s.stepKey,
-                            )
-                          ? "訂正 · "
-                          : ""}
-                      {s.meaning?.condition ||
-                        (s.certainty === "explicit" ? "原文に明示" : "推定")}
-                    </small>
-                    <strong>{s.name}</strong>
-                    {s.meaning?.result && <span>→ {s.meaning.result}</span>}
-                  </button>
-                ))}
+              <nav
+                ref={stripRef}
+                className="input-step-strip"
+                aria-label="入力が作った手順"
+              >
+                {steps
+                  .slice(
+                    stepPage * REVIEW_PAGE_SIZE,
+                    (stepPage + 1) * REVIEW_PAGE_SIZE,
+                  )
+                  .map((s, i, visible) => (
+                    <Fragment key={s.stepKey}>
+                      <button
+                        key={s.stepKey}
+                        className={
+                          draft &&
+                          diff?.added.some((n) => n.stepKey === s.stepKey)
+                            ? "input-step--added"
+                            : draft &&
+                                diff?.changed.some(
+                                  (n) => n.after.stepKey === s.stepKey,
+                                )
+                              ? "input-step--changed"
+                              : ""
+                        }
+                        aria-pressed={selected.stepKey === s.stepKey}
+                        onClick={() => choose(s)}
+                      >
+                        <small>
+                          {s.order} ·{" "}
+                          {draft &&
+                          diff?.added.some((n) => n.stepKey === s.stepKey)
+                            ? "追加 · "
+                            : draft &&
+                                diff?.changed.some(
+                                  (n) => n.after.stepKey === s.stepKey,
+                                )
+                              ? "訂正 · "
+                              : ""}
+                          {s.meaning?.halt
+                            ? "停止・保留"
+                            : s.actor || s.executingSystem || "担当は未確認"}
+                        </small>
+                        <strong>{s.name}</strong>
+                        {s.meaning?.condition && (
+                          <span>条件：{s.meaning.condition}</span>
+                        )}
+                      </button>
+                      {i < visible.length - 1 && (
+                        <span className="input-strip-connection">
+                          {review.transitions.some(
+                            (t) =>
+                              t.fromStepKey === s.stepKey &&
+                              t.toStepKey === visible[i + 1].stepKey,
+                          ) ? (
+                            <>
+                              <span>
+                                {review.transitions.find(
+                                  (t) =>
+                                    t.fromStepKey === s.stepKey &&
+                                    t.toStepKey === visible[i + 1].stepKey,
+                                )?.condition
+                                  ? "条件つき"
+                                  : "次へ"}
+                                {review.transitions.find(
+                                  (t) =>
+                                    t.fromStepKey === s.stepKey &&
+                                    t.toStepKey === visible[i + 1].stepKey,
+                                )?.certainty !== "confirmed" && (
+                                  <>
+                                    <br />
+                                    要確認
+                                  </>
+                                )}
+                              </span>
+                              <strong>→</strong>
+                            </>
+                          ) : (
+                            <>
+                              <span>
+                                接続は
+                                <br />
+                                未確認
+                              </span>
+                              <strong>···</strong>
+                            </>
+                          )}
+                        </span>
+                      )}
+                    </Fragment>
+                  ))}
               </nav>
-              {steps.length > 7 && (
+              {draft && (
+                <p className="input-generation-note">
+                  {draft.provider.startsWith("local")
+                    ? "簡易抽出による候補です。"
+                    : draft.provider === "human-edit"
+                      ? "人が補足・訂正した候補です。"
+                      : "AIが整理した候補です。"}
+                  手順を選んで、話と合っているか確かめてください。
+                </p>
+              )}
+              {steps.length > REVIEW_PAGE_SIZE && (
                 <div className="kg-pagination">
                   <button
                     disabled={stepPage === 0}
-                    onClick={() => setStepPage((p) => p - 1)}
+                    onClick={() =>
+                      choose(steps[(stepPage - 1) * REVIEW_PAGE_SIZE])
+                    }
                   >
-                    前の7手順
+                    前の3手順
                   </button>
                   <span>
-                    {stepPage * 7 + 1}–
-                    {Math.min(steps.length, (stepPage + 1) * 7)} /{" "}
-                    {steps.length}
+                    {stepPage * REVIEW_PAGE_SIZE + 1}–
+                    {Math.min(steps.length, (stepPage + 1) * REVIEW_PAGE_SIZE)}{" "}
+                    / {steps.length}
                   </span>
                   <button
-                    disabled={(stepPage + 1) * 7 >= steps.length}
-                    onClick={() => setStepPage((p) => p + 1)}
+                    disabled={(stepPage + 1) * REVIEW_PAGE_SIZE >= steps.length}
+                    onClick={() =>
+                      choose(steps[(stepPage + 1) * REVIEW_PAGE_SIZE])
+                    }
                   >
-                    次の7手順
+                    次の3手順
                   </button>
                 </div>
               )}
-              <WorkflowReading
-                key={key}
-                graph={preview}
-                workflowId={workflow!.id}
-                initialStepId={process?.id}
-                initialDepth="step"
-                onStepChange={(id) => {
-                  const s = steps.find(
-                    (s) =>
-                      id ===
-                      getWorkflowProcesses(preview, workflow!.id).find(
-                        (n) => n.canonicalKey.split(":").at(-1) === s.stepKey,
-                      )?.id,
-                  );
-                  if (s) choose(s);
-                }}
-                onDetail={(id) => {
-                  const node = preview.nodes.find((n) => n.id === id);
-                  if (node?.workflowId === workflow!.id)
-                    setEdit(structuredClone(selected));
-                  else if (node?.workflowId) onSelect(node.workflowId);
-                }}
-              />
-              <div className="input-correction-actions">
-                <button
-                  className="button-secondary"
-                  disabled={busy}
-                  onClick={() => setEdit(structuredClone(selected))}
-                >
-                  この手順の理解を訂正する
-                </button>
-                <button disabled={busy} onClick={removeStep}>
-                  この手順を候補から除外
-                </button>
+              <div ref={focusRef} className="input-focus-anchor">
+                <InputReviewFlow
+                  review={review}
+                  selected={selected}
+                  graph={preview}
+                  busy={busy}
+                  choose={choose}
+                  onOverview={() =>
+                    stripRef.current?.scrollIntoView({
+                      behavior: "smooth",
+                      block: "start",
+                    })
+                  }
+                  onEdit={() => setEdit(structuredClone(selected))}
+                  onExclude={removeStep}
+                  onWorkflow={(id, stepKey) => {
+                    const step = getWorkflowProcesses(graph, id).find(
+                      (p) => p.canonicalKey.split(":").at(-1) === stepKey,
+                    );
+                    if (step) onFocusStep?.(id, step.id);
+                    onSelect(id);
+                  }}
+                />
               </div>
               {edit && (
-                <fieldset className="input-inline-editor" disabled={busy}>
-                  <legend>手順{selected.order}を訂正する</legend>
+                <fieldset
+                  ref={editorRef}
+                  className="input-inline-editor"
+                  disabled={busy}
+                >
+                  <legend>手順{selected.order}の理解を訂正</legend>
                   <label className="kg-edit-field">
                     行うこと
                     <textarea
@@ -726,58 +970,108 @@ export function InputWorkbench({
                     />
                   </label>
                   <label className="kg-edit-field">
-                    部署
+                    何が決まる・変わるか
                     <input
-                      value={edit.department ?? ""}
-                      onChange={(e) =>
-                        setEdit({ ...edit, department: e.target.value || null })
-                      }
-                    />
-                  </label>
-                  <label className="kg-edit-field">
-                    実行するSystem
-                    <input
-                      value={edit.executingSystem ?? ""}
+                      value={edit.meaning?.result ?? ""}
                       onChange={(e) =>
                         setEdit({
                           ...edit,
-                          executingSystem: e.target.value || null,
-                          executionMode: edit.executionMode,
+                          meaning: {
+                            purpose: "",
+                            basis: "",
+                            next: "",
+                            condition: "",
+                            halt: false,
+                            ...edit.meaning,
+                            certainty: "confirmed",
+                            evidence: "利用者が構造の確認中に補足",
+                            result: e.target.value,
+                          },
                         })
                       }
                     />
                   </label>
-                  <label className="kg-edit-field">
-                    実行方法
-                    <select
-                      value={edit.executionMode}
-                      onChange={(e) =>
-                        setEdit({
-                          ...edit,
-                          executionMode: e.target
-                            .value as ExtractionReviewStep["executionMode"],
-                        })
-                      }
-                    >
-                      <option value="unknown">未確認</option>
-                      <option value="manual">人が行う</option>
-                      <option value="automatic">システムが自動で行う</option>
-                      <option value="mixed">人とシステムが行う</option>
-                    </select>
-                  </label>
-                  {(
-                    [
-                      ["purpose", "この作業が必要な理由"],
-                      ["basis", "判断の根拠"],
-                      ["result", "何が決まる・変わるか"],
-                      ["next", "その結果、次に動く仕事"],
-                      ["condition", "実行する条件"],
-                    ] as const
-                  ).map(([field, label]) => (
-                    <label className="kg-edit-field" key={field}>
-                      {label}
+                  <details>
+                    <summary>部署・道具・判断の条件も訂正する</summary>
+                    <label className="kg-edit-field">
+                      部署
                       <input
-                        value={edit.meaning?.[field] ?? ""}
+                        value={edit.department ?? ""}
+                        onChange={(e) =>
+                          setEdit({
+                            ...edit,
+                            department: e.target.value || null,
+                          })
+                        }
+                      />
+                    </label>
+                    <label className="kg-edit-field">
+                      実行するSystem
+                      <input
+                        value={edit.executingSystem ?? ""}
+                        onChange={(e) =>
+                          setEdit({
+                            ...edit,
+                            executingSystem: e.target.value || null,
+                            executionMode: edit.executionMode,
+                          })
+                        }
+                      />
+                    </label>
+                    <label className="kg-edit-field">
+                      実行方法
+                      <select
+                        value={edit.executionMode}
+                        onChange={(e) =>
+                          setEdit({
+                            ...edit,
+                            executionMode: e.target
+                              .value as ExtractionReviewStep["executionMode"],
+                          })
+                        }
+                      >
+                        <option value="unknown">未確認</option>
+                        <option value="manual">人が行う</option>
+                        <option value="automatic">システムが自動で行う</option>
+                        <option value="mixed">人とシステムが行う</option>
+                      </select>
+                    </label>
+                    {(
+                      [
+                        ["purpose", "この作業が必要な理由"],
+                        ["basis", "判断の根拠"],
+                        ["next", "その結果、次に動く仕事"],
+                        ["condition", "実行する条件"],
+                      ] as const
+                    ).map(([field, label]) => (
+                      <label className="kg-edit-field" key={field}>
+                        {label}
+                        <input
+                          value={edit.meaning?.[field] ?? ""}
+                          onChange={(e) =>
+                            setEdit({
+                              ...edit,
+                              meaning: {
+                                purpose: "",
+                                basis: "",
+                                result: "",
+                                next: "",
+                                condition: "",
+                                halt: false,
+                                ...edit.meaning,
+                                certainty: "confirmed",
+                                evidence: "利用者が構造の確認中に補足",
+                                [field]: e.target.value,
+                              },
+                            })
+                          }
+                        />
+                      </label>
+                    ))}
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={edit.meaning?.halt ?? false}
                         onChange={(e) =>
                           setEdit({
                             ...edit,
@@ -787,40 +1081,17 @@ export function InputWorkbench({
                               result: "",
                               next: "",
                               condition: "",
-                              halt: false,
                               ...edit.meaning,
                               certainty: "confirmed",
                               evidence: "利用者が構造の確認中に補足",
-                              [field]: e.target.value,
+                              halt: e.target.checked,
                             },
                           })
                         }
                       />
+                      ここで停止・保留する
                     </label>
-                  ))}
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={edit.meaning?.halt ?? false}
-                      onChange={(e) =>
-                        setEdit({
-                          ...edit,
-                          meaning: {
-                            purpose: "",
-                            basis: "",
-                            result: "",
-                            next: "",
-                            condition: "",
-                            ...edit.meaning,
-                            certainty: "confirmed",
-                            evidence: "利用者が構造の確認中に補足",
-                            halt: e.target.checked,
-                          },
-                        })
-                      }
-                    />
-                    ここで停止・保留する
-                  </label>
+                  </details>
                   <p>原文の根拠と利用者の訂正を別々に保持します。</p>
                   <button className="button-primary" onClick={applyEdit}>
                     訂正を構造へ反映
@@ -841,18 +1112,17 @@ export function InputWorkbench({
                   className="button-primary"
                   disabled={busy || !addition.trim()}
                   onClick={async () => {
-                    const lines = memo.split(/[。\n]+/).filter((s) => s.trim());
-                    const anchor = lines.findIndex(
-                      (s) => s.trim() === selected.evidence.trim(),
+                    const text = insertNoteAfterEvidence(
+                      memo,
+                      selected.evidence,
+                      addition,
                     );
-                    if (anchor < 0) {
+                    if (text === null) {
                       setError(
-                        "本文中の位置を特定できません。左の本文で追加する位置を指定し、読み直してください。",
+                        "メモ中の位置を一つに特定できません。メモに直接続きを書き足し、「変更を流れに反映」を押してください。",
                       );
                       return;
                     }
-                    lines.splice(anchor + 1, 0, addition);
-                    const text = lines.join("。\n");
                     onTranscripts({ ...transcripts, [key]: text });
                     setAddition("");
                     await organize(undefined, text);
@@ -989,7 +1259,7 @@ export function InputWorkbench({
                 ))}
               </details>
               <details onToggle={(e) => setAdvanced(e.currentTarget.open)}>
-                <summary>System・Data・接続・技術詳細を細かく編集する</summary>
+                <summary>システム・情報・接続を詳しく編集する</summary>
                 {advanced &&
                   renderAdvanced?.({
                     draft: ensureDraft(review),
@@ -1002,19 +1272,15 @@ export function InputWorkbench({
               </details>
               <div className="input-save-actions">
                 <p>
-                  {draft
-                    ? "保存すると、この原文と訂正した構造が蓄積されます。"
-                    : `保存済み：${workflow?.name}`}
+                  {stale
+                    ? "メモの変更は、まだ流れへ反映されていません。"
+                    : draft
+                      ? "確認できたところまで保存できます。未確認の内容も、そのまま残ります。"
+                      : "この話と流れは保存されています。続きを書くと、ここにつながります。"}
                 </p>
-                <button
-                  className="button-primary"
-                  disabled={
-                    !draft || busy || stale || !draft.workflow.name.trim()
-                  }
-                  onClick={save}
-                >
-                  {busy ? "処理中…" : "この構造を保存する"}
-                </button>
+                {!draft && onExplore && (
+                  <button onClick={onExplore}>会社の全体像で見る →</button>
+                )}
               </div>
             </>
           )}
@@ -1047,7 +1313,8 @@ export function InputWorkbench({
                       setStepKey(s.stepKey);
                       setStepPage(
                         Math.floor(
-                          Math.min(s.order - 1, restored.length - 1) / 7,
+                          Math.min(s.order - 1, restored.length - 1) /
+                            REVIEW_PAGE_SIZE,
                         ),
                       );
                     }}
