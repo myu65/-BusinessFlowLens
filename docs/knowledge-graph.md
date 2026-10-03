@@ -15,6 +15,14 @@ System, Tool, and Platform share canonical System identity. Configurable categor
 
 Large workflow/transfer lists are paginated. Data-flow diagrams group system pairs while preserving inspectable original transfers. Scenario projections separate Current/Future memberships.
 
+## Follow the same flow across depth
+
+Company, workflow and data-flow exploration share one reader. **業務のまとまり → 手順と受渡し → 判断・個別作業** changes depth while retaining the selected process and data. A process shows incoming information, the responsible person or executing system, action/tools, and outgoing information. Selecting data traces its explicit operations and transfers in workflow order; selecting a tool explains its purpose within that same context. The data-flow entry opens the related business steps instead of jumping directly to a technical-only inspector. Full diagrams remain optional. Company/workflow focus carries into the data-flow workflow selector.
+
+To add a small fact, open **この手順の後に、メモを追加してつなぐ**, type a sentence and select **追加してつなぐ**. For example, `受注管理部担当がExcelから「納期差異確認リスト」をTeamsへ手動で転記する。` Existing named assets are reused, new named data is connected, and the resulting process is inserted after the selected process and before its successor. No ID mapping or drawing is required. Changes use the normal project autosave; the latest addition can be undone while no other graph edit has intervened.
+
+Configured AI uses the existing extraction provider; without AI, a local parser recognizes registered systems/aliases and explicitly quoted information names. Added facts remain **要確認** with their source text. Unspecified people, information, trigger/rule/exception, frequency and transfer protocol remain unknown. Automatic execution alone does not imply an API. Ambiguous aliases are not silently resolved, existing conditional routes are retained, and complex branching notes use the full workflow input/review instead of flattening a branch into a sequence.
+
 ## Persistence and interpretation
 
 Optional `LensGraph.knowledge` is persisted in SQLite project `knowledge_json`; process context is in `details_json`. Older projects remain usable. Workflow replacement, scenario branching, canonical asset merging, and legacy normalization preserve/remap company relationships. Editors support company/activity/capability structure, assignments, criticality, handoffs, system categories, ownership, and dependencies. AI refinement preserves manually supplied execution context.

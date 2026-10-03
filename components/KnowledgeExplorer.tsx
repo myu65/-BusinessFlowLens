@@ -8,6 +8,7 @@ import {
   knowledgeReport,
   type KnowledgeScope,
 } from "@/lib/knowledge";
+import { ProcessContextEditor } from "./ProcessContextEditor";
 import { WorkflowReading } from "./WorkflowReading";
 import { CompanyOrientation } from "./CompanyOrientation";
 import { termExplanation } from "@/lib/knowledge-guide";
@@ -32,11 +33,13 @@ export function KnowledgeExplorer({
   graph,
   onGraphApply,
   onOpenWorkflow,
+  onWorkflowFocus,
 }: {
   projectId: string;
   graph: LensGraph;
   onGraphApply: (g: LensGraph) => void;
   onOpenWorkflow: (id: string) => void;
+  onWorkflowFocus: (id: string) => void;
 }) {
   const [report, setReport] = useState<{ text: string; url: string } | null>(
     null,
@@ -57,6 +60,8 @@ export function KnowledgeExplorer({
   const [category, setCategory] = useState("");
   const [page, setPage] = useState(0);
   const [readStepId, setReadStep] = useState("");
+  const [readDataId, setReadData] = useState("");
+  const [editingStep, setEditingStep] = useState("");
   const [categoryName, setCategoryName] = useState("");
   const [dependencyId, setDependencyId] = useState("");
   const [dependencyReason, setDependencyReason] = useState("");
@@ -70,6 +75,12 @@ export function KnowledgeExplorer({
     setHistory((h) => [...h, { focus, scope, query, department, category }]);
     setFocus(next);
     setPage(0);
+    setEditingStep("");
+    if (next.kind === "workflow") onWorkflowFocus(next.id);
+    if (next.kind === "process") {
+      const process = graph.nodes.find(n => n.id === next.id);
+      if (process?.workflowId) onWorkflowFocus(process.workflowId);
+    }
     window.scrollTo({ top: 0, behavior: "instant" });
   };
   const row =
@@ -272,6 +283,12 @@ export function KnowledgeExplorer({
           onClick={() => {
             const previous = history.at(-1)!;
             setFocus(previous.focus);
+            if (previous.focus.kind === "workflow") onWorkflowFocus(previous.focus.id);
+            if (previous.focus.kind === "process") {
+              const process = graph.nodes.find(n => n.id === (previous.focus as {id: string}).id);
+              if (process?.workflowId) onWorkflowFocus(process.workflowId);
+            }
+            setEditingStep("");
             setScope(previous.scope);
             setQuery(previous.query);
             setDepartment(previous.department);
@@ -554,15 +571,26 @@ export function KnowledgeExplorer({
             graph={graph}
             workflowId={row.workflow.id}
             initialStepId={readStepId}
+            initialDataId={readDataId || undefined}
+            initialLens={readDataId ? "data" : "work"}
+            onGraphApply={onGraphApply}
+            onStepChange={id => {setReadStep(id);setEditingStep("");}}
+            onNavigateWorkflow={(id) => {
+              setQuery("");
+              setDepartment("");
+              go({ kind: "workflow", id });
+            }}
             onDetail={(id) => {
               setReadStep(id);
-              go({ kind: "process", id });
+              setEditingStep(id);
             }}
             onAsset={(n, stepId) => {
               setReadStep(stepId);
+              if (n.kind === "data") setReadData(n.id);
               go({ kind: "asset", id: n.id });
             }}
           />
+          {editingStep && graph.nodes.some(n => n.id === editingStep && n.workflowId === row.workflow.id) && <ProcessContextEditor graph={graph} stepId={editingStep} onApply={onGraphApply} />}
           <h3>前後の業務・活動</h3>
           <div className="kg-links">
             {(graph.knowledge?.handoffs ?? [])
@@ -638,95 +666,29 @@ export function KnowledgeExplorer({
       {focus.kind === "process" && asset && processRow && (
         <>
           <h2>{asset.label}</h2>
-          {termExplanation(asset.label) && (
-            <p className="kg-term">{termExplanation(asset.label)}</p>
+          <WorkflowReading
+            key={asset.id}
+            graph={graph}
+            workflowId={processRow.workflow.id}
+            initialStepId={asset.id}
+            initialDepth="detail"
+            onStepChange={id => {setReadStep(id);setEditingStep("");}}
+            onGraphApply={onGraphApply}
+            onDetail={setEditingStep}
+            onAsset={(n, id) => {
+              setReadStep(id);
+              if (n.kind === "data") setReadData(n.id);
+              go({ kind: "asset", id: n.id });
+            }}
+            onNavigateWorkflow={(id) => go({ kind: "workflow", id })}
+          />
+          {editingStep && (
+            <ProcessContextEditor
+              graph={graph}
+              stepId={editingStep}
+              onApply={onGraphApply}
+            />
           )}
-          <p>{asset.action ?? asset.description}</p>
-          <p>
-            {mode[asset.executionMode ?? "unknown"]} · 管理部署:{" "}
-            {asset.department ?? "未登録"}
-          </p>
-          <div className="kg-toolbar">
-            {asset.workflowId && workflowButton(asset.workflowId)}
-          </div>
-          <h3>使う道具と、受け取る・作る情報</h3>
-          {view.assetsFor([asset]).map(assetButton)}
-          <p>
-            自動処理を行うシステム:{" "}
-            {graph.edges
-              .filter((e) => e.relation === "executes" && e.target === asset.id)
-              .map((e) => label(e.source))
-              .join(" / ") || "人による実行 / 未登録"}
-          </p>
-          <p>
-            入力:{" "}
-            {graph.edges
-              .filter(
-                (e) =>
-                  (e.source === asset.id || e.target === asset.id) &&
-                  e.relation === "reads",
-              )
-              .map((e) => label(e.source === asset.id ? e.target : e.source))
-              .join(" / ") || "未登録"}
-          </p>
-          <p>
-            出力:{" "}
-            {graph.edges
-              .filter(
-                (e) =>
-                  (e.source === asset.id || e.target === asset.id) &&
-                  ["writes", "sends"].includes(e.relation),
-              )
-              .map((e) => label(e.source === asset.id ? e.target : e.source))
-              .join(" / ") || "未登録"}
-          </p>
-          <h3>いつ始まり、何を判断するか</h3>
-          <p>始まるきっかけ: {asset.executionContext?.trigger ?? "未登録"}</p>
-          <p>確認・判断すること: {asset.executionContext?.rule ?? "未登録"}</p>
-          <p>
-            うまく進まないときの対応:{" "}
-            {asset.executionContext?.exception ?? "未登録"}
-          </p>
-          <details>
-            <summary>起点・ルール・例外を編集</summary>
-            {(["trigger", "rule", "exception"] as const).map((key, i) => (
-              <label className="kg-edit-field" key={key}>
-                {["起点", "ルール / 判断", "失敗 / 例外"][i]}
-                <textarea
-                  value={asset.executionContext?.[key] ?? ""}
-                  onChange={(e) =>
-                    onGraphApply({
-                      ...graph,
-                      nodes: graph.nodes.map((n) =>
-                        n.id === asset.id
-                          ? {
-                              ...n,
-                              executionContext: {
-                                trigger: "",
-                                rule: "",
-                                exception: "",
-                                ...n.executionContext,
-                                [key]: e.target.value,
-                              },
-                            }
-                          : n,
-                      ),
-                    })
-                  }
-                />
-              </label>
-            ))}
-          </details>
-          <h3>具体的に行うこと（個別作業）</h3>
-          <ol>
-            {(asset.detailSteps ?? []).map((t) => (
-              <li key={t.id}>
-                {t.action}
-                {t.condition && ` / 条件: ${t.condition}`}
-              </li>
-            ))}
-          </ol>
-          <p>根拠: {asset.evidence ?? "未登録"}</p>
         </>
       )}
       {focus.kind === "process" && !processRow && (
@@ -915,6 +877,17 @@ export function KnowledgeExplorer({
               ),
             ].join(" / ")}
           </p>
+          {asset.kind === "data" && impact.direct[0] && (
+            <button
+              onClick={() => {
+                setReadData(asset.id);
+                setReadStep("");
+                go({ kind: "workflow", id: impact.direct[0].workflow.id });
+              }}
+            >
+              この情報を業務の流れの中で辿る →
+            </button>
+          )}
           <h3>使用部署</h3>
           <p>
             {[

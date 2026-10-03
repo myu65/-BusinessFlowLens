@@ -25,5 +25,9 @@ test('business and system acronyms are explained without inventing unknown defin
   assert.match(termExplanation('ATPチェック')!, /在庫/);
   assert.match(termExplanation('MRPへ反映')!, /原料/);
   assert.match(termExplanation('SAP S/4HANA')!, /受注/);
+  assert.match(termExplanation('Microsoft Teams')!, /連絡/);
+  assert.doesNotMatch(termExplanation('受注管理部担当がExcelから「記録」をTeamsへ手動で転記する')!, /設備/);
+  assert.match(termExplanation('EAM 設備保全')!, /設備/);
+  assert.equal(termExplanation('Games Capital'), undefined);
   assert.equal(termExplanation('登録されていない用語'), undefined);
 });

@@ -246,7 +246,7 @@ export function WorkflowExplorer({
   children,
 }: {
   graph: LensGraph;
-  initialLevel?: "overview" | "business" | "detail";
+  initialLevel?: "overview" | "business";
   workflowId: string;
   selectedStepId?: string;
   onSelectWorkflow: (id: string) => void;
@@ -254,7 +254,7 @@ export function WorkflowExplorer({
   onGraphApply: (graph: LensGraph) => void;
   children: ReactNode;
 }) {
-  const [level, setLevel] = useState<"overview" | "business" | "detail">(
+  const [level, setLevel] = useState<"overview" | "business">(
     initialLevel,
   );
   const [stepId, setStepId] = useState<string | null>(null);
@@ -262,8 +262,6 @@ export function WorkflowExplorer({
     window.scrollTo({ top: 0, behavior: "instant" });
   }, [level, workflowId]);
   const workflow = graph.workflows.find((item) => item.id === workflowId);
-  const steps = getWorkflowProcesses(graph, workflowId);
-  const selected = steps.find((node) => node.id === stepId) ?? steps[0];
   return (
     <div className="workflow-explorer">
       <div className="level-toolbar">
@@ -275,8 +273,7 @@ export function WorkflowExplorer({
           {(
             [
               ["overview", "鳥瞰"],
-              ["business", "手順と情報"],
-              ["detail", "詳細"],
+              ["business", "流れと情報"],
             ] as const
           ).map(([id, label]) => (
             <button
@@ -284,8 +281,6 @@ export function WorkflowExplorer({
               aria-pressed={level === id}
               className={level === id ? "active" : ""}
               onClick={() => {
-                if (id === "detail" && selectedStepId)
-                  setStepId(selectedStepId);
                 setLevel(id);
               }}
             >
@@ -297,19 +292,8 @@ export function WorkflowExplorer({
       {level === "business" ? (
         <>
           <section className="page-view kg-view"><h1>{workflow?.name}</h1><p>{workflow?.description}</p>
-          <WorkflowReading key={workflowId} initialStepId={stepId ?? undefined} graph={graph} workflowId={workflowId} onDetail={id => {setStepId(id);setLevel("detail");}} />
+          <WorkflowReading key={workflowId} initialStepId={stepId ?? selectedStepId} onStepChange={setStepId} onGraphApply={onGraphApply} onNavigateWorkflow={onSelectWorkflow} graph={graph} workflowId={workflowId} onDetail={() => onEdit()} />
           <details><summary>業務を切り替える・全手順のフロー図と関連情報を見る</summary>{children}</details></section>
-          <div className="drill-footer">
-            <p>操作や技術情報まで確認する場合は、詳細へ進めます。</p>
-            <button
-              onClick={() => {
-                if (selectedStepId) setStepId(selectedStepId);
-                setLevel("detail");
-              }}
-            >
-              この業務の詳細を見る →
-            </button>
-          </div>
         </>
       ) : null}
       {level === "overview" && graph.knowledge ? <section className="page-view kg-view"><h1>会社の仕事を鳥瞰する</h1><CompanyMap graph={graph} workflowIds={graph.workflows.filter(w => (w.scenario ?? "current") === (workflow?.scenario ?? "current")).map(w=>w.id)} onWorkflow={id=>{onSelectWorkflow(id);setLevel("business");}} /><details><summary>条件で絞り込む・詳しい関係図を開く</summary><BusinessOverview graph={graph} onEdit={onEdit} onGraphApply={onGraphApply} onOpen={id=>{onSelectWorkflow(id);setLevel("business");}} /></details></section> : null}
@@ -319,66 +303,6 @@ export function WorkflowExplorer({
           setStepId(null);
           setLevel("business");
         }} />
-      ) : null}
-      {level === "detail" ? (
-        <section className="page-view">
-          <button className="back-link" onClick={() => setLevel("business")}>
-            ← 手順と情報に戻る
-          </button>
-          <div className="eyebrow">必要なところを、具体的に</div>
-          <h1>{workflow?.name}の詳細</h1>
-          <div className="detail-picker">
-            <label>
-              業務
-              <select
-                value={workflowId}
-                onChange={(event) => {
-                  onSelectWorkflow(event.target.value);
-                  setStepId(null);
-                }}
-              >
-                {graph.workflows.map((item) => (
-                  <option value={item.id} key={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              ステップ
-              <select
-                value={selected?.id ?? ""}
-                onChange={(event) => setStepId(event.target.value)}
-              >
-                {steps.map((node, index) => (
-                  <option key={node.id} value={node.id}>
-                    {node.stepOrder ?? index + 1}. {node.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          {selected ? (
-            <article className="detail-card">
-              <h2>{selected.label}</h2>
-              <p>{selected.action || selected.description}</p>
-              <p className="uncertainty-note">
-                {selected.status === "confirmed"
-                  ? "確認済み"
-                  : "要確認・推定を含む"}{" "}
-                · {selected.department || selected.actor || "担当未確認"} ·
-                根拠：{selected.evidence || "未確認"}
-              </p>
-              <TechnicalDetails node={selected} />
-              <button onClick={onEdit}>業務入力で詳細を補足する →</button>
-            </article>
-          ) : (
-            <div className="empty-state">
-              手順はまだ未登録です。
-              <button onClick={onEdit}>メモを入力する</button>
-            </div>
-          )}
-        </section>
       ) : null}
     </div>
   );
