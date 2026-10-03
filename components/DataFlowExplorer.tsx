@@ -234,14 +234,14 @@ export function DataFlowExplorer({
           )}
         </section>
       )}
-      {workflowId && (
+      {workflowId && (!flow || related.length > 0) && (
         <WorkflowReading
           key={`${workflowId}:${readerVersion}`}
           graph={graph}
           workflowId={workflowId}
           initialStepId={related[0]?.id}
           initialDataId={flow?.dataIds[0]}
-          initialLens="data"
+          initialLens={flow && !flow.dataIds.length ? "work" : "data"}
           onDetail={stepId => onEdit(workflowId, stepId)}
           onGraphApply={onGraphApply}
           onNavigateWorkflow={(id) => {

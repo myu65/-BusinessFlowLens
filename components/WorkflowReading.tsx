@@ -48,7 +48,10 @@ export function WorkflowReading({
   onStepChange?: (id: string) => void;
   onNavigateWorkflow?: (id: string) => void;
 }) {
-  const [stepId, setStepId] = useState(initialStepId ?? "");
+  const [stepId, setStepId] = useState(() => {
+    const related = initialDataId ? traceData(graph, workflowId, initialDataId) : [];
+    return related.length && !related.some(t => t.step.id === initialStepId) ? related[0].step.id : initialStepId ?? "";
+  });
   const [depth, setDepth] = useState<Depth>(initialDepth);
   const [lens, setLens] = useState<"work" | "data">(initialLens);
   const [dataId, setData] = useState(initialDataId ?? "");
@@ -421,8 +424,12 @@ export function WorkflowReading({
                   <select
                     value={focusData?.id ?? ""}
                     onChange={(e) => {
-                      setData(e.target.value);
-                      setTracePage(0);
+                      const id = e.target.value;
+                      const related = traceData(graph, workflowId, id);
+                      const index = related.findIndex(t => t.step.id === selected.id);
+                      if (index < 0 && related[0]) select(related[0].step.id);
+                      setData(id);
+                      setTracePage(index < 0 ? 0 : Math.floor(index / 5));
                     }}
                   >
                     {allData.map((n) => (
