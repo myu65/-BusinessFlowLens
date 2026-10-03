@@ -1,5 +1,9 @@
 import { findConfirmedAsset, preserveRefinements } from "../refinement";
 import { existsSync, readFileSync } from "node:fs";
+import { buildExtractionContext } from "./context";
+import type { AIConfigurationStatus } from "./status";
+import { AIProviderError } from "./errors";
+import { callCodexModel } from "./codex";
 import type {
   Confidence,
   ExtractionQuestion,
@@ -72,6 +76,16 @@ const WORKFLOW_DRAFT_SCHEMA = {
             enum: ["manual", "automatic", "mixed", "unknown"],
           },
           executingSystem: { type: ["string", "null"] },
+          executionContext: {
+            type: ["object", "null"],
+            additionalProperties: false,
+            properties: {
+              trigger: { type: "string" },
+              rule: { type: "string" },
+              exception: { type: "string" },
+            },
+            required: ["trigger", "rule", "exception"],
+          },
           action: { type: "string" },
           certainty: {
             type: "string",
@@ -192,6 +206,7 @@ const WORKFLOW_DRAFT_SCHEMA = {
           "responsiblePerson",
           "executionMode",
           "executingSystem",
+          "executionContext",
           "action",
           "certainty",
           "evidence",
@@ -420,15 +435,33 @@ function resolveToken() {
 }
 
 export function hasAIConfig() {
-  return Boolean(
-    resolveBaseURL() &&
-      env("AI_MODEL") &&
-      (runtimeTokenAvailable() || env("AI_API_KEY")),
-  );
+  return getAIConfigurationStatus().configured;
+}
+
+export function getAIConfigurationStatus(): AIConfigurationStatus {
+  const missing: AIConfigurationStatus["missing"] = [];
+  const localCodex = env("AI_RUNTIME") === "codex";
+  if (!localCodex && !resolveBaseURL()) missing.push("endpoint");
+  if (!env("AI_MODEL")) missing.push("model");
+  if (!localCodex && !(runtimeTokenAvailable() || env("AI_API_KEY")))
+    missing.push("credential");
+  return {
+    configured: missing.length === 0,
+    protocol: protocol(),
+    runtime: localCodex ? "codex" : "api",
+    model: env("AI_MODEL") ?? null,
+    missing,
+  };
 }
 
 function protocol(): AIProtocol {
   return env("AI_PROTOCOL") === "anthropic" ? "anthropic" : "openai";
+}
+
+function providerLabel() {
+  return env("AI_RUNTIME") === "codex"
+    ? `codex-chatgpt:${env("AI_MODEL")}`
+    : `${protocol()}-compatible:${env("AI_MODEL")}`;
 }
 
 function endpoint(baseURL: string, mode: AIProtocol) {
@@ -466,6 +499,16 @@ async function structuredCall<T>(args: {
   const model = env("AI_MODEL");
   const apiKey = resolveToken();
 
+  if (env("AI_RUNTIME") === "codex" && model) {
+    return callCodexModel<T>({
+      model,
+      schema: args.schema,
+      system: args.system,
+      user: args.user,
+      timeoutMs: Number(env("AI_TIMEOUT_MS")) || 120_000,
+    });
+  }
+
   if (!baseURL || !model || !apiKey) {
     throw new Error(
       "AI provider is not configured. Set AI_MODEL and either run in Snowflake App Runtime or provide AI_BASE_URL/AI_API_KEY.",
@@ -487,6 +530,7 @@ async function structuredCall<T>(args: {
             type: "json_schema",
             json_schema: {
               name: args.schemaName,
+              strict: true,
               schema: args.schema,
             },
           },
@@ -504,21 +548,59 @@ async function structuredCall<T>(args: {
           },
         };
 
-  const response = await fetch(url, {
-    method: "POST",
-    headers: authHeaders(apiKey, mode),
-    body: JSON.stringify(body),
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(
-      `AI provider returned ${response.status}: ${detail.slice(0, 700)}`,
+  const configuredTimeout = Number(env("AI_TIMEOUT_MS"));
+  const timeout =
+    Number.isFinite(configuredTimeout) && configuredTimeout >= 100
+      ? Math.min(configuredTimeout, 180_000)
+      : 90_000;
+  let payload: any;
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: authHeaders(apiKey, mode),
+      body: JSON.stringify(body),
+      cache: "no-store",
+      signal: AbortSignal.timeout(timeout),
+    });
+    if (!response.ok) {
+      // Provider error bodies can echo credentials or source notes. Never return/log them.
+      await response.body?.cancel();
+      if ([401, 403].includes(response.status))
+        throw new AIProviderError(
+          "authentication",
+          "AIの認証に失敗しました。管理者に接続設定の確認を依頼してください。メモと候補は残っています。",
+        );
+      if (response.status === 429)
+        throw new AIProviderError(
+          "rate_limit",
+          "AIの利用上限または混雑により整理できませんでした。時間をおいて再試行してください。メモと候補は残っています。",
+        );
+      throw new AIProviderError(
+        "provider",
+        `AIが整理結果を返せませんでした（HTTP ${response.status}）。接続先とモデルの設定を確認してください。メモと候補は残っています。`,
+      );
+    }
+    payload = await response.json();
+  } catch (error) {
+    if (error instanceof AIProviderError) throw error;
+    if (
+      error instanceof Error &&
+      ["TimeoutError", "AbortError"].includes(error.name)
+    )
+      throw new AIProviderError(
+        "timeout",
+        "AIの応答待ちが時間切れになりました。メモと前の候補は残っています。もう一度整理できます。",
+      );
+    if (error instanceof SyntaxError)
+      throw new AIProviderError(
+        "invalid_response",
+        "AIの応答を構造として読み取れませんでした。メモと前の候補は残っています。再試行してください。",
+      );
+    throw new AIProviderError(
+      "network",
+      "AIの接続先に到達できませんでした。接続を確認して再試行してください。メモと候補は残っています。",
     );
   }
-
-  const payload = await response.json();
   const text =
     mode === "openai"
       ? payload?.choices?.[0]?.message?.content
@@ -527,10 +609,19 @@ async function structuredCall<T>(args: {
         )?.text;
 
   if (typeof text !== "string") {
-    throw new Error("AI provider response did not contain text output.");
+    throw new AIProviderError(
+      "invalid_response",
+      "AIの応答に整理結果がありませんでした。メモと前の候補は残っています。再試行してください。",
+    );
   }
-
-  return JSON.parse(text) as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new AIProviderError(
+      "invalid_response",
+      "AIの応答を構造として読み取れませんでした。メモと前の候補は残っています。再試行してください。",
+    );
+  }
 }
 
 function extractionSystemPrompt() {
@@ -553,7 +644,7 @@ Rules:
 11. Manual re-entry is a legitimate dataFlow: transferType=manual and automation=manual.
 12. If a critical fact is missing, ask a focused follow-up question rather than guessing.
 13. warnings should call out ambiguity, contradictions, suspicious duplicate entry, unclear system-of-record, or places where the transcript is insufficient.
-14. stepKey is local to this draft. Use short stable English slugs such as receive-order, check-content, register-order.
+14. stepKey is local to this draft. Use short stable English slugs such as receive-order, check-content, register-order. During re-extraction reuse prior keys for the same step so additions and corrections can be compared. Do not reuse a key for unrelated work.
 15. Process execution mode is separate from ownership and from System-to-System Data Flow:
    - manual: a person performs the step
    - automatic: a System performs the step internally
@@ -561,6 +652,7 @@ Rules:
    - unknown: execution mode is not clear
 16. Set executingSystem ONLY when the interview explicitly says or very clearly describes a named System performing the step automatically. Example: "SAPが自動で在庫を引き当てる" => executionMode=automatic, executingSystem=SAP. "SAPで在庫を確認する" does NOT imply SAP executes the business step; that is usually a manual step using SAP.
 17. Automatic internal System execution is NOT a dataFlow. "ERP automatically assigns an order number" is an automatic Process step. "ERP sends the order to WMS" is a dataFlow and may also cause a later automatic Process step in WMS if explicitly described.
+17a. executionContext contains only the explicitly stated trigger, rule and failure/exception for that step. Use null when none are stated; unknown fields are empty strings. Do not infer rules from standard ERP practice.
 18a. Emit handoffs only to IDs in the provided workflow catalog. Keep the source step, transferred Data and interview evidence. A targetStepKey must be null unless a specific receiving step is known. Workflow name similarity alone is inferred, not confirmed. Unknown destinations must become questions.
 18. Existing System/Data/Workflow context may be provided as reference candidates. Use it to understand aliases, shorthand, and handoffs, but NEVER treat a candidate as confirmed solely because it exists in the catalog.
 19. "ERP" may plausibly refer to an existing SAP system, and "いつもの出荷処理" may plausibly refer to an existing shipping workflow. Preserve the interview wording/evidence and surface uncertainty rather than inventing or silently canonicalizing.
@@ -572,75 +664,6 @@ Rules:
 Write concise Japanese labels/descriptions when the interview is Japanese.`;
 }
 
-function compactExistingContext(graph: LensGraph, currentWorkflowId: string) {
-  const workflowNames = new Map(
-    graph.workflows.map((workflow) => [workflow.id, workflow.name]),
-  );
-
-  const workflowIdsForNode = (nodeId: string) => {
-    const ids = new Set<string>();
-    for (const edge of graph.edges) {
-      if (edge.source === nodeId || edge.target === nodeId) {
-        for (const workflowId of edge.workflowIds) ids.add(workflowId);
-      }
-    }
-    for (const flow of graph.dataFlows ?? []) {
-      if (
-        flow.sourceSystemId === nodeId ||
-        flow.targetSystemId === nodeId ||
-        flow.dataIds.includes(nodeId)
-      ) {
-        for (const workflowId of flow.workflowIds) ids.add(workflowId);
-      }
-    }
-    return [...ids].map((id) => workflowNames.get(id) ?? id).slice(0, 8);
-  };
-
-  const systems = graph.nodes
-    .filter((node) => node.kind === "system")
-    .map((node) => ({
-      canonicalKey: node.canonicalKey,
-      name: node.label,
-      aliases: node.aliases ?? [],
-      description: node.description,
-      usedBy: workflowIdsForNode(node.id),
-    }))
-    .slice(0, 30);
-
-  const data = graph.nodes
-    .filter((node) => node.kind === "data")
-    .map((node) => ({
-      canonicalKey: node.canonicalKey,
-      name: node.label,
-      aliases: node.aliases ?? [],
-      description: node.description,
-      usedBy: workflowIdsForNode(node.id),
-    }))
-    .slice(0, 30);
-
-  const workflows = graph.workflows
-    .filter((workflow) => workflow.id !== currentWorkflowId)
-    .map((workflow) => ({
-      id: workflow.id,
-      name: workflow.name,
-      description: workflow.description ?? "",
-      steps: graph.nodes
-        .filter(
-          (node) => node.kind === "process" && node.workflowId === workflow.id,
-        )
-        .sort(
-          (a, b) =>
-            (a.stepOrder ?? Number.MAX_SAFE_INTEGER) -
-            (b.stepOrder ?? Number.MAX_SAFE_INTEGER),
-        )
-        .slice(0, 10)
-        .map((node) => node.label),
-    }))
-    .slice(0, 30);
-
-  return { systems, data, workflows };
-}
-
 function extractionUserPrompt(args: {
   interview: string;
   workflow: Workflow;
@@ -648,9 +671,15 @@ function extractionUserPrompt(args: {
   previousReview?: ExtractionReview | null;
   followUpAnswers?: FollowUpAnswer[];
 }) {
-  const existingContext = compactExistingContext(args.graph, args.workflow.id);
   const answered = (args.followUpAnswers ?? []).filter(
     (item) => item.answer.trim().length > 0,
+  );
+  const existingContext = buildExtractionContext(
+    args.graph,
+    args.workflow,
+    [args.interview, ...answered.map((a) => `${a.question} ${a.answer}`)].join(
+      "\n",
+    ),
   );
 
   return `Workflow being interviewed:
@@ -666,7 +695,7 @@ ${JSON.stringify(existingContext, null, 2)}
 
 ${
   args.previousReview
-    ? `Current review draft. It may include human edits; preserve those edits unless the new follow-up answers clearly contradict them:
+    ? `Previous review draft, for comparison and stable keys. The interview above is the latest source and replaces earlier interview text: reflect additions, corrections and removals. The previous draft is not additional source evidence. Preserve specifically recorded human edits and surface new contradictions as warnings; do not freeze unedited fields:
 ${JSON.stringify(args.previousReview, null, 2)}
 `
     : ""
@@ -795,6 +824,23 @@ async function resolveAssets(
   if (candidates.length === 0) return [];
 
   const catalog = existingAssets(graph);
+  const exact = new Map<string, AssetResolution>();
+  for (const candidate of candidates) {
+    const confirmed = findConfirmedAsset(graph, candidate.kind, candidate.name);
+    if (confirmed)
+      exact.set(candidate.candidateId, {
+        candidateId: candidate.candidateId,
+        decision: "reuse",
+        existingCanonicalKey: confirmed.canonicalKey,
+        canonicalLabel: confirmed.label,
+        reason: "Unique confirmed label or alias.",
+      });
+  }
+  const unresolved = candidates.filter(
+    (candidate) => !exact.has(candidate.candidateId),
+  );
+  if (!unresolved.length)
+    return candidates.map((candidate) => exact.get(candidate.candidateId)!);
 
   if (catalog.length === 0) {
     return candidates.map((candidate) => ({
@@ -814,10 +860,17 @@ async function resolveAssets(
 ${JSON.stringify(catalog, null, 2)}
 
 New extracted candidates:
-${JSON.stringify(candidates, null, 2)}
+${JSON.stringify(unresolved, null, 2)}
 
 Resolve every candidate exactly once.`,
   });
+
+  if (!Array.isArray(result?.resolutions)) {
+    throw new AIProviderError(
+      "invalid_response",
+      "AIの応答からシステム・情報の対応を読み取れませんでした。メモと候補は残っています。再試行してください。",
+    );
+  }
 
   const byCandidate = new Map(
     result.resolutions.map((resolution) => [
@@ -827,15 +880,8 @@ Resolve every candidate exactly once.`,
   );
 
   return candidates.map((candidate) => {
-    const confirmed = findConfirmedAsset(graph, candidate.kind, candidate.name);
-    if (confirmed)
-      return {
-        candidateId: candidate.candidateId,
-        decision: "reuse" as const,
-        existingCanonicalKey: confirmed.canonicalKey,
-        canonicalLabel: confirmed.label,
-        reason: "Unique confirmed label or alias.",
-      };
+    const confirmed = exact.get(candidate.candidateId);
+    if (confirmed) return confirmed;
     const resolution = byCandidate.get(candidate.candidateId);
     if (!resolution) {
       return {
@@ -1091,6 +1137,23 @@ function buildGraphPatch(
 }
 
 function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
+  if (
+    !raw ||
+    !Array.isArray(raw.steps) ||
+    raw.steps.some(
+      (s) =>
+        !s ||
+        typeof s.stepKey !== "string" ||
+        typeof s.name !== "string" ||
+        typeof s.action !== "string" ||
+        typeof s.evidence !== "string",
+    )
+  ) {
+    throw new AIProviderError(
+      "invalid_response",
+      "AIの候補に手順や原文の根拠が不足しています。メモと前の候補は残っています。再試行してください。",
+    );
+  }
   const seen = new Set<string>();
   const steps = raw.steps
     .map((step, index) => {
@@ -1110,6 +1173,8 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
         order: Number.isFinite(step.order) ? step.order : index + 1,
         department: step.department ?? null,
         responsiblePerson: step.responsiblePerson ?? null,
+        meaning: step.meaning ?? undefined,
+        executionContext: step.executionContext ?? undefined,
         technicalDetails: (step.technicalDetails ?? []).filter(
           (detail) =>
             detail.module ||
@@ -1153,9 +1218,9 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
       .filter((flow) =>
         Boolean(
           flow.sourceSystem &&
-            flow.targetSystem &&
-            flow.sourceSystem !== flow.targetSystem &&
-            flow.evidence,
+          flow.targetSystem &&
+          flow.sourceSystem !== flow.targetSystem &&
+          flow.evidence,
         ),
       )
       .map((flow) => ({
@@ -1185,6 +1250,8 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
           : undefined,
       })),
     excludedSteps: raw.excludedSteps,
+    extraction: raw.extraction,
+    protectedDetails: raw.protectedDetails,
   };
 }
 
@@ -1201,6 +1268,15 @@ export async function extractWorkflowReviewWithAI(args: {
     system: extractionSystemPrompt(),
     user: extractionUserPrompt(args),
   });
+  // Reject malformed AI output before applying protections for human changes.
+  // A human may deliberately exclude every step afterward; that stays valid.
+  if (!rawDraft || !Array.isArray(rawDraft.steps) || !rawDraft.steps.length) {
+    throw new AIProviderError(
+      "invalid_response",
+      "AIの候補に手順がありませんでした。メモと前の候補は残っています。再試行してください。",
+    );
+  }
+  normalizeDraft(rawDraft);
 
   const draft = normalizeDraft(
     preserveRefinements(rawDraft, args.previousReview),
@@ -1208,6 +1284,12 @@ export async function extractWorkflowReviewWithAI(args: {
 
   return {
     review: {
+      extraction: {
+        method: "ai",
+        provider: providerLabel(),
+        model: env("AI_MODEL"),
+        completedAt: new Date().toISOString(),
+      },
       summary: draft.summary,
       trigger: draft.trigger,
       outcome: draft.outcome,
@@ -1218,8 +1300,9 @@ export async function extractWorkflowReviewWithAI(args: {
       warnings: draft.warnings,
       handoffs: draft.handoffs,
       excludedSteps: draft.excludedSteps,
+      protectedDetails: draft.protectedDetails,
     },
-    provider: `${protocol()}-compatible:${env("AI_MODEL")}`,
+    provider: providerLabel(),
   };
 }
 
@@ -1260,7 +1343,7 @@ export async function resolveWorkflowReviewWithAI(args: {
       ...draft,
       warnings: [...draft.warnings, ...resolutionWarnings],
     },
-    provider: `${protocol()}-compatible:${env("AI_MODEL")}`,
+    provider: providerLabel(),
   };
 }
 

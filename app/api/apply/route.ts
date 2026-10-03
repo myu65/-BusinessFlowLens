@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { safeAIError } from "@/lib/ai/errors";
 import {
   replaceWorkflowGraph,
   type ExtractionReview,
@@ -75,6 +76,8 @@ export async function POST(request: Request) {
         warnings: result.review.warnings,
         followUpAnswers: body.followUpAnswers ?? [],
         excludedSteps: result.review.excludedSteps,
+        extraction: result.review.extraction,
+        protectedDetails: result.review.protectedDetails,
       },
     };
     const graph = applyReviewConnections(
@@ -127,13 +130,11 @@ export async function POST(request: Request) {
       storage: process.env.BUSINESS_FLOW_STORAGE ?? "sqlite",
     });
   } catch (error) {
-    console.error(error);
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Failed to apply workflow",
-      },
-      { status: 500 },
+    const failure = safeAIError(
+      error,
+      "流れを保存できませんでした。メモと候補は残っています。再試行してください。",
     );
+    console.error("Workflow apply failed:", failure.code);
+    return NextResponse.json(failure, { status: 500 });
   }
 }

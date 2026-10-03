@@ -7,6 +7,7 @@ import {
   type Workflow,
 } from "@/lib/graph";
 import { extractWorkflowReviewWithAI, hasAIConfig } from "@/lib/ai/provider";
+import { safeAIError } from "@/lib/ai/errors";
 
 type ExtractRequest = {
   interview?: string;
@@ -46,6 +47,11 @@ export async function POST(request: Request) {
           return {
             review: {
               ...baseReview,
+              extraction: {
+                method: "local" as const,
+                provider: "local-demo-extractor",
+                completedAt: new Date().toISOString(),
+              },
               warnings: [...new Set(baseReview.warnings)],
             },
             provider: "local-demo-extractor",
@@ -54,13 +60,11 @@ export async function POST(request: Request) {
 
     return NextResponse.json(result);
   } catch (error) {
-    console.error(error);
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error ? error.message : "Failed to extract workflow",
-      },
-      { status: 500 },
+    const failure = safeAIError(
+      error,
+      "話を構造として整理できませんでした。メモと前の候補は残っています。再試行してください。",
     );
+    console.error("Workflow extraction failed:", failure.code);
+    return NextResponse.json(failure, { status: 500 });
   }
 }

@@ -58,7 +58,7 @@ export type Workflow = {
   landscape?: WorkflowLandscape;
   reviewContext?: Pick<
     ExtractionReview,
-    "summary" | "trigger" | "outcome" | "questions" | "warnings" | "excludedSteps"
+    "summary" | "trigger" | "outcome" | "questions" | "warnings" | "excludedSteps" | "extraction" | "protectedDetails"
   > & {
     followUpAnswers?: FollowUpAnswer[];
   };
@@ -284,6 +284,8 @@ export type ExtractionTransition = {
 };
 
 export type ExtractionReview = {
+  protectedDetails?: Array<{ stepKey: string; fields: Array<"technicalDetails" | "detailSteps" | "executionContext"> }>;
+  extraction?: { method: "ai" | "local"; provider: string; model?: string; completedAt: string };
   summary: string;
   trigger: string | null;
   outcome: string | null;
@@ -1461,6 +1463,8 @@ export function buildWorkflowReviewFromGraph(
     questions: workflow?.reviewContext?.questions ?? [],
     warnings: workflow?.reviewContext?.warnings ?? [],
     excludedSteps: workflow?.reviewContext?.excludedSteps,
+    extraction: workflow?.reviewContext?.extraction,
+    protectedDetails: workflow?.reviewContext?.protectedDetails,
     handoffs: (graph.knowledge?.handoffs ?? []).filter(h => h.sourceWorkflowId === workflowId && h.sourceProcessId).map(h => ({
       fromStepKey: processKeyById.get(h.sourceProcessId!) ?? "",
       targetWorkflowId: h.targetWorkflowId,

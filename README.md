@@ -243,6 +243,21 @@ Then open http://localhost:3000.
 
 Without AI configuration the application falls back to a deterministic local demo extractor so the UI can still be explored.
 
+### Local AI through Codex
+
+An optional local transport uses the installed [Codex App Server](https://developers.openai.com/codex/app-server/) and its existing login. For a local developer machine with `codex` on PATH, check `codex login status`, then add to the ignored `.env.local`:
+
+```bash
+AI_RUNTIME=codex
+AI_MODEL=gpt-6-luna
+AI_REASONING_EFFORT=medium
+AI_TIMEOUT_MS=120000
+```
+
+Restart the server after changing configuration. `AI_CODEX_COMMAND` can point to the installed executable if PATH does not contain it. This local transport requires that exact model to be available to the signed-in account; it stops if the model is unavailable, without choosing another model. It creates ephemeral inference sessions with tools and environment access disabled, and never reads or copies login credentials. It requires a local Node server and is not a Snowflake deployment configuration.
+
+The input screen distinguishes configuration from a successful model response and records the model used for each extracted structure. An AI failure leaves the source and previous candidate intact; it does not silently replace the result with the simple extractor. Automated adapter tests use mocks; real AI input testing is recorded separately in [the input growth audit](docs/ai-input-growth-validation.md).
+
 ## Canonical model
 
 Examples:
