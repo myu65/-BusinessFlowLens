@@ -1015,6 +1015,16 @@
 .kg-view[data-focus="workflow"] > h2 {
   display: none;
 }
+.kg-view[data-focus="systems"] .company-filters { padding: 8px 0; margin: 8px 0; }
+.kg-view[data-focus="systems"] .kg-explore-nav { margin: 8px 0; }
+.kg-view[data-focus="systems"] > .kg-trail { padding: 6px 12px; margin: 8px 0; }
+.kg-view[data-focus="systems"] > .kg-context { padding: 8px 12px; margin: 8px 0; font-size: 13px; }
+.kg-view[data-focus="systems"] > p:not(.kg-trail):not(.kg-context) { margin: 8px 0; font-size: 14px; }
+.system-landscape-reading > p { margin: 10px 0; font-size: 13px; }
+.system-landscape-reading > .kg-toolbar { margin: 10px 0; }
+.system-landscape-reading .kg-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 12px 0; }
+@media (max-width: 1100px) { .system-landscape-reading .kg-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .system-landscape-reading .kg-cards { grid-template-columns: minmax(0, 1fr); } }
 .kg-view[data-focus="workflow"] > .kg-context {
   padding: 8px 12px;
   font-size: 13px;
