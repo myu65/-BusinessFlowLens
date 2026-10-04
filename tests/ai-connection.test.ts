@@ -9,7 +9,7 @@ import {
 import { aiStatusLabel } from "../lib/ai/status";
 import { AIProviderError, safeAIError } from "../lib/ai/errors";
 import { extractGroundedLocal } from "../lib/local-review";
-import type { LensGraph } from "../lib/graph";
+import type { ExtractionReview, LensGraph } from "../lib/graph";
 import { previewReviewGraph } from "../lib/review-workbench";
 import { knowledgeIndex } from "../lib/knowledge";
 
@@ -144,11 +144,11 @@ test("configuration, actual response, and quality review remain separate; no end
 test("an intent-only AI review keeps questions and no invented assets, then accepts a concrete follow-up", async () => {
   const source = "購買の仕事を整理したいです。順番も担当も道具もまだ分かりません。";
   const question = { question: "最初にどんな話や情報が届くか、知っていることはありますか？", reason: "具体的な作業がまだ説明されていないため。", target: "scope" as const };
-  const initial = { summary: "購買の仕事について整理したいが、作業内容はまだ分からない。", trigger: null, outcome: null,
+  const initial: ExtractionReview = { summary: "購買の仕事について整理したいが、作業内容はまだ分からない。", trigger: null, outcome: null,
     steps: [], transitions: [], dataFlows: [], questions: [question], warnings: [] };
   const fact = "購買担当がメールで原料の見積依頼を受け取る。";
   const followUp = { question: question.question, answer: fact };
-  let draft = initial as typeof initial & { steps: ReturnType<typeof extractGroundedLocal>["steps"] };
+  let draft = initial;
   const server = createServer((_request, response) => {
     response.setHeader("Content-Type", "application/json");
     response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(draft) } }] }));

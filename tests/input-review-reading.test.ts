@@ -69,7 +69,7 @@ test("a zero-step input review offers clarification and saving without a workflo
   const html = renderToStaticMarkup(createElement(InputWorkbench, {
     projectId: "test", graph, selectedId: "note", transcripts: { note: memo },
     drafts: { note: { workflow: { id: "note", name: "入力した話" }, review: initial,
-      sourceNotes: memo, provider: "test-ai", answers: {}, answerHistory: [] } },
+      sourceNotes: memo, provider: "test-ai", baseline: null, answers: {}, answerHistory: [] } },
     onSelect: () => {}, onTranscripts: () => {}, onDraft: () => {}, onGraphApply: () => {},
   }));
   assert.ok(html.includes("まだ作業の流れは決めていません"));
