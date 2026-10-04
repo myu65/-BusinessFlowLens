@@ -207,7 +207,7 @@ export function validateAITransitions<T extends ExtractionReview>(
     }
     const approvalQuote = step && sourceEvidence(source, step.evidence);
     const deniedQuote = targetEvidence && compact(targetEvidence);
-    const notApproved = /未承認|不承認|承認され(?:ない|なかった)|承認(?:していない|されていない)|承認が(?:ない|下りない|得られない)/;
+    const notApproved = /未承認|不承認|承認され(?:ない|なかった)|承認(?:していない|されていない)|承認が(?:ない|下りない|得られない)|承認(?:を|は|が|の)?保留(?!しない|しません|せず|しなかった|していない|していません|されない)/;
     const afterApproval = /承認(?:した|された|する)後|承認後|承認.{0,16}(?:取り消|取消|撤回)/;
     const statedAfterApproval = [sourceEvidence(source, t.evidence), targetEvidence].some(quote => quote && afterApproval.test(compact(quote)) &&
       !/不明|分から|未確認|未定|承認(?:した|された|する)?後(?:ではない|ではなく|ではありません)/.test(compact(quote)));
