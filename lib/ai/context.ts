@@ -9,13 +9,12 @@ export function buildPreviousReviewContext(review: ExtractionReview) {
     steps: review.steps.map(step => ({
       stepKey: step.stepKey,
       order: step.order,
-      name: step.name,
-      actor: step.actor,
-      systems: step.systems.map(system => system.name),
-      data: step.data.map(data => ({ name: data.name, operation: data.operation })),
-      result: step.meaning?.result,
+      evidence: step.evidence,
       detailSteps: step.detailSteps?.map(detail => ({ id: detail.id, action: detail.action, condition: detail.condition })),
-      humanEdits: step.humanEdits?.map(edit => ({ field: edit.field, after: edit.after, evidence: edit.evidence })),
+      humanEdits: step.humanEdits?.filter(edit => edit.field !== "placement")
+        .map(edit => ({ field: edit.field, after: edit.after, evidence: edit.evidence })),
+      humanPlacements: step.humanEdits?.filter(edit => edit.field === "placement")
+        .map(edit => ({ position: edit.after, evidence: edit.evidence })),
     })),
     protectedDetails: review.protectedDetails,
     transitions: review.transitions,

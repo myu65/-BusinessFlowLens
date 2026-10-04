@@ -199,3 +199,25 @@ test("an unknown or denied adjustment, including a newer answer, does not revive
       [contractAnswer, followUp]).transitions.length, 0);
   }
 });
+
+test("a pre-approval request cannot follow a combined approval, while a checking-only source can keep the branch", () => {
+  const before = "承認されていない案件を含めるか迷った場合は、承認する前にTeamsで部長へ判断を頼みます。";
+  const review = fixture("Teamsで部長へ判断を頼む", before);
+  review.steps[0] = { ...review.steps[0], action: "大型案件の確度を確認し、承認する", name: "確認して承認する",
+    meaning: { ...review.steps[0].meaning!, halt: false, condition: "", result: "承認する" } };
+  review.steps[1].evidence = before;
+  review.transitions[0].condition = "迷った場合。依頼は承認前。";
+  const result = validateAITransitions(review, before);
+  assert.equal(result.transitions.length, 0);
+  assert(result.questions.some(q => q.target === "rule"));
+  assert.equal(result.steps[0].action, review.steps[0].action);
+  const check = { ...review, steps: [{ ...review.steps[0], action: "大型案件の確度を確認する" }, review.steps[1]] };
+  assert.equal(validateAITransitions(check, before).transitions.length, 1);
+  const unapproved = { ...check, steps: [{ ...check.steps[0], action: "大型案件の確度を確認し、承認しない" }, review.steps[1]] };
+  assert.equal(validateAITransitions(unapproved, before).transitions.length, 1);
+  for (const evidence of ["承認する前ではなく、承認した後に部長へ判断を頼みます。", "承認する前かどうかは未確認です。"]) {
+    const unknown = { ...review, steps: [review.steps[0], { ...review.steps[1], evidence }],
+      transitions: [{ ...review.transitions[0], evidence }] };
+    assert.equal(validateAITransitions(unknown, evidence).transitions.length, 1);
+  }
+});
