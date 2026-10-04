@@ -38,6 +38,38 @@ export function validateSystemDependencies(review: ExtractionReview, source: str
   return { ...review, systemDependencies: dependencies, questions, warnings: [...new Set(warnings)] };
 }
 
+// Supplement only named, literal dependencies that the model omitted. Never
+// infer one from a product's usual architecture or from a co-mention.
+export function supplementSourceDependencies<T extends ExtractionReview>(review: T, source: string, knownNames: string[] = []): T {
+  const labels = [...review.steps.flatMap(s => [...s.systems.map(t => t.name), s.executingSystem ?? ""]),
+    ...(review.systemProfiles ?? []).map(p => p.name),
+    ...(review.systemDependencies ?? []).flatMap(d => [d.system, d.prerequisite]), ...knownNames];
+  const names = [...new Map(labels.filter(n => n.trim()).map(n => [compact(n), n])).values()];
+  const dependencies = [...(review.systemDependencies ?? [])], warnings = [...review.warnings];
+  for (const sentence of source.split(/(?<=[。！？\n])/).map(s => s.trim()).filter(Boolean)) {
+    const text = compact(sentence);
+    // Do not split a named product into a shorter catalog name that happens
+    // to be contained in it (for example SAP inside SAP S/4HANA).
+    const mentions = names.filter(n => text.includes(compact(n))).filter(n =>
+      !names.some(long => compact(long) !== compact(n) && compact(long).includes(compact(n)) && text.includes(compact(long))));
+    for (const system of mentions) for (const prerequisite of mentions) {
+      const candidate: ReviewSystemDependency = { system, prerequisite, evidence: sentence,
+        reason: sentence, certainty: "confirmed", origin: "ai" };
+      if (!groundedDependency(candidate, source)) continue;
+      const existing = dependencies.findIndex(d => pair(d) === pair(candidate));
+      if (existing >= 0) {
+        const prior = dependencies[existing];
+        if (prior.origin === "human" || prior.rejected || prior.certainty !== "unknown") continue;
+        // A literal, unambiguous source statement can resolve the model's
+        // uncertainty, but never override a human's excluded/corrected pair.
+        dependencies[existing] = candidate;
+      } else dependencies.push(candidate);
+      warnings.push(`${system} → ${prerequisite}：原文に明示された道具の依存関係を補いました。`);
+    }
+  }
+  return { ...review, systemDependencies: dependencies, warnings: [...new Set(warnings)] };
+}
+
 export function preserveSystemDependencies(next: ExtractionReview, previous: ExtractionReview) {
   const dependencies = [...(next.systemDependencies ?? [])];
   for (const human of previous.systemDependencies ?? []) {

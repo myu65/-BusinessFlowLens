@@ -3232,6 +3232,8 @@ button:disabled { cursor:not-allowed; opacity:.45; }
 .input-step-strip button.input-step--added { border-top:4px solid #337955; }
 .input-step-strip button.input-step--changed { border-top:4px solid #b37720; }
 .input-diff-items small { display:block; max-width:480px; line-height:1.5; color:#52675b; }
+.input-review-changes { margin-top:12px; }
+.input-review-changes li { margin:8px 0; line-height:1.6; overflow-wrap:anywhere; }
 .input-source-history { white-space:pre-wrap; overflow-wrap:anywhere; max-height:260px; overflow:auto; font:inherit; line-height:1.6; padding:12px; background:#f3f7f4; }
 .input-step-strip small { color:#627169; }.input-step-strip span { font-size:12px; color:#305d41; }
 .input-diff { background:#edf6ef!important; }.input-diff-items { display:flex; flex-wrap:wrap; gap:8px; padding-top:10px; }
