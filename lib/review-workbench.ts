@@ -176,6 +176,7 @@ export function previewReviewGraph(
       label: t.condition,
       evidence: t.evidence,
       status: t.certainty ?? "unknown",
+      holdEffect: t.holdEffect,
     });
   for (const f of review.dataFlows)
     patch.dataFlows.push({
@@ -439,8 +440,8 @@ export function diffReviews(
     return [
     ...(r?.transitions ?? []).map(
       (t) => ({
-        key: `${t.fromStepKey} → ${t.toStepKey}${t.condition ? `（${t.condition}）` : ""} / ${t.certainty ?? "unknown"}`,
-        label: `${name(t.fromStepKey)} → ${name(t.toStepKey)}${t.condition ? `（${t.condition}）` : ""} · ${certainty(t.certainty)}`,
+        key: `${t.fromStepKey} → ${t.toStepKey}${t.condition ? `（${t.condition}）` : ""} / ${t.certainty ?? "unknown"} / ${t.holdEffect ?? ""}`,
+        label: `${name(t.fromStepKey)} → ${name(t.toStepKey)}${t.condition ? `（${t.condition}）` : ""} · ${certainty(t.certainty)}${t.holdEffect === "response" ? " · 停止中の対応" : t.holdEffect === "resume" ? " · 再開" : ""}`,
       }),
     ),
     ...(r?.handoffs ?? []).map(

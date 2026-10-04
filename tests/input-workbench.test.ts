@@ -55,6 +55,26 @@ test("a question-only memo survives storage and reconstruction without fabricate
   assert.equal(loaded.transcripts[workflow.id], source);
 });
 
+test("removing an incorrect data use keeps the shared information and preserves the human correction after rereading and reload", async () => {
+  const source = 'ETLが「日次経営データ」を更新する。取込みエラーがあれば、ETLが日次経営データの更新処理を止める。';
+  const original = extractGroundedLocal(source);
+  original.steps[1].data = [{ name: "日次経営データ", operation: "update", evidence: "更新処理を止める" }];
+  const corrected = editReviewStep(original, original.steps[1].stepKey, { data: [] });
+  const preview = previewReviewGraph(empty, workflow, corrected);
+  const shared = preview.nodes.find(n => n.kind === "data" && n.label === "日次経営データ")!;
+  assert.ok(shared);
+  assert.equal(preview.edges.filter(e => e.relation === "writes" && e.target === shared.id).length, 1);
+  const repository = new SqliteBusinessFlowRepository(join(mkdtempSync(join(tmpdir(), "lens-data-correction-")), "test.sqlite"));
+  await repository.saveProject({ projectId: "test", projectName: "Test", graph: preview, transcripts: { [workflow.id]: source }, updatedAt: new Date().toISOString() });
+  const loaded = (await repository.loadProject("test"))!;
+  const restored = buildWorkflowReviewFromGraph(loaded.graph, workflow.id);
+  const reread = preserveRefinements(original, restored);
+  assert.deepEqual(reread.steps[1].data, []);
+  assert.ok(reread.steps[0].data.length);
+  assert.ok(reread.steps[1].humanEdits?.some(e => e.field === "data" && Array.isArray(e.after) && !e.after.length));
+  assert.equal(loaded.transcripts[workflow.id], source);
+});
+
 test("first memo previews people, groupware, data and branches without saving or inventing outcomes", () => {
   const review = extractGroundedLocal(notes);
   const graph = previewReviewGraph(empty, workflow, review);

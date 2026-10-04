@@ -9,7 +9,7 @@ export function InputStripConnection({ connection, choose }: {
 }) {
   return <span className="input-strip-connection" data-kind={connection.kind}>
     {connection.kind === "next" ? <>
-      <span>{connection.transition.condition ? "条件つき" : "次へ"}
+      <span>{connection.transition.holdEffect === "response" ? "停止中の対応" : connection.transition.holdEffect === "resume" ? "再開" : connection.transition.condition ? "条件つき" : "次へ"}
         {connection.transition.certainty !== "confirmed" && <><br />要確認</>}
       </span>
       <strong aria-hidden="true">→</strong>

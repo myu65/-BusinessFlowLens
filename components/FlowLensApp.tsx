@@ -268,7 +268,7 @@ function workflowFlow(
       source: edge.source,
       target: edge.target,
       type: "smoothstep",
-      label: edge.label,
+      label: edge.holdEffect === "response" ? `停止中の対応${edge.label ? `：${edge.label}` : ""}` : edge.holdEffect === "resume" ? `再開${edge.label ? `：${edge.label}` : ""}` : edge.label,
       markerEnd: {
         type: MarkerType.ArrowClosed,
         width: 16,

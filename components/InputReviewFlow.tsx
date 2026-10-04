@@ -48,6 +48,11 @@ export function InputReviewFlow({
   const transitions = review.transitions.filter(
     (t) => t.fromStepKey === selected.stepKey,
   );
+  const heldInputs = review.transitions.filter(t => t.toStepKey === selected.stepKey && t.holdEffect === "response")
+    .flatMap(t => {
+      const stopped = review.steps.find(s => s.stepKey === t.fromStepKey);
+      return stopped?.meaning?.halt ? [{ transition: t, stopped }] : [];
+    });
   const inherited = (graph.knowledge?.handoffs ?? []).filter(
     (h) => h.reviewedWorkflowId && h.reviewedWorkflowId !== workflowId,
   );
@@ -178,6 +183,17 @@ export function InputReviewFlow({
           <span className="input-unconfirmed">まだ分かっていません</span>
         )}
       </div>
+      {heldInputs.length > 0 && (
+        <section className="input-incoming" aria-label="停止・保留からの対応">
+          <h4>停止・保留からの対応</h4>
+          {heldInputs.map(({ transition, stopped }, i) => (
+            <div key={i}>
+              <p>停止・保留中に進む対応 · {transition.certainty === "confirmed" ? "原文に明示" : "接続は要確認"}</p>
+              <button onClick={() => choose(stopped)}>停止した処理：{stopped.name} ←</button>
+            </div>
+          ))}
+        </section>
+      )}
       {incoming.length > 0 && (
         <section
           className="input-incoming"
@@ -261,7 +277,9 @@ export function InputReviewFlow({
       <section className="input-next-work" aria-label="条件と次の仕事">
         <h4>
           {selected.meaning?.halt
-            ? transitions.length > 1
+            ? transitions.length > 0 && transitions.every(t => t.holdEffect === "response")
+              ? "停止・保留中に進む対応"
+              : transitions.length > 1
               ? "条件ごとの進み方・保留"
               : selected.meaning.condition
                 ? "条件による停止・保留"
@@ -278,6 +296,7 @@ export function InputReviewFlow({
             next && (
               <button key={i} onClick={() => choose(next)}>
                 <span>
+                  {t.holdEffect === "response" ? "停止中の対応 · " : t.holdEffect === "resume" ? "再開 · " : ""}
                   {t.condition || "次へ"}
                   {t.certainty !== "confirmed" ? "（接続は要確認）" : ""}
                 </span>{" "}
@@ -286,6 +305,9 @@ export function InputReviewFlow({
             )
           );
         })}
+        {selected.meaning?.halt && transitions.some(t => t.holdEffect === "response") && !transitions.some(t => t.holdEffect === "resume") && (
+          <p className="input-unconfirmed">対応へ進むことは、停止・保留の解除を意味しません。通常の仕事を再開する条件・先は未確認です。</p>
+        )}
         {handoffs.map((h, i) => {
           const target = graph.workflows.find(
             (w) => w.id === h.targetWorkflowId,

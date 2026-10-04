@@ -22,6 +22,7 @@ import type {
   FollowUpAnswer,
   ExtractionReview,
   ExtractionReviewStep,
+  ExtractionTransition,
   GraphPatch,
   GraphPatchEdge,
   GraphPatchNode,
@@ -34,13 +35,7 @@ import type {
 type AIProtocol = "openai" | "anthropic";
 type AuthMode = "bearer" | "x-api-key";
 
-type DraftTransition = {
-  fromStepKey: string;
-  toStepKey: string;
-  condition: string | null;
-  evidence: string;
-  certainty?: Confidence;
-};
+type DraftTransition = ExtractionTransition;
 
 type WorkflowDraft = ExtractionReview & {
   transitions: DraftTransition[];
@@ -727,6 +722,7 @@ Rules:
 2b. A person can start with a topic or an intent to understand work without describing any performed action. A draft with zero steps and a few material clarification questions is valid. Summarize only what the person actually knows; do not fill in a standard purchasing/sales process, owner, tool, trigger or outcome. Ask up to three approachable questions to help them tell the next part, and do not require a workflow name or classification before they can continue.
 3. Only list a system when the transcript names a system, application, spreadsheet, email, portal, screen, tool, or clearly says a system is used. "Check inventory" does NOT imply an inventory system.
 3a. The tool and actor must be stated for THIS action, not merely mentioned in another action. Do not carry Forms, SharePoint or a transaction system onto a human judgment unless its use is stated there. An approval does not identify who sends the later notice. Use null/empty lists for unstated fields; an actual action remains even when its actor or tool is unknown.
+3b. Separate meaningful actions when their principal executor differs. In particular, an ETL stopping an update and a monitoring system notifying a person are separate automatic actions. Do not attribute both to the monitoring system or combine them as mixed. Mixed means human action together with automatic system action, not two automatic systems. A person repairing the cause is another manual action; the data update can remain stopped while notification and repair proceed. If an executor is unknown, keep it unknown without borrowing the known executor of the next action.
 4. Data may be explicit ("order data", "customer master", "Excel row") or strongly implied by an explicit read/write operation. Mark the containing step inferred when the business object itself is inferred.
 4a. Receiving or reading an existing decision/quantity is receive/read, not create. A person entering it into a system may also update a record, but must not appear to originate the upstream decision. Include the named incoming information on the receiving step.
 4b. Saving an already received document in SharePoint does not create its original contents. Represent receipt and storage/update, or distinctly name a newly created archive record only if the source states one. Do not describe the received signed receipt as newly authored by the receiving person.
@@ -1209,6 +1205,7 @@ function buildGraphPatch(
       relation: "next",
       label: transition.condition ?? undefined,
       evidence: transition.evidence,
+      holdEffect: transition.holdEffect,
       status:
         transition.certainty ?? (transition.evidence ? "inferred" : "unknown"),
     });

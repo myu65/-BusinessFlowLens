@@ -1163,7 +1163,7 @@ export function InputWorkbench({
                       />
                     </label>
                     <label className="kg-edit-field">
-                      実行するSystem
+                      実行するシステム
                       <input
                         value={edit.executingSystem ?? ""}
                         onChange={(e) =>
@@ -1198,15 +1198,17 @@ export function InputWorkbench({
                         {data.name}の使い方
                         <select aria-label={`${i + 1}番目の情報・${data.name}の使い方`}
                           value={data.operation} onChange={e => setEdit({ ...edit,
-                            data: edit.data.map((d, index) => index === i ? { ...d,
-                              operation: e.target.value as typeof d.operation,
-                            } : d),
+                            data: e.target.value === "unused" ? edit.data.filter((_, index) => index !== i)
+                              : edit.data.map((d, index) => index === i ? { ...d,
+                                operation: e.target.value as typeof d.operation,
+                              } : d),
                           })}>
                           <option value="read">参照する</option>
                           <option value="receive">受け取る</option>
                           <option value="create">情報を新たに作る</option>
                           <option value="update">更新する</option>
                           <option value="send">渡す</option>
+                          <option value="unused">この手順では使わない</option>
                         </select>
                         <small>根拠：{data.evidence}</small>
                       </label>

@@ -818,7 +818,7 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
           edge.label ?? null,
           edge.relation,
           encodeArray(edge.workflowIds),
-          JSON.stringify({ evidence: edge.evidence, status: edge.status }),
+          JSON.stringify({ evidence: edge.evidence, status: edge.status, holdEffect: edge.holdEffect }),
         );
       }
 

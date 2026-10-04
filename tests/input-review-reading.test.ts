@@ -80,6 +80,30 @@ test("a zero-step input review offers clarification and saving without a workflo
   assert.ok(!html.includes("手順がありません。本文を補足して読み直してください。"));
 });
 
+test("a response while held is readable without claiming that normal work resumes", () => {
+  const html = render({ ...review,
+    steps: [{ ...step, meaning: { purpose: "", basis: "", result: "更新を停止する", next: "担当が原因を直す", condition: "取込エラー", halt: true, certainty: "confirmed", evidence: "更新を止める" } }, { ...next, name: "担当が原因を直す" }],
+    transitions: [{ fromStepKey: "s1", toStepKey: "s2", condition: "取込エラー", evidence: "担当が原因を直す", certainty: "inferred", holdEffect: "response" }],
+  });
+  assert.ok(html.includes("停止・保留中に進む対応"));
+  assert.ok(html.includes("停止中の対応 · "));
+  assert.ok(html.includes("担当が原因を直す"));
+  assert.ok(html.includes("通常の仕事を再開する条件・先は未確認です。"));
+  assert.ok(!html.includes("再開 · "));
+});
+
+test("following a response still shows which preceding work was held, without marking the response itself stopped", () => {
+  const draft: ExtractionReview = { ...review,
+    steps: [{ ...step, name: "ETLの更新を止める", meaning: { purpose: "", basis: "", result: "更新停止", next: "通知する", condition: "取込エラー", halt: true, certainty: "confirmed", evidence: "ETLの更新を止める" } }, { ...next, name: "エラーを通知する" }],
+    transitions: [{ fromStepKey: "s1", toStepKey: "s2", condition: null, evidence: "エラーを通知する", certainty: "inferred", holdEffect: "response" }],
+  };
+  const html = renderToStaticMarkup(createElement(InputReviewFlow, { review: draft, selected: draft.steps[1], graph,
+    busy: false, choose: () => {}, onEdit: () => {}, onExclude: () => {}, onWorkflow: () => {} }));
+  assert.ok(html.includes("停止・保留からの対応"));
+  assert.ok(html.includes("停止した処理：ETLの更新を止める ←"));
+  assert.ok(!html.includes("ここで停止・保留する"));
+});
+
 test("unsaved memo status includes clearing a saved memo, while an untouched empty entry is clean", () => {
   assert.equal(hasUnreflectedNotes({ new: "" }, {}), false);
   assert.equal(hasUnreflectedNotes({ new: "まだ担当が分からない" }, {}), true);
