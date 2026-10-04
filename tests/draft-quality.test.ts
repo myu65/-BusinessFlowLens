@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { preApprovalRepair, retainSplitCheckKeys } from "../lib/ai/draft-quality";
+import { preApprovalRepair, approvalDenialRepair, retainSplitCheckKeys } from "../lib/ai/draft-quality";
 import { extractGroundedLocal } from "../lib/local-review";
 import { preserveRefinements } from "../lib/refinement";
 import type { ExtractionReview } from "../lib/graph";
@@ -81,4 +81,44 @@ test("denied, unknown, ungrounded or absent pre-approval work does not trigger a
   assert.equal(preApprovalRepair(review, "確度を確認します。" + before), null);
   review.steps[0].evidence = undefined as unknown as string;
   assert.equal(preApprovalRepair(review, approval + before), null);
+});
+
+const denial = "承認されなければ送付を保留して検査担当へ確認します。";
+function denialBranch() {
+  const review = combined();
+  review.steps.push({ ...review.steps[0], stepKey: "hold", action: "不承認なら送付を保留して検査へ確認する", evidence: denial });
+  review.transitions = [{ fromStepKey: "check", toStepKey: "hold", condition: "承認されない場合", evidence: denial, certainty: "confirmed" }];
+  return review;
+}
+
+test("a literal denied-approval hold after combined checking flags only the grouping without changing facts or connections", () => {
+  const review = denialBranch(), before = structuredClone(review);
+  assert.deepEqual(approvalDenialRepair(review, approval + denial), {
+    stepKeys: ["check"], checkAndApprovalEvidence: [approval], denialEvidence: [denial],
+  });
+  assert.deepEqual(review, before);
+  review.steps[0].action = "大型案件の確度を確認する";
+  assert.equal(approvalDenialRepair(review, approval + denial), null);
+});
+
+test("unknown, denied, unrelated, post-approval or ungrounded holds do not trigger the denied-approval repair", () => {
+  for (const text of [approval, approval + "承認されなければ送付を保留するかは未確認です。",
+    approval + "承認されなければ送付を保留しません。", approval + "承認後に反映が失敗したら送付を保留します。"]) {
+    const review = denialBranch();
+    review.transitions[0].evidence = text.slice(approval.length);
+    review.steps[1].evidence = review.transitions[0].evidence;
+    assert.equal(approvalDenialRepair(review, text), null);
+  }
+  const review = denialBranch();
+  review.transitions[0].fromStepKey = "another-check";
+  assert.equal(approvalDenialRepair(review, approval + denial), null);
+  review.transitions[0].fromStepKey = "check";
+  review.steps[1].evidence = "承認されなければMESを停止する";
+  assert.equal(approvalDenialRepair(review, approval + denial), null);
+  review.steps[1].evidence = denial;
+  review.steps[0].action = "確度を確認して承認しない";
+  assert.equal(approvalDenialRepair(review, approval + denial), null);
+  review.steps[0].action = "確度を確認して承認する";
+  review.steps[0].evidence = "承認済み案件を確認する";
+  assert.equal(approvalDenialRepair(review, approval + denial), null);
 });
