@@ -126,7 +126,7 @@ export function CompanyMap({
       </div>
       <p className="relationship-caption">{selectedId ? "選んだ活動と、直接つながる活動" : "会社の活動と、登録された受渡し・参照"}。線を選ぶと根拠を読めます。点線は推定・未確認を含みます。</p>
       <RelationshipDiagram nodes={map.nodes} edges={map.edges} layoutEdges={map.layoutEdges} selectedId={selectedId}
-        onNode={choose} onEdge={setRelation} label="活動の関係図" />
+        onNode={choose} onEdge={setRelation} label="活動の関係図" graph={graph} />
       <div className="relationship-pagination">
         <span role="status">{map.nodes.length} / {selectedId ? (map.neighborCount ?? 0) + 1 : map.totalNodes}活動 · {map.edges.length} / {map.totalRelations}関係を表示</span>
         {map.lastRelationPage > 0 && <><button disabled={!map.relationPage} onClick={() => { setRelationPage(map.relationPage - 1); setRelation(""); }}>前の6関係</button>

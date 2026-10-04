@@ -35,7 +35,7 @@ export function ActivityRelationshipMap({ graph, activity, workflowIds, onActivi
     <p className="relationship-caption">{selected ? `「${selected.name}」と、直接つながるまとまり` : `${activity.capabilities.filter(c => c.rows.length).length}の仕事のまとまりと、つながる別の活動`}。
       点線は推定・未確認の接続です。まとまり自体が整理案の場合は、ノードに示します。</p>
     <RelationshipDiagram nodes={map.nodes} edges={map.edges} layoutEdges={map.layoutEdges} selectedId={selected?.id}
-      onNode={choose} onEdge={setRelation} label="仕事のまとまりの関係図" />
+      onNode={choose} onEdge={setRelation} label="仕事のまとまりの関係図" graph={graph} />
     <div className="relationship-pagination">
       <span role="status">{map.nodes.length} / {selected ? (map.neighborCount ?? 0) + 1 : map.totalNodes}まとまり · {map.edges.length} / {map.totalRelations}関係を表示</span>
       {map.lastPage > 0 && <><button disabled={!map.page} onClick={() => { setPage(map.page - 1); setRelationPage(0); setRelation(""); }}>前のまとまり</button>

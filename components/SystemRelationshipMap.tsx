@@ -68,9 +68,9 @@ export function SystemRelationshipMap({ graph, scope, systems, view, onSelect, o
       <button aria-pressed={relationKind === "dependency"} onClick={() => { setRelationKind("dependency"); setRelation(""); setPage(0); setRelationPage(0); }}>稼働の依存</button>
       <span>{relationKind === "transfer" ? "矢印：情報を渡す" : "矢印：動くために必要とする"} · 点線：推定・未確認を含む</span>
     </nav>
-    <p className="relationship-caption">{selectedSystem ? `${selectedSystem.node.label}と、直接つながる道具` : selectedCategory ? `「${selectedCategory.label}」を3道具ずつ開いています。他の種類はまとまりで表示します。` : `${groups.length}のまとまりに集約。線の件数は元の受渡し・依存の件数です。`}
+    <p className="relationship-caption">{selectedSystem ? `${selectedSystem.node.label}と、直接つながる道具` : selectedCategory ? `「${selectedCategory.label}」を3道具ずつ開いています。他の種類はまとまりで表示します。` : `${groups.length}のまとまりに集約。線を選ぶと元の受渡し・依存を読めます。`}
       {!selectedSystem && " まとまり内の関係は、開いてから確認できます。"}</p>
-    <RelationshipDiagram nodes={map.nodes} edges={map.edges} layoutEdges={map.layoutEdges} selectedId={selectedSystem?.node.id} onNode={choose} onEdge={setRelation} label="道具のまとまりと関係図" />
+    <RelationshipDiagram nodes={map.nodes} edges={map.edges} layoutEdges={map.layoutEdges} selectedId={selectedSystem?.node.id} onNode={choose} onEdge={setRelation} label="道具のまとまりと関係図" graph={graph} />
     <div className="relationship-pagination"><span role="status">{map.nodes.length}要素 · {map.edges.length} / {map.totalRelations}関係を表示</span>
       {map.lastRelationPage > 0 && <><button disabled={!map.relationPage} onClick={() => { setRelationPage(map.relationPage - 1); setRelation(""); }}>前の6関係</button>
         <span>{map.relationPage * 6 + 1}–{Math.min(map.windowRelations, (map.relationPage + 1) * 6)} / この要素間の{map.windowRelations}関係</span>
