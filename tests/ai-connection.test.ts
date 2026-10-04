@@ -16,6 +16,38 @@ import { knowledgeIndex } from "../lib/knowledge";
 const empty: LensGraph = { workflows: [], nodes: [], edges: [], dataFlows: [] };
 const workflow = { id: "new", name: "入力した話" };
 
+test("a short addition sends neighboring work as context without treating it as evidence for new facts", async () => {
+  const source = '営業企画担当がExcelで「価格案」を保存する。';
+  const existingFact = 'TeamsはEntra IDのSSOを使います。';
+  const draft: ExtractionReview = { ...extractGroundedLocal(source), systemDependencies: [{ system: "Teams", prerequisite: "Entra ID", reason: "SSO", evidence: existingFact, certainty: "confirmed" }] };
+  let sent = "";
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    sent = JSON.parse(Buffer.concat(chunks).toString()).messages.at(-1).content;
+    response.setHeader("Content-Type", "application/json");
+    response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(draft) } }] }));
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    await withConfig({ AI_MODEL: "mock", AI_API_KEY: "test-only", AI_BASE_URL: `http://127.0.0.1:${(server.address() as { port: number }).port}` }, async () => {
+      const result = await extractWorkflowReviewWithAI({ interview: source, workflow, graph: empty, additionContext: {
+        before: { name: "価格案を作る", actor: "営業企画担当", result: existingFact, data: [{ name: "価格案", operation: "create" }] },
+        after: { name: "営業部長が承認する", actor: "営業部長", result: "価格案の承認", data: [] },
+      } });
+      assert.match(sent, /価格案を作る/);
+      assert.match(sent, /営業部長が承認する/);
+      assert.ok(!result.review.systemDependencies?.some(d => d.certainty === "confirmed"));
+      assert.equal(result.review.steps.length, 1);
+      assert.equal(result.review.steps[0].evidence, draft.steps[0].evidence);
+      assert.ok(source.includes(result.review.steps[0].evidence));
+    });
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
 test("the AI adapter separates a runtime specification and registration values before constructing structure", async () => {
   const registration = "情報システム担当がネットワーク管理システムへVPN利用者を登録します。";
   const specification = "VPNはログイン時にEntra IDの認証を使います。";

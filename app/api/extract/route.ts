@@ -8,6 +8,7 @@ import {
 } from "@/lib/graph";
 import { extractWorkflowReviewWithAI, hasAIConfig } from "@/lib/ai/provider";
 import { safeAIError } from "@/lib/ai/errors";
+import type { ReviewAdditionContext } from "@/lib/review-addition";
 
 type ExtractRequest = {
   interview?: string;
@@ -15,6 +16,7 @@ type ExtractRequest = {
   graph?: LensGraph;
   previousReview?: ExtractionReview | null;
   followUpAnswers?: FollowUpAnswer[];
+  additionContext?: ReviewAdditionContext;
 };
 
 export async function POST(request: Request) {
@@ -35,6 +37,7 @@ export async function POST(request: Request) {
           graph: body.graph,
           previousReview: body.previousReview ?? null,
           followUpAnswers: body.followUpAnswers ?? [],
+          additionContext: body.additionContext,
         })
       : (() => {
           const baseReview = extractGroundedLocal(

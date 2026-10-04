@@ -82,6 +82,23 @@
 .input-canvas-step[data-change="changed"] small { color: #986d35; }
 .input-canvas-tools { color: #72867a; margin-top: auto; }
 .input-canvas-footnote { font-size: 10px; color: #839087; line-height: 1.6; margin: 6px 0 12px; }
+.input-flow-canvas .input-canvas-insert { position: absolute; z-index: 2; width: 22px; height: 22px; min-height: 22px; padding: 0; border-radius: 50%; border: 1px solid #fafcf9; background: #4f876b; color: white; font-size: 16px; line-height: 20px; }
+.input-canvas-insert:hover, .input-canvas-insert:focus-visible { outline: 2px solid #4487b5; outline-offset: 2px; }
+.input-canvas-insert:disabled { opacity: .4; }
+.input-growing-hint, .input-insertion-form p { font-size: 11px; color: #6b7e71; line-height: 1.7; }
+.input-workbench .input-add-work { width: 100%; font-size: 12px; min-height: 34px; color: #35684e; border-color: #bfd3c5; margin: 6px 0; }
+.input-insertion-form h3 { font-size: 14px; margin: 14px 0; }
+.input-insertion-place { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 20px; }
+.input-insertion-place li { position: relative; padding: 9px 10px; border: 1px solid #d8e1d9; border-radius: 5px; font-size: 12px; }
+.input-insertion-place li + li::before { content: "↓"; position: absolute; left: 50%; top: -20px; color: #779180; }
+.input-insertion-place li:nth-child(2) { background: #edf7ee; border-style: dashed; border-color: #71a17e; color: #367149; }
+.input-insertion-form .kg-edit-field textarea { min-height: 110px; }
+.input-insertion-form > button { font-size: 12px; min-height: 34px; padding: 6px 10px; margin: 4px; }
+.input-insertion-branches { border: 0; padding: 8px 0; font-size: 12px; }
+.input-insertion-branches button { display: block; width: 100%; text-align: left; font-size: 12px; padding: 8px; margin: 4px 0; }
+.input-addition-notice { padding: 8px; background: #f0f6ec; border-radius: 5px; font-size: 12px; }
+.input-addition-notice p { margin: 3px 0; }
+.input-addition-notice button { min-height: 28px; padding: 3px 7px; font-size: 11px; }
 .input-canvas-anchor[hidden] { display: none; }
 .input-saved-notice { font-size: 11px; padding: 5px 8px; margin: 7px 0; }
 .input-detail-pane > header { position: sticky; top: -14px; z-index: 3; background: #fcfdfb; border-bottom: 1px solid #e1e8e2; padding: 0 0 10px; margin: 0 0 10px; display: flex; align-items: center; justify-content: space-between; }

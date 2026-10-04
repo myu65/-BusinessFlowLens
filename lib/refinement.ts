@@ -1,5 +1,6 @@
 import type { ExtractionReview, LensGraph, LensNode } from "./graph";
 import { preserveSystemDependencies } from "./system-dependencies";
+import { reviewFieldLabel } from "./review-copy";
 
 export { normalizeAssetName, findConfirmedAsset } from "./asset-identity";
 
@@ -136,6 +137,7 @@ export function preserveRefinements(
 ): ExtractionReview {
   if (!previous) return review;
   const warnings = [...review.warnings];
+  let restoredHumanField = false;
   const protectedDetails = new Map(
     (previous.protectedDetails ?? []).map((item) => [
       item.stepKey,
@@ -169,7 +171,8 @@ export function preserveRefinements(
       (edit) => edit.field === field || edit.field.startsWith(`${field}.`),
     );
   const retains = (step: ExtractionReview["steps"][number]) =>
-    !!step.humanEdits?.length || !!protectedDetails.get(step.stepKey)?.length;
+    !!step.humanEdits?.length || !!protectedDetails.get(step.stepKey)?.length ||
+    previous.transitions.some(t => t.humanEdits?.length && (t.fromStepKey === step.stepKey || t.toStepKey === step.stepKey));
   const excludedSteps = previous.excludedSteps ?? [];
   const steps = review.steps
     .filter((step) => {
@@ -183,9 +186,15 @@ export function preserveRefinements(
       return !excluded;
     })
     .map((step) => {
+      const uniquePrevious = (match: (item: typeof step) => boolean) => {
+        const matches = previous.steps.filter(match);
+        return matches.length === 1 ? matches[0] : undefined;
+      };
       const prior =
-        previous.steps.find((item) => item.stepKey === step.stepKey) ??
-        previous.steps.find((item) => item.name === step.name);
+        uniquePrevious(item => item.name === step.name) ??
+        uniquePrevious(item => item.action === step.action) ??
+        (step.evidence.trim() ? uniquePrevious(item => item.evidence === step.evidence) : undefined) ??
+        previous.steps.find((item) => item.stepKey === step.stepKey);
       if (!prior) return step;
       if (prior.stepKey !== step.stepKey && protectedDetails.has(prior.stepKey))
         protectedDetails.set(
@@ -232,6 +241,8 @@ export function preserveRefinements(
       for (const edit of new Map(
         (prior.humanEdits ?? []).map((edit) => [edit.field, edit]),
       ).values()) {
+        // Position is a human graph operation, not an AI-extracted task field.
+        if (edit.field === "placement") continue;
         if (edit.field.startsWith("meaning.")) {
           const field = edit.field.slice("meaning.".length);
           const meaning = {
@@ -248,10 +259,12 @@ export function preserveRefinements(
           if (
             JSON.stringify(meaning[field as keyof typeof meaning]) !==
             JSON.stringify(edit.after)
-          )
+          ) {
+            restoredHumanField = true;
             warnings.push(
-              `${step.name}: 利用者が訂正した「${edit.field}」と再抽出に差があります。利用者の訂正を保持しました。`,
+              `${step.name}：読み直した内容は、利用者が訂正した「${reviewFieldLabel(edit.field)}」と異なります。利用者の訂正を保持しました。`,
             );
+          }
           edited.meaning = {
             ...meaning,
             [field]: edit.after,
@@ -261,10 +274,12 @@ export function preserveRefinements(
           continue;
         }
         const field = edit.field as keyof typeof edited;
-        if (JSON.stringify(edited[field]) !== JSON.stringify(edit.after))
+        if (JSON.stringify(edited[field]) !== JSON.stringify(edit.after)) {
+          restoredHumanField = true;
           warnings.push(
-            `${step.name}: 利用者が訂正した「${field}」と再抽出に差があります。利用者の訂正を保持しました。`,
+            `${step.name}：読み直した内容は、利用者が訂正した「${reviewFieldLabel(field)}」と異なります。利用者の訂正を保持しました。`,
           );
+        }
         Object.assign(edited, { [field]: edit.after });
       }
       return edited;
@@ -287,6 +302,34 @@ export function preserveRefinements(
     omitted.filter((step) => retains(step)).map((step) => step.stepKey),
   );
   const transitions = [...review.transitions];
+  const remappedKey = (oldKey: string) => {
+    const old = previous.steps.find(s => s.stepKey === oldKey);
+    const unique = (match: (step: ExtractionReview["steps"][number]) => boolean) => {
+      const matches = steps.filter(match);
+      return matches.length === 1 ? matches[0].stepKey : undefined;
+    };
+    return unique(s => s.name === old?.name) ??
+      unique(s => s.action === old?.action) ??
+      (old?.evidence.trim() ? unique(s => s.evidence === old.evidence) : undefined) ??
+      steps.find(s => s.stepKey === oldKey)?.stepKey;
+  };
+  for (const transition of previous.transitions.filter(t => t.humanEdits?.length)) {
+    const from = remappedKey(transition.fromStepKey), to = remappedKey(transition.toStepKey);
+    if (!from || !to) continue;
+    // Rereading the appended source must not re-create the arrow the user split.
+    for (const edit of transition.humanEdits ?? []) {
+      if (edit.field !== "placement" || !edit.before) continue;
+      const original = edit.before as { fromStepKey: string; toStepKey: string; condition: string | null };
+      const originalFrom = remappedKey(original.fromStepKey), originalTo = remappedKey(original.toStepKey);
+      for (let i = transitions.length - 1; i >= 0; i--)
+        if (transitions[i].fromStepKey === originalFrom && transitions[i].toStepKey === originalTo && transitions[i].condition === original.condition)
+          transitions.splice(i, 1);
+    }
+    const proposed = transitions.findIndex(t => t.fromStepKey === from && t.toStepKey === to && t.condition === transition.condition);
+    const preserved = { ...transition, fromStepKey: from, toStepKey: to };
+    if (proposed < 0) transitions.push(preserved);
+    else transitions[proposed] = preserved;
+  }
   for (const transition of previous.transitions) {
     if (
       (retainedKeys.has(transition.fromStepKey) ||
@@ -379,6 +422,8 @@ export function preserveRefinements(
         relatedStepKeys: f.relatedStepKeys.filter((k) => keys.has(k)),
       })),
     handoffs: handoffs.filter((h) => keys.has(h.fromStepKey)),
-    warnings: [...new Set(warnings)],
+    warnings: [...new Set(warnings.map((warning, i) =>
+      restoredHumanField && i < review.warnings.length
+        ? `人の訂正を反映する前の候補への注意：${warning}` : warning))],
   };
 }

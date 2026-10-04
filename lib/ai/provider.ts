@@ -775,7 +775,7 @@ Rules:
 26. Keep the draft concise. Use short phrases for meaning (usually 10-35 Japanese characters), summaries under 120 Japanese characters, and minimal verbatim evidence phrases. Do not repeat the whole action in purpose, basis, result and next; leave absent facts empty. A single business check can have several ordered child operations instead of turning every small interaction into a separate top-level step, but preserve separate human judgments, automatic system decisions and exception branches. System/Data mention evidence should be just the relevant short source phrase. Never shorten by dropping a stated condition or changing its meaning.
 27. Describe connections in plain business terms: what information is used or received and what job it enables. Do not add implementation commentary or explain absent APIs/transfers in the description; use via to distinguish a reference from a handoff. Put any missing transfer method in questions only if it materially affects understanding.
 
-Write concise Japanese labels/descriptions when the interview is Japanese.`;
+When the interview is Japanese, write every user-facing label, description, question, warning and reason in concise natural Japanese. Say '担当' and '原文' rather than schema keys such as actor or internal terms such as transcript. Explain business facts and unresolved differences; do not describe implementation steps. Preserve product names and verbatim source evidence.`;
 }
 
 function extractionUserPrompt(args: {
@@ -784,6 +784,7 @@ function extractionUserPrompt(args: {
   graph: LensGraph;
   previousReview?: ExtractionReview | null;
   followUpAnswers?: FollowUpAnswer[];
+  additionContext?: import("../review-addition").ReviewAdditionContext;
 }) {
   const answered = effectiveFollowUpAnswers(args.followUpAnswers ?? []).map(referencePromptAnswer).filter(
     (item) => item.answer.trim().length > 0,
@@ -807,9 +808,12 @@ ${args.interview}
 Existing company context (REFERENCE CANDIDATES ONLY):
 ${JSON.stringify(existingContext)}
 
+${args.additionContext ? `Incremental addition to an existing flow. The transcript above is ONLY the new note. Extract only its new actions, facts and evidence. The user has selected a position and the application will connect the new steps: do not extract, rewrite or include the following existing neighboring steps, or assume a new branch/release from their placement. Do not import an unstated actor, tool, condition or result from this context into the new note. Use this context only to avoid asking again about already recorded creation, approval or next work. Ask at most two material questions about the added work that this context does not answer. No generic questions about how the whole workflow starts or ends. Existing neighboring steps (context, never new source evidence):
+${JSON.stringify(args.additionContext)}\n` : ""}
+
 ${
   args.previousReview
-    ? `Previous review draft, for comparison and stable keys. The interview above is the latest source and replaces earlier interview text: reflect additions, corrections and removals. The previous draft is not additional source evidence. Preserve specifically recorded human edits and surface new contradictions as warnings; do not freeze unedited fields:
+    ? `Previous review draft, for comparison and stable keys. The interview above is the latest source and replaces earlier interview text: reflect additions, corrections and removals. The previous draft is not additional source evidence. Specifically recorded humanEdits.after remain authoritative: rereading unchanged older wording does not retract a human edit. Preserve those values and human-selected graph positions. When a source conflicts with a human edit, describe the unresolved discrepancy in warnings; never claim the human correction was overwritten, because the application keeps it. Do not freeze unedited fields:
 ${JSON.stringify(buildPreviousReviewContext(args.previousReview))}
 `
     : ""
@@ -921,7 +925,8 @@ Rules:
 5. Never merge system and data kinds.
 6. existingCanonicalKey must be populated only for REUSE, and must exactly match a key from the provided catalog.
 7. canonicalLabel should be a concise display label for CREATE/UNCERTAIN, or the existing asset label for REUSE.
-8. Prefer uncertainty over a false merge. A later human can merge assets safely.`;
+8. Prefer uncertainty over a false merge. A later human can merge assets safely.
+9. When candidates or their evidence are Japanese, write reasons in concise natural Japanese about the business identity. Keep named products and source wording intact; do not expose internal keys or resolver implementation terminology in reasons.`;
 }
 
 async function resolveAssets(
@@ -942,7 +947,7 @@ async function resolveAssets(
         decision: "reuse",
         existingCanonicalKey: confirmed.canonicalKey,
         canonicalLabel: confirmed.label,
-        reason: "Unique confirmed label or alias.",
+        reason: "名前か別名が一致し、対応先が一つに決まります。",
       });
   }
   const unresolved = candidates.filter(
@@ -957,7 +962,7 @@ async function resolveAssets(
       decision: "create" as const,
       existingCanonicalKey: null,
       canonicalLabel: candidate.name,
-      reason: "No existing canonical assets to compare.",
+      reason: "比較できる道具・情報が、まだ登録されていません。",
     }));
   }
 
@@ -996,7 +1001,7 @@ Resolve every candidate exactly once. REUSE only a supplied same-kind comparison
         decision: "uncertain" as const,
         existingCanonicalKey: null,
         canonicalLabel: candidate.name,
-        reason: "Resolver omitted this candidate.",
+        reason: "AIから、この道具・情報の対応結果が返っていません。",
       };
     }
 
@@ -1015,7 +1020,7 @@ Resolve every candidate exactly once. REUSE only a supplied same-kind comparison
           decision: "uncertain" as const,
           existingCanonicalKey: null,
           canonicalLabel: candidate.name,
-          reason: `Invalid reuse target. ${resolution.reason}`,
+          reason: `AIが指定した対応先を確認できませんでした。${resolution.reason}`,
         };
       }
     }
@@ -1080,7 +1085,7 @@ function buildGraphPatch(
         decision: "uncertain",
         existingCanonicalKey: null,
         canonicalLabel: candidate.name,
-        reason: "No resolution available.",
+        reason: "道具・情報の対応先を、まだ確認できていません。",
       } satisfies AssetResolution);
 
     let canonicalKey = makeAssetCanonicalKey(candidate, resolution);
@@ -1172,7 +1177,7 @@ function buildGraphPatch(
             decision: "uncertain",
             existingCanonicalKey: null,
             canonicalLabel: system.name,
-            reason: "Unresolved system mention.",
+            reason: "この道具が、どの登録済みの道具と同じかは未確認です。",
           },
         );
 
@@ -1207,6 +1212,7 @@ function buildGraphPatch(
       label: transition.condition ?? undefined,
       evidence: transition.evidence,
       holdEffect: transition.holdEffect,
+      humanEdits: transition.humanEdits,
       status:
         transition.certainty ?? (transition.evidence ? "inferred" : "unknown"),
     });
@@ -1396,6 +1402,7 @@ export async function extractWorkflowReviewWithAI(args: {
   graph: LensGraph;
   previousReview?: ExtractionReview | null;
   followUpAnswers?: FollowUpAnswer[];
+  additionContext?: import("../review-addition").ReviewAdditionContext;
 }): Promise<{ review: ExtractionReview; provider: string; followUpAnswers?: FollowUpAnswer[] }> {
   const followUpAnswers = [...(args.followUpAnswers ?? [])];
   for (const answer of effectiveFollowUpAnswers(followUpAnswers)) {
@@ -1571,7 +1578,7 @@ export function resolveWorkflowReviewLocally(args: {
         decision: "reuse",
         existingCanonicalKey: exact.canonicalKey,
         canonicalLabel: exact.label,
-        reason: "Exact normalized label match in local demo resolver.",
+        reason: "簡易照合で、表記をそろえた名前が一致しました。",
       };
     }
 
@@ -1580,7 +1587,7 @@ export function resolveWorkflowReviewLocally(args: {
       decision: "create",
       existingCanonicalKey: null,
       canonicalLabel: candidate.name,
-      reason: "No exact local match.",
+      reason: "簡易照合では、同じ名前の道具・情報は見つかりませんでした。",
     };
   });
 

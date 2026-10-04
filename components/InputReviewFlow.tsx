@@ -8,6 +8,7 @@ import type {
 } from "@/lib/graph";
 import { describeHumanEdit } from "@/lib/review-workbench";
 import { termExplanation } from "@/lib/knowledge-guide";
+import { inputStepName } from "@/lib/input-canvas";
 
 const certainty = {
   explicit: "原文に明示",
@@ -128,17 +129,17 @@ export function InputReviewFlow({
           <small>
             手順 {selected.order} / {review.steps.length} ·{" "}
             {certainty[selected.certainty]}
-            {selected.humanEdits?.length ? " · 人の訂正あり" : ""}
+            {selected.humanEdits?.some(e => e.field !== "placement") ? " · 人の訂正あり" : selected.humanEdits?.length ? " · 追加位置を指定" : ""}
           </small>
           {onOverview && (
             <button className="input-back-overview" onClick={onOverview}>
               ↑ 話全体の流れ
             </button>
           )}
-          <h3>{selected.name}</h3>
+          <h3 title={selected.name}>{inputStepName(selected)}</h3>
         </div>
         <button className="button-secondary" disabled={busy} onClick={onEdit}>
-          この理解を訂正する
+          手順を編集
         </button>
       </div>
       <div className="input-who">
@@ -191,7 +192,7 @@ export function InputReviewFlow({
           {heldInputs.map(({ transition, stopped }, i) => (
             <div key={i}>
               <p>停止・保留中に進む対応 · {transition.certainty === "confirmed" ? "原文に明示" : "接続は要確認"}</p>
-              <button onClick={() => choose(stopped)}>停止した処理：{stopped.name} ←</button>
+              <button onClick={() => choose(stopped)}>停止した処理：{inputStepName(stopped)} ←</button>
             </div>
           ))}
         </section>
@@ -292,7 +293,7 @@ export function InputReviewFlow({
         {selected.meaning?.condition && (
           <p className="input-condition">条件：{selected.meaning.condition}</p>
         )}
-        {selected.meaning?.next && <p>{selected.meaning.next}</p>}
+        {selected.meaning?.next && (transitions.length ? <details><summary>この先の仕事についての説明</summary><p>{selected.meaning.next}</p></details> : <p>{selected.meaning.next}</p>)}
         {transitions.map((t, i) => {
           const next = review.steps.find((s) => s.stepKey === t.toStepKey);
           return (
@@ -303,7 +304,7 @@ export function InputReviewFlow({
                   {t.condition || "次へ"}
                   {t.certainty !== "confirmed" ? "（接続は要確認）" : ""}
                 </span>{" "}
-                → {next.name}
+                → {inputStepName(next)}
               </button>
             )
           );

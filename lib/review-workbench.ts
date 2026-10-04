@@ -8,6 +8,7 @@ import {
   type Workflow,
 } from "./graph";
 import { findConfirmedAsset } from "./refinement";
+import { REVIEW_FIELD_LABELS, reviewFieldLabel } from "./review-copy";
 import {
   applyInputOrganization,
   emptyInputKnowledge,
@@ -189,6 +190,7 @@ export function previewReviewGraph(
       evidence: t.evidence,
       status: t.certainty ?? "unknown",
       holdEffect: t.holdEffect,
+      humanEdits: t.humanEdits,
     });
   for (const f of review.dataFlows)
     patch.dataFlows.push({
@@ -600,35 +602,8 @@ export function recordReviewEdits(
 }
 
 export function describeHumanEdit(edit: import("./graph").HumanEdit): string[] {
-  const labels: Record<string, string> = {
-    name: "手順名",
-    action: "行うこと",
-    actor: "担当する人",
-    department: "部署",
-    responsiblePerson: "責任者",
-    executionMode: "実行方法",
-    certainty: "根拠の確かさ",
-    executingSystem: "実行するシステム",
-    executionContext: "開始条件・ルール・例外",
-    trigger: "開始条件",
-    rule: "実行・判断のルール",
-    exception: "例外の扱い",
-    systems: "使う道具",
-    data: "情報",
-    order: "順序",
-    technicalDetails: "技術詳細",
-    detailSteps: "個別作業",
-    purpose: "必要な理由",
-    basis: "判断の根拠",
-    result: "決まる・変わること",
-    next: "次に動く仕事",
-    condition: "実行条件",
-    halt: "停止・保留",
-    system: "依存する道具",
-    prerequisite: "必要な仕組み",
-    reason: "必要な理由",
-    rejected: "依存関係の除外",
-  };
+  if (edit.field === "placement") return ["追加する位置を、人が図の上で指定しました。入力した話は原文の根拠に残しています。"];
+  const labels = REVIEW_FIELD_LABELS;
   const value = (v: unknown): string =>
     v == null || v === ""
       ? "未確認"
@@ -688,6 +663,6 @@ export function describeHumanEdit(edit: import("./graph").HumanEdit): string[] {
           `${labels[field] ?? field}：${value((edit.before as Record<string, unknown>)?.[field])} → ${value(v)}`,
       );
   return [
-    `${labels[edit.field.split(".").at(-1)!] ?? edit.field}：${fieldValue(edit.before)} → ${fieldValue(edit.after)}`,
+    `${reviewFieldLabel(edit.field)}：${fieldValue(edit.before)} → ${fieldValue(edit.after)}`,
   ];
 }

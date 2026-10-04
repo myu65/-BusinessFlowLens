@@ -102,9 +102,10 @@ This is the create/update workspace for business workflows.
 - adjust its workflow name and scenario when needed
 - edit or replace the source interview/business notes
 - see the already-saved workflow structure immediately
-- see three steps at a time and read one person's action, tools, evidence and information change
+- see up to six connected steps and read the selected person's action, tools, evidence and information change
 - correct the current structure directly, with technical fields behind a disclosure
-- append a continuation after a step without rewriting the earlier source
+- add a short note at an arrow, or after a step, without rewriting earlier tasks or their source
+- choose one branch when adding work, preserving the other branches and their uncertainty
 - review added, corrected and excluded steps before saving
 - ask AI to update the current structure from new notes
 - answer follow-up questions and refine the current model
@@ -114,6 +115,8 @@ This is the create/update workspace for business workflows.
 On narrow screens, writing and reviewing are separate tabs; the memo is preserved when switching. Unknown actors, outcomes and connections remain unconfirmed. Without an AI connection, the simple extractor's proposed flow and extraction limits are labelled explicitly. See [the novice experience validation](docs/novice-experience-validation.md) for the tested inputs, operations and limits.
 
 Updating an existing workflow replaces that workflow's Process structure and workflow-scoped relationships while preserving shared canonical System/Data assets and other workflows.
+
+A short addition is extracted separately from the earlier story. The two neighboring steps are bounded reference context, not new evidence. The selected position is recorded as a human graph change; the added facts retain their own source. Save remains explicit. An unsent note and its selected arrow are remembered in the browser session, and the latest untouched addition can be undone before saving. See [the incremental input validation](docs/incremental-input-validation.md) for actual AI operations and limits.
 
 ### Workflow scenarios and effective dates
 
@@ -240,6 +243,8 @@ npm run dev
 ```
 
 Then open http://localhost:3000.
+
+For production UI validation, `BFL_NEXT_DIST_DIR` can select a separate build directory, for example `.data/qa-next-candidate`. Use the same value for build, regression tests and start. Build into a directory different from the one serving the current app, then switch the local server after checks pass. Next may add its generated type path to `tsconfig.json` and `next-env.d.ts`; keep those machine-specific changes out of commits.
 
 Without AI configuration the application falls back to a deterministic local demo extractor so the UI can still be explored.
 
