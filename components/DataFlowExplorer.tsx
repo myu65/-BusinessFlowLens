@@ -228,7 +228,7 @@ export function DataFlowExplorer({
             関連する仕事：
             {related
               .slice(0, 3)
-              .map((p) => `${p.department ?? "担当未確認"} / ${p.label}`)
+              .map((p) => `${p.label}（担当：${p.responsiblePerson?.trim() || p.actor?.trim() || "未確認"}、部署：${p.department?.trim() || "未確認"}）`)
               .join("、") || "関連手順は未登録"}
           </p>
           {!related.length && (
