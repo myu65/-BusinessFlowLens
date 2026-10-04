@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 import type { LensGraph } from "@/lib/graph";
 import { applyFlowAddition, type FlowAddition } from "@/lib/flow-note";
 
