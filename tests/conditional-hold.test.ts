@@ -93,3 +93,25 @@ test("a stated later approval cancellation is retained, while unknown or denied 
   const ordinaryFailure = "承認後に資料の登録が失敗したら紹介を保留します。";
   assert.equal(validateAITransitions(approvalDraft(ordinaryFailure), approvalQuote + ordinaryFailure).transitions.length, 2);
 });
+
+test("an approval-pending clause does not follow a completed approval even when its condition contains the pending explanation", () => {
+  for (const quote of ["予算超過は承認を保留して依頼した部署へTeamsで確認します。", "予算超過の場合、承認は保留します。", "予算超過の承認保留を依頼部署へ知らせます。"]) {
+    const r = approvalDraft(quote);
+    r.steps[0].meaning = { purpose: "", basis: "予算と数量", result: "承認する", next: "資料を保存する",
+      condition: "予算超過時は承認を保留する", halt: false, certainty: "confirmed", evidence: approvalQuote };
+    const before = JSON.stringify(r), checked = validateAITransitions(r, approvalQuote + r.steps[1].evidence + quote);
+    assert.deepEqual(checked.transitions.map(t => t.toStepKey), ["a1"], quote);
+    assert.deepEqual(checked.steps, r.steps);
+    assert.ok(checked.questions.some(q => q.question.includes("どの確認・判断から")));
+    assert.equal(JSON.stringify(r), before);
+  }
+});
+
+test("a pending approval after stated cancellation and negated pending wording are not mistaken for this pre-approval hold", () => {
+  for (const quote of ["承認後に条件変更で承認を取り消し、次の承認を保留して依頼部署へ確認します。",
+    "承認を保留しないが、登録に失敗したら作業を保留します。", "承認は保留しません。登録に失敗したら作業を保留します。"]) {
+    const checked = validateAITransitions(approvalDraft(quote), approvalQuote + quote);
+    assert.equal(checked.transitions.length, 2, quote);
+    assert.ok(!checked.warnings.some(w => w.includes("承認完了から未承認時")), quote);
+  }
+});
