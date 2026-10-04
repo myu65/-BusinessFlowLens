@@ -4,12 +4,15 @@ import type { KnowledgeScope } from "./knowledge";
 
 export type ExplorationFocus = { kind: "company" | "systems" }
   | { kind: "activity" | "capability" | "workflow" | "process" | "asset"; id: string };
+export type ActivityReadingPosition = { activityId: string; capabilityId: string; page: number; relationPage: number; systemPage: number };
 export type ExplorationPosition = Partial<FlowReadingPosition> & {
   focus: ExplorationFocus;
   scope: KnowledgeScope;
   query: string;
   department: string;
   category: string;
+  activityReading?: ActivityReadingPosition;
+  listPage?: number;
 };
 export type KnowledgeExploration = ExplorationPosition & { history: ExplorationPosition[] };
 

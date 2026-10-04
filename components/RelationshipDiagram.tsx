@@ -1,6 +1,7 @@
 "use client";
-import React, { useId } from "react";
+import React, { useEffect, useId, useState } from "react";
 import type { OverviewNode, OverviewRelation } from "@/lib/relationship-overview";
+import { readingPage } from "@/lib/overview-reading";
 
 export const relationLabels = { handoff: "受渡し・参照", transfer: "情報の受渡し", dependency: "稼働の依存" };
 export const certaintyLabels = { confirmed: "確認済み", inferred: "推定", unknown: "未確認" };
@@ -69,18 +70,19 @@ export function RelationshipDiagram({ nodes, edges, layoutEdges = edges, selecte
   </div>;
 }
 
-export function RelationshipEvidence({ edge, nodes, graph, onWorkflow, onClose }: {
-  edge: OverviewRelation; nodes: readonly OverviewNode[]; graph: import("@/lib/graph").LensGraph;
-  onWorkflow: (id: string, stepId?: string) => void; onClose: () => void;
+function ReferenceEvidence({ reference, graph, onWorkflow }: {
+  reference: OverviewRelation["references"][number]; graph: import("@/lib/graph").LensGraph;
+  onWorkflow: (id: string, stepId?: string) => void;
 }) {
-  const label = (id: string) => nodes.find(n => n.id === id)?.label ?? id;
-  const ref = (reference: OverviewRelation["references"][number], i: number) => <article key={i}>
-    <span>{certaintyLabels[reference.certainty]}</span>
+  const [page, setPage] = useState(0);
+  const workflows = readingPage(reference.workflowIds, page, 6);
+  return <article>
+    <span>{certaintyLabels[reference.certainty]}{reference.kind === "handoff" && (reference.via === "reference" ? " · 情報の参照" : " · 仕事の受渡し")}</span>
     {reference.kind !== "handoff" && <strong> {graph.nodes.find(n => n.id === reference.source)?.label} → {graph.nodes.find(n => n.id === reference.target)?.label}</strong>}
     <p>{reference.description}</p>
     {reference.dataIds.length > 0 && <p>渡す・参照する情報：{reference.dataIds.map(id => graph.nodes.find(n => n.id === id)?.label ?? id).join(" / ")}</p>}
     {reference.evidence ? <blockquote>{reference.evidence}</blockquote> : <p>原文の根拠は未登録です。</p>}
-    <div>{reference.workflowIds.map(id => {
+    <div>{workflows.items.map(id => {
       const steps = reference.processIds.map(processId => graph.nodes.find(n => n.id === processId))
         .filter(n => n?.workflowId === id && n.kind === "process");
       const step = steps.length === 1 ? steps[0] : undefined;
@@ -89,11 +91,30 @@ export function RelationshipEvidence({ edge, nodes, graph, onWorkflow, onClose }
         {step && <small>「{step.label}」の手順へ</small>}
       </button>;
     })}</div>
+    {workflows.last > 0 && <div className="relationship-pagination" role="group" aria-label="この根拠に関連する業務のページ">
+      <button disabled={!workflows.page} onClick={() => setPage(workflows.page - 1)}>前の6関連業務</button>
+      <span>{workflows.start}–{workflows.end} / {workflows.total}関連業務</span>
+      <button disabled={workflows.page === workflows.last} onClick={() => setPage(workflows.page + 1)}>次の6関連業務</button>
+    </div>}
   </article>;
+}
+
+export function RelationshipEvidence({ edge, nodes, graph, onWorkflow, onClose, title }: {
+  edge: OverviewRelation; nodes: readonly OverviewNode[]; graph: import("@/lib/graph").LensGraph;
+  onWorkflow: (id: string, stepId?: string) => void; onClose?: () => void; title?: string;
+}) {
+  const [page, setPage] = useState(0);
+  useEffect(() => setPage(0), [edge.id]);
+  const references = readingPage(edge.references, page, 3);
+  const label = (id: string) => nodes.find(n => n.id === id)?.label ?? id;
   return <aside className="relationship-evidence" aria-label="選んだ関係の根拠">
-    <header><h3>{label(edge.source)} → {label(edge.target)}</h3><button onClick={onClose}>根拠を閉じる</button></header>
+    <header><h3>{title ?? `${label(edge.source)} → ${label(edge.target)}`}</h3>{onClose && <button onClick={onClose}>根拠を閉じる</button>}</header>
     <p>{relationLabels[edge.kind]} · {edge.references.length}件。{edge.kind === "dependency" && `${label(edge.source)}が動くために${label(edge.target)}を必要とします。`}</p>
-    {edge.references.slice(0, 3).map(ref)}
-    {edge.references.length > 3 && <details><summary>ほか{edge.references.length - 3}件の根拠</summary>{edge.references.slice(3).map(ref)}</details>}
+    {references.items.map((reference, i) => <ReferenceEvidence key={`${edge.id}:${references.page}:${i}`} reference={reference} graph={graph} onWorkflow={onWorkflow} />)}
+    {references.last > 0 && <div className="relationship-pagination" role="group" aria-label="関係の根拠のページ">
+      <button disabled={!references.page} onClick={() => setPage(references.page - 1)}>前の3根拠</button>
+      <span>{references.start}–{references.end} / {references.total}根拠</span>
+      <button disabled={references.page === references.last} onClick={() => setPage(references.page + 1)}>次の3根拠</button>
+    </div>}
   </aside>;
 }

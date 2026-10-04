@@ -25,8 +25,10 @@ import { createChemicalCompany } from "@/lib/chemical-company";
 import { inputSystemRoles } from "@/lib/input-knowledge";
 import { SystemLandscapeCards } from "./SystemLandscapeCards";
 import { SystemRelationshipMap } from "./SystemRelationshipMap";
+import { ActivityRelationshipMap } from "./ActivityRelationshipMap";
+import { readingPage } from "@/lib/overview-reading";
 import { KnowledgeReportPreview } from "./KnowledgeReportPreview";
-import type { ExplorationFocus as Focus, ExplorationPosition, KnowledgeExploration } from "@/lib/exploration";
+import type { ActivityReadingPosition, ExplorationFocus as Focus, ExplorationPosition, KnowledgeExploration } from "@/lib/exploration";
 export type { KnowledgeExploration } from "@/lib/exploration";
 
 const mode = {
@@ -35,6 +37,15 @@ const mode = {
   mixed: "人＋自動処理",
   unknown: "実行方法未確認",
 };
+
+function ScopeControls({ compact, scope, department, query, count, children }: {
+  compact: boolean; scope: KnowledgeScope; department: string; query: string; count: number; children: React.ReactNode;
+}) {
+  if (!compact) return <>{children}</>;
+  return <details className="kg-scope-controls"><summary>
+    表示範囲：{scope === "current" ? "現在の仕事" : scope === "future" ? "改善後の案" : "別の案"} · {department || "すべての部署"} · {count}業務{query && ` · 検索「${query}」`} — 条件を変える
+  </summary>{children}</details>;
+}
 
 export function KnowledgeExplorer({
   projectId,
@@ -66,19 +77,21 @@ export function KnowledgeExplorer({
   const [query, setQuery] = useState(exploration?.query ?? "");
   const [department, setDepartment] = useState(exploration?.department ?? "");
   const [category, setCategory] = useState(exploration?.category ?? "");
-  const [page, setPage] = useState(0);
+  const [page, setPage] = useState(exploration?.listPage ?? 0);
   const [readStepId, setReadStep] = useState(exploration?.stepId ?? "");
   const [readerJourney, setReaderJourney] = useState<FlowJourney | undefined>(exploration?.journey);
   const [readDataId, setReadData] = useState(exploration?.dataId ?? "");
   const [readDepth, setReadDepth] = useState<FlowReadingPosition["depth"]>(exploration?.depth ?? "step");
   const [readLens, setReadLens] = useState<FlowReadingPosition["lens"]>(exploration?.lens ?? (exploration?.dataId ? "data" : "work"));
+  const [activityReading, setActivityReading] = useState<ActivityReadingPosition | undefined>(exploration?.activityReading);
+  const rememberActivity = useCallback((position: ActivityReadingPosition) => setActivityReading(position), []);
   const rememberReading = useCallback((position: FlowReadingPosition) => {
     setReadStep(position.stepId); setReadData(position.dataId);
     setReadDepth(position.depth); setReadLens(position.lens); setReaderJourney(position.journey);
   }, []);
   useEffect(() => {
-    onExplorationChange?.({ focus, history, scope, query, department, category, stepId: readStepId, dataId: readDataId, depth: readDepth, lens: readLens, journey: readerJourney });
-  }, [focus, history, scope, query, department, category, readStepId, readDataId, readDepth, readLens, readerJourney, onExplorationChange]);
+    onExplorationChange?.({ focus, history, scope, query, department, category, stepId: readStepId, dataId: readDataId, depth: readDepth, lens: readLens, journey: readerJourney, activityReading, listPage: page });
+  }, [focus, history, scope, query, department, category, readStepId, readDataId, readDepth, readLens, readerJourney, activityReading, page, onExplorationChange]);
   const [editingStep, setEditingStep] = useState("");
   const [categoryName, setCategoryName] = useState("");
   const [dependencyId, setDependencyId] = useState("");
@@ -90,7 +103,7 @@ export function KnowledgeExplorer({
     [graph, scope, query, department],
   );
   const go = (next: Focus) => {
-    setHistory((h) => [...h, { focus, scope, query, department, category, stepId: readStepId, dataId: readDataId, depth: readDepth, lens: readLens, journey: readerJourney }]);
+    setHistory((h) => [...h, { focus, scope, query, department, category, stepId: readStepId, dataId: readDataId, depth: readDepth, lens: readLens, journey: readerJourney, activityReading, listPage: page }]);
     setFocus(next);
     if (next.kind === "process") { setReadDepth("detail"); setReadLens("work"); setReadData(""); }
     setPage(0);
@@ -255,17 +268,20 @@ export function KnowledgeExplorer({
               }),
             )
           : (activity?.rows ?? cap?.rows ?? impact?.direct ?? view.rows);
-  const list = (rows: typeof view.rows) => (
+  const listSize = activity || cap ? 6 : 20;
+  const list = (rows: typeof view.rows) => {
+    const displayed = readingPage(rows, page, listSize);
+    return (
     <>
       <p>
         {rows.length}業務 /{" "}
         {rows.length
-          ? `${page * 20 + 1}–${Math.min(rows.length, (page + 1) * 20)}`
+          ? `${displayed.start}–${displayed.end}`
           : "0"}
         を表示
       </p>
       <div className="kg-workflows">
-        {rows.slice(page * 20, (page + 1) * 20).map((r) => (
+        {displayed.items.map((r) => (
           <article key={r.workflow.id}>
             {workflowButton(r.workflow.id)}
             <p>{r.workflow.description}</p>
@@ -280,18 +296,19 @@ export function KnowledgeExplorer({
         ))}
       </div>
       <div className="kg-toolbar">
-        <button disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
-          前の20件
+        <button disabled={displayed.page === 0} onClick={() => setPage(displayed.page - 1)}>
+          前の{listSize}件
         </button>
         <button
-          disabled={(page + 1) * 20 >= rows.length}
-          onClick={() => setPage((p) => p + 1)}
+          disabled={displayed.page === displayed.last}
+          onClick={() => setPage(displayed.page + 1)}
         >
-          次の20件
+          次の{listSize}件
         </button>
       </div>
     </>
   );
+  };
   return (
     <section className="page-view kg-view" data-focus={focus.kind}>
       <header className="company-page-header">
@@ -360,8 +377,9 @@ export function KnowledgeExplorer({
               setReadDepth(previous.depth ?? "step");
               setReadLens(previous.lens ?? (previous.dataId ? "data" : "work"));
               setReaderJourney(previous.journey);
+              setActivityReading(previous.activityReading);
               setHistory((h) => h.slice(0, -1));
-              setPage(0);
+              setPage(previous.listPage ?? 0);
               window.scrollTo({ top: 0, behavior: "instant" });
             }}
           >
@@ -373,6 +391,7 @@ export function KnowledgeExplorer({
       {error && <p role="alert">{error}</p>}
       {report && <KnowledgeReportPreview key={report.url} {...report} onClose={() => setReport(null)} />}
 
+      <ScopeControls compact={!!(activity || cap)} scope={scope} department={department} query={query} count={selectedRows.length}>
       <div className="kg-toolbar company-filters">
         <label>
           表示する状態
@@ -429,6 +448,7 @@ export function KnowledgeExplorer({
           検索・部署の条件をクリア
         </button>
       )}
+      </ScopeControls>
       {focus.kind === "company" && (
         <CompanyOrientation
           graph={graph}
@@ -523,52 +543,20 @@ export function KnowledgeExplorer({
       )}
       {activity && (
         <>
-          <h2>{activity.name}</h2>
-          {activity.certainty && activity.certainty !== "confirmed" && (
-            <p>入力された話からの整理案です。</p>
-          )}
-          <p>{activity.description}</p>
-          <p className="kg-context">
-            ここでは、この活動に必要な「仕事の種類」を選びます。たとえば受注登録は仕事の種類で、工場ごとに担当部署や手順が違います。
-          </p>
-          <h3>どの仕事を知りたいですか？</h3>
-          <div className="kg-cards">
-            {activity.capabilities
-              .filter((c) => c.rows.length)
-              .map((c) => (
-                <button
-                  key={c.id}
-                  onClick={() => go({ kind: "capability", id: c.id })}
-                >
-                  <strong>{c.name}</strong>
-                  {c.certainty && c.certainty !== "confirmed" && (
-                    <small> 整理案</small>
-                  )}
-                  <p>{c.description}</p>
-                  {c.rows.length}業務
-                </button>
-              ))}
-          </div>
-          <h3>この活動を支えるシステム・道具</h3>
-          {[
-            ...new Map(
-              activity.rows
-                .flatMap((r) => r.assets.filter((n) => n.kind === "system"))
-                .map((n) => [n.id, n]),
-            ).values(),
-          ].map(assetButton)}
-          <h3>関係部署</h3>
-          <p>
-            {[...new Set(activity.rows.flatMap((r) => r.departments))].join(
-              " / ",
-            )}
-          </p>
-          {list(activity.rows)}
+          <ActivityRelationshipMap key={activity.id} graph={graph} activity={activity} workflowIds={view.rows.map(r => r.workflow.id)}
+            position={activityReading} onPositionChange={rememberActivity}
+            onActivity={id => go({ kind: "activity", id })} onCapability={id => go({ kind: "capability", id })}
+            onSystem={id => go({ kind: "asset", id })} onWorkflow={(id, stepId) => {
+              setReadStep(stepId ?? ""); setReaderJourney(undefined); setReadData(""); setReadDepth("step"); setReadLens("work");
+              go({ kind: "workflow", id });
+            }} />
+          <details><summary>この活動の業務を一覧から選ぶ · {activity.rows.length}件</summary>{list(activity.rows)}</details>
         </>
       )}
       {cap && (
         <>
           <h2>{cap.name}</h2>
+          <button onClick={() => go({ kind: "activity", id: view.activities.find(a => a.capabilities.some(c => c.id === cap.id))!.id })}>↑ 活動のまとまりの関係へ戻る</button>
           <p>{cap.description}</p>
           <p className="kg-context">
             同じ仕事でも、部署・工場・製品ごとに行い方が違います。ひとつ選ぶと、開始から完了までの手順がわかります。
