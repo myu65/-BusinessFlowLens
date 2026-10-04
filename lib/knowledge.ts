@@ -374,6 +374,44 @@ function comparisonRowsFor(graph: LensGraph) {
   ].flatMap((scope) => knowledgeIndex(graph, scope).rows);
 }
 
+function comparisonProcessKey(process: LensNode, workflowId: string) {
+  const prefix = `process:${workflowId}:`;
+  return process.canonicalKey.startsWith(prefix) ? process.canonicalKey.slice(prefix.length) : "";
+}
+
+function comparableProcess(graph: LensGraph, process: LensNode) {
+  const resources = graph.edges.filter(e => ["uses", "executes", "reads", "writes"].includes(e.relation)
+    && (e.source === process.id || e.target === process.id))
+    .map(e => [e.relation, e.source === process.id ? e.target : e.source].join(":"))
+    .sort();
+  return { label: process.label, action: process.action, meaning: process.meaning,
+    mode: process.executionMode, actor: process.actor, department: process.department,
+    responsiblePerson: process.responsiblePerson, executionContext: process.executionContext, resources };
+}
+
+export function comparisonExecutor(graph: LensGraph, process: LensNode) {
+  const systems = graph.edges.filter(e => e.relation === "executes" && e.target === process.id)
+    .map(e => graph.nodes.find(n => n.id === e.source)?.label).filter(Boolean);
+  const human = process.actor || "担当未確認";
+  return process.executionMode === "automatic" ? systems.join(" / ") || "実行システム未確認"
+    : process.executionMode === "mixed" ? `${human}${systems.length ? ` / ${systems.join(" / ")}` : " / 実行システム未確認"}` : human;
+}
+
+export const executionLabels = { manual: "人が行う", automatic: "システムが自動実行", mixed: "人と自動処理", unknown: "実行方法未確認" };
+export const confidenceLabels = { confirmed: "確認済み", inferred: "推定", unknown: "未確認" };
+
+export function comparisonResources(graph: LensGraph, process: LensNode) {
+  const labels = (relations: string[]) => [...new Set(graph.edges
+    .filter(e => relations.includes(e.relation) && (e.source === process.id || e.target === process.id))
+    .map(e => graph.nodes.find(n => n.id === (e.source === process.id ? e.target : e.source))?.label)
+    .filter((label): label is string => !!label))].sort().join(" / ") || "未登録";
+  return { tools: labels(["uses", "executes"]), input: labels(["reads"]), output: labels(["writes"]) };
+}
+
+function comparisonEvidence(process: LensNode) {
+  return [...new Set([process.meaning?.evidence, process.evidence].filter(Boolean))].join(" / ") || "未登録";
+}
+
 export function compareWorkflow(
   graph: LensGraph,
   workflowId: string,
@@ -391,14 +429,19 @@ export function compareWorkflow(
   const a = rows.find((r) => r.workflow.id === workflowId)!;
   return alternatives.map((w) => {
     const b = rows.find((r) => r.workflow.id === w.id)!;
+    const matches = new Map<string, LensNode>();
+    for (const process of a.processes) {
+      const key = comparisonProcessKey(process, a.workflow.id);
+      if (!key || a.processes.filter(n => comparisonProcessKey(n, a.workflow.id) === key).length !== 1) continue;
+      const others = b.processes.filter(n => comparisonProcessKey(n, b.workflow.id) === key);
+      if (others.length === 1) matches.set(process.id, others[0]);
+    }
+    const matchedAfter = new Set([...matches.values()].map(p => p.id));
     return {
       workflow: w,
-      removed: a.processes.filter(
-        (p) => !b.processes.some((n) => n.label === p.label),
-      ),
-      added: b.processes.filter(
-        (p) => !a.processes.some((n) => n.label === p.label),
-      ),
+      removed: a.processes.filter(p => !matches.has(p.id)),
+      added: b.processes.filter(p => !matchedAfter.has(p.id)),
+      correspondingSteps: a.processes.flatMap(p => matches.has(p.id) ? [{ before: p, after: matches.get(p.id)! }] : []),
       beforeManual: a.flows.filter((f) => f.automation === "manual").length,
       afterManual: b.flows.filter((f) => f.automation === "manual").length,
       beforeSystems: a.assets.filter((n) => n.kind === "system"),
@@ -406,22 +449,8 @@ export function compareWorkflow(
       beforeOutcome: a.workflow.outcome,
       afterOutcome: b.workflow.outcome,
       resultChanges: a.processes.flatMap((p) => {
-        const other = b.processes.find(
-          (n) =>
-            n.canonicalKey.split(":").at(-1) ===
-            p.canonicalKey.split(":").at(-1),
-        );
-        return other &&
-          JSON.stringify({
-            meaning: p.meaning,
-            mode: p.executionMode,
-            actor: p.actor,
-          }) !==
-            JSON.stringify({
-              meaning: other.meaning,
-              mode: other.executionMode,
-              actor: other.actor,
-            })
+        const other = matches.get(p.id);
+        return other && JSON.stringify(comparableProcess(graph, p)) !== JSON.stringify(comparableProcess(graph, other))
           ? [{ before: p, after: other }]
           : [];
       }),
@@ -528,12 +557,12 @@ export function knowledgeReport(
       "",
       ...comparisons.map(
         (c) =>
-          `比較: ${c.workflow.name} / 有効日: ${c.workflow.effectiveFrom ?? "未定"} / 手動転送 ${c.beforeManual} → ${c.afterManual} / 削除: ${c.removed.map((p) => p.label).join("、")} / 追加: ${c.added.map((p) => p.label).join("、")}`,
+          `比較: ${c.workflow.name} / 有効日: ${c.workflow.effectiveFrom ?? "未定"} / 登録された手動の受渡し ${c.beforeManual} → ${c.afterManual} / 除外する手順の候補: ${c.removed.map((p) => p.label).join("、") || "なし"} / 追加する手順の候補: ${c.added.map((p) => p.label).join("、") || "なし"}`,
       ),
       ...comparisons.flatMap((c) => [
         ...c.resultChanges.map(
           (x) =>
-            `結果の比較: ${x.before.label} / ${x.before.meaning?.result || "未確認"} → ${x.after.meaning?.result || "未確認"} / 次の仕事: ${x.before.meaning?.next || "未確認"} → ${x.after.meaning?.next || "未確認"} / 根拠: ${x.after.meaning?.evidence || "未登録"}`,
+            `同じ手順の変更: ${x.before.label} → ${x.after.label} / 担当・実行主体: ${comparisonExecutor(graph, x.before)} → ${comparisonExecutor(graph, x.after)} / 実行方法: ${executionLabels[x.before.executionMode ?? "unknown"]} → ${executionLabels[x.after.executionMode ?? "unknown"]} / 結果: ${x.before.meaning?.result || "未確認"} → ${x.after.meaning?.result || "未確認"} / 次の仕事: ${x.before.meaning?.next || "未確認"} → ${x.after.meaning?.next || "未確認"} / 道具: ${comparisonResources(graph, x.before).tools} → ${comparisonResources(graph, x.after).tools} / 受け取る情報: ${comparisonResources(graph, x.before).input} → ${comparisonResources(graph, x.after).input} / 残す情報: ${comparisonResources(graph, x.before).output} → ${comparisonResources(graph, x.after).output} / 確かさ: ${confidenceLabels[x.before.meaning?.certainty ?? x.before.status]} → ${confidenceLabels[x.after.meaning?.certainty ?? x.after.status]} / 原文: ${comparisonEvidence(x.before)} → ${comparisonEvidence(x.after)} / 人の訂正: ${x.before.humanEdits?.length ?? 0}件 → ${x.after.humanEdits?.length ?? 0}件`,
         ),
         ...c.added.map(
           (p) =>
@@ -545,6 +574,7 @@ export function knowledgeReport(
         ),
       ]),
       "",
+      ...(comparisons.length ? ["比較は同じ業務の家族と保存済み手順の識別子を対応づける。名前や順番だけでは同じ作業と決めない。手動の受渡し件数は登録されたSystem間の線を数え、人の操作全体や未登録の受渡しを含まない。", ""] : []),
     );
   }
   return lines.join("\n");

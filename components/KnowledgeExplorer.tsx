@@ -1,10 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { LensGraph, LensNode } from "@/lib/graph";
-import { handoffJourney, type FlowJourney } from "@/lib/flow-context";
+import { handoffJourney, type FlowJourney, type FlowReadingPosition } from "@/lib/flow-context";
 import {
   compareWorkflow,
+  comparisonExecutor,
+  comparisonResources,
+  executionLabels,
+  confidenceLabels,
   knowledgeIndex,
   knowledgeReport,
   type KnowledgeScope,
@@ -19,23 +23,9 @@ import { createChemicalCompany } from "@/lib/chemical-company";
 import { inputSystemRoles } from "@/lib/input-knowledge";
 import { SystemLandscapeCards } from "./SystemLandscapeCards";
 import { SystemRelationshipMap } from "./SystemRelationshipMap";
+import type { ExplorationFocus as Focus, ExplorationPosition, KnowledgeExploration } from "@/lib/exploration";
+export type { KnowledgeExploration } from "@/lib/exploration";
 
-type Focus =
-  | { kind: "company" | "systems" }
-  | {
-      kind: "activity" | "capability" | "workflow" | "process" | "asset";
-      id: string;
-    };
-type ExplorationPosition = {
-  focus: Focus;
-  scope: KnowledgeScope;
-  query: string;
-  department: string;
-  category: string;
-};
-export type KnowledgeExploration = ExplorationPosition & {
-  history: ExplorationPosition[];
-};
 const mode = {
   manual: "人による作業",
   automatic: "システム自動処理",
@@ -73,13 +63,19 @@ export function KnowledgeExplorer({
   const [query, setQuery] = useState(exploration?.query ?? "");
   const [department, setDepartment] = useState(exploration?.department ?? "");
   const [category, setCategory] = useState(exploration?.category ?? "");
-  useEffect(() => {
-    onExplorationChange?.({ focus, history, scope, query, department, category });
-  }, [focus, history, scope, query, department, category, onExplorationChange]);
   const [page, setPage] = useState(0);
-  const [readStepId, setReadStep] = useState("");
-  const [readerJourney, setReaderJourney] = useState<FlowJourney>();
-  const [readDataId, setReadData] = useState("");
+  const [readStepId, setReadStep] = useState(exploration?.stepId ?? "");
+  const [readerJourney, setReaderJourney] = useState<FlowJourney | undefined>(exploration?.journey);
+  const [readDataId, setReadData] = useState(exploration?.dataId ?? "");
+  const [readDepth, setReadDepth] = useState<FlowReadingPosition["depth"]>(exploration?.depth ?? "step");
+  const [readLens, setReadLens] = useState<FlowReadingPosition["lens"]>(exploration?.lens ?? (exploration?.dataId ? "data" : "work"));
+  const rememberReading = useCallback((position: FlowReadingPosition) => {
+    setReadStep(position.stepId); setReadData(position.dataId);
+    setReadDepth(position.depth); setReadLens(position.lens); setReaderJourney(position.journey);
+  }, []);
+  useEffect(() => {
+    onExplorationChange?.({ focus, history, scope, query, department, category, stepId: readStepId, dataId: readDataId, depth: readDepth, lens: readLens, journey: readerJourney });
+  }, [focus, history, scope, query, department, category, readStepId, readDataId, readDepth, readLens, readerJourney, onExplorationChange]);
   const [editingStep, setEditingStep] = useState("");
   const [categoryName, setCategoryName] = useState("");
   const [dependencyId, setDependencyId] = useState("");
@@ -91,8 +87,9 @@ export function KnowledgeExplorer({
     [graph, scope, query, department],
   );
   const go = (next: Focus) => {
-    setHistory((h) => [...h, { focus, scope, query, department, category }]);
+    setHistory((h) => [...h, { focus, scope, query, department, category, stepId: readStepId, dataId: readDataId, depth: readDepth, lens: readLens, journey: readerJourney }]);
     setFocus(next);
+    if (next.kind === "process") { setReadDepth("detail"); setReadLens("work"); setReadData(""); }
     setPage(0);
     setEditingStep("");
     if (next.kind === "workflow") onWorkflowFocus(next.id);
@@ -355,6 +352,11 @@ export function KnowledgeExplorer({
               setQuery(previous.query);
               setDepartment(previous.department);
               setCategory(previous.category);
+              setReadStep(previous.stepId ?? "");
+              setReadData(previous.dataId ?? "");
+              setReadDepth(previous.depth ?? "step");
+              setReadLens(previous.lens ?? (previous.dataId ? "data" : "work"));
+              setReaderJourney(previous.journey);
               setHistory((h) => h.slice(0, -1));
               setPage(0);
               window.scrollTo({ top: 0, behavior: "instant" });
@@ -449,7 +451,7 @@ export function KnowledgeExplorer({
           scope={scope}
           rows={view.rows}
           workflowIds={view.rows.map((r) => r.workflow.id)}
-          onWorkflow={(id, stepId) => { setReadStep(stepId ?? ""); setReaderJourney(undefined); setReadData(""); go({ kind: "workflow", id }); }}
+          onWorkflow={(id, stepId) => { setReadStep(stepId ?? ""); setReaderJourney(undefined); setReadData(""); setReadDepth("step"); setReadLens("work"); go({ kind: "workflow", id }); }}
           onSystems={() => go({ kind: "systems" })}
           onActivity={(id) => go({ kind: "activity", id })}
           onSystem={(id) => go({ kind: "asset", id })}
@@ -634,7 +636,9 @@ export function KnowledgeExplorer({
             workflowId={row.workflow.id}
             initialStepId={readStepId}
             initialDataId={readDataId || undefined}
-            initialLens={readDataId ? "data" : "work"}
+            initialDepth={readDepth}
+            initialLens={readLens}
+            onReadingChange={rememberReading}
             onGraphApply={onGraphApply}
             onStepChange={(id) => {
               setReadStep(id);
@@ -650,6 +654,7 @@ export function KnowledgeExplorer({
               setReaderJourney(journey);
               setReadStep(journey.stepId ?? "");
               setReadData(journey.dataId ?? "");
+              setReadLens(journey.dataId ? "data" : "work");
               setQuery("");
               setDepartment("");
               go({ kind: "workflow", id });
@@ -660,7 +665,7 @@ export function KnowledgeExplorer({
             }}
             onAsset={(n, stepId) => {
               setReadStep(stepId);
-              if (n.kind === "data") setReadData(n.id);
+              if (n.kind === "data") { setReadData(n.id); setReadLens("data"); }
               go({ kind: "asset", id: n.id });
             }}
           />
@@ -708,6 +713,7 @@ export function KnowledgeExplorer({
                         setReaderJourney(journey);
                         setReadStep(journey.stepId ?? "");
                         setReadData(journey.dataId ?? "");
+                        setReadLens(journey.dataId ? "data" : "work");
                         go({ kind: "workflow", id: target });
                       }}
                     >
@@ -737,23 +743,28 @@ export function KnowledgeExplorer({
                       setScope(c.workflow.scenario ?? "current");
                       setQuery("");
                       setDepartment("");
+                      setReadStep(c.correspondingSteps.find(x => x.before.id === readStepId)?.after.id ?? "");
+                      setReaderJourney(undefined);
+                      setReadData("");
+                      setReadLens("work");
                       go({ kind: "workflow", id: c.workflow.id });
                     }}
                   >
                     {c.workflow.name}
                   </button>
                   <p>
-                    有効日: {c.workflow.effectiveFrom ?? "未定"} · 手動受渡し{" "}
+                    有効日: {c.workflow.effectiveFrom ?? "未定"} · 登録された手動の受渡し{" "}
                     {c.beforeManual} → {c.afterManual}
                   </p>
                   <p>
-                    削除される工程:{" "}
+                    除外する手順の候補:{" "}
                     {c.removed.map((n) => n.label).join(" / ") || "なし"}
                   </p>
                   <p>
-                    追加される工程:{" "}
+                    追加する手順の候補:{" "}
                     {c.added.map((n) => n.label).join(" / ") || "なし"}
                   </p>
+                  <p>同じ手順の識別子で対応づけています。名前や順番だけでは同じ作業と決めません。件数は登録されたSystem間の線を数え、人の操作全体や未登録の受渡しを含みません。</p>
                   <p>
                     道具: {c.beforeSystems.map((n) => n.label).join(" / ")} →{" "}
                     {c.afterSystems.map((n) => n.label).join(" / ")}
@@ -763,13 +774,28 @@ export function KnowledgeExplorer({
                     {c.afterOutcome || "未確認"}
                   </p>
                   {c.resultChanges.map((x) => (
-                    <p key={x.before.id}>
-                      {x.before.label}：
+                    <article className="kg-comparison-change" key={x.before.id}>
+                      <h4>同じ手順の変更：{x.before.label} → {x.after.label}</h4>
+                      <p>担当・実行主体：{comparisonExecutor(graph, x.before)} → {comparisonExecutor(graph, x.after)}</p>
+                      <p>実行方法：{executionLabels[x.before.executionMode ?? "unknown"]} → {executionLabels[x.after.executionMode ?? "unknown"]}</p>
+                      <p>結果：
                       {x.before.meaning?.result || "結果未確認"} →{" "}
-                      {x.after.meaning?.result || "結果未確認"} / 次の仕事：
-                      {x.after.meaning?.next || "未確認"} / 根拠：
-                      {x.after.meaning?.evidence || "未登録"}
-                    </p>
+                      {x.after.meaning?.result || "結果未確認"}</p>
+                      <p>次の仕事：{x.before.meaning?.next || "未確認"} → {x.after.meaning?.next || "未確認"}</p>
+                      <details><summary>判断の根拠・道具・情報・原文を比べる</summary>
+                        <p>仕事の理由：{x.before.meaning?.purpose || "未確認"} → {x.after.meaning?.purpose || "未確認"}</p>
+                        <p>判断の根拠：{x.before.meaning?.basis || "未確認"} → {x.after.meaning?.basis || "未確認"}</p>
+                        <p>条件：{x.before.meaning?.condition || "未確認"} → {x.after.meaning?.condition || "未確認"}</p>
+                        <p>道具：{comparisonResources(graph, x.before).tools} → {comparisonResources(graph, x.after).tools}</p>
+                        <p>受け取る情報：{comparisonResources(graph, x.before).input} → {comparisonResources(graph, x.after).input}</p>
+                        <p>残す情報：{comparisonResources(graph, x.before).output} → {comparisonResources(graph, x.after).output}</p>
+                        <p>比較元「{row.workflow.name}」：{confidenceLabels[x.before.meaning?.certainty ?? x.before.status]} / {x.before.meaning?.evidence || "根拠未登録"}</p>
+                        {x.before.evidence && x.before.evidence !== x.before.meaning?.evidence && <blockquote>{x.before.evidence}</blockquote>}
+                        <p>比較先「{c.workflow.name}」：{confidenceLabels[x.after.meaning?.certainty ?? x.after.status]} / {x.after.meaning?.evidence || "根拠未登録"}</p>
+                        {x.after.evidence && x.after.evidence !== x.after.meaning?.evidence && <blockquote>{x.after.evidence}</blockquote>}
+                        <p>人の訂正：比較元{x.before.humanEdits?.length ?? 0}件 / 比較先{x.after.humanEdits?.length ?? 0}件。値は元の手順・履歴で確認できます。</p>
+                      </details>
+                    </article>
                   ))}
                   {c.added.map(
                     (n) =>
@@ -802,7 +828,10 @@ export function KnowledgeExplorer({
             graph={graph}
             workflowId={processRow.workflow.id}
             initialStepId={asset.id}
-            initialDepth="detail"
+            initialDepth={readDepth}
+            initialDataId={readDataId || undefined}
+            initialLens={readLens}
+            onReadingChange={rememberReading}
             onStepChange={(id) => {
               setReadStep(id);
               setEditingStep("");
@@ -811,7 +840,7 @@ export function KnowledgeExplorer({
             onDetail={setEditingStep}
             onAsset={(n, id) => {
               setReadStep(id);
-              if (n.kind === "data") setReadData(n.id);
+              if (n.kind === "data") { setReadData(n.id); setReadLens("data"); }
               go({ kind: "asset", id: n.id });
             }}
             journey={
@@ -823,6 +852,7 @@ export function KnowledgeExplorer({
               setReaderJourney(journey);
               setReadStep(journey.stepId ?? "");
               setReadData(journey.dataId ?? "");
+              setReadLens(journey.dataId ? "data" : "work");
               go({ kind: "workflow", id });
             }}
           />
@@ -869,7 +899,7 @@ export function KnowledgeExplorer({
           <SystemRelationshipMap graph={graph} scope={scope} systems={systems} view={view}
             onSelect={id => go({ kind: "asset", id })} onActivity={id => go({ kind: "activity", id })}
             onWorkflow={(id, stepId) => {
-              setReadStep(stepId ?? ""); setReaderJourney(undefined); setReadData("");
+              setReadStep(stepId ?? ""); setReaderJourney(undefined); setReadData(""); setReadDepth("step"); setReadLens("work");
               go({ kind: "workflow", id });
               if (!view.rows.some(r => r.workflow.id === id)) { setQuery(""); setDepartment(""); }
             }} />
@@ -1074,6 +1104,7 @@ export function KnowledgeExplorer({
             <button
               onClick={() => {
                 setReadData(asset.id);
+                setReadLens("data");
                 setReadStep("");
                 go({ kind: "workflow", id: impact.direct[0].workflow.id });
               }}

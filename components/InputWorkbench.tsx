@@ -82,7 +82,7 @@ export function InputWorkbench({
   renderAdvanced?: (actions: AdvancedActions) => ReactNode;
   focusedStepId?: string;
   onFocusStep?: (workflowId: string, stepId: string) => void;
-  onExplore?: () => void;
+  onExplore?: (workflowId: string, stepId?: string) => void;
 }) {
   const key = selectedId || NEW_MEMO_ID;
   const draft = drafts[key];
@@ -1540,8 +1540,11 @@ export function InputWorkbench({
                       ? "確認できたところまで保存できます。未確認の内容も、そのまま残ります。"
                       : "この話と流れは保存されています。続きを書くと、ここにつながります。"}
                 </p>
-                {!draft && onExplore && (
-                  <button onClick={onExplore}>会社の全体像で見る →</button>
+                {!draft && saved && onExplore && (
+                  <button disabled={busy || stale || pendingAnswers || !!addition.trim() || !!edit} onClick={() => {
+                    const step = getWorkflowProcesses(graph, saved.id).find(n => n.canonicalKey === `process:${saved.id}:${selected?.stepKey}`);
+                    onExplore(saved.id, step?.id);
+                  }}>この仕事を会社の中で見る →</button>
                 )}
                 {!draft && relatedQuestions.length > 0 && (
                   <aside className="input-question-reference">
@@ -1562,6 +1565,8 @@ export function InputWorkbench({
               <strong>{review.systemDependencies?.some(d => !d.rejected) ? "道具どうしの関係が分かりました" : "まだ作業の流れは決めていません"}</strong>
               <p>{review.summary}</p>
               <p>全部を説明する必要はありません。知っていることをメモに足すか、下の確認事項に答えると、ここから流れが育ちます。分からないことは未確認のまま残せます。</p>
+              {!draft && saved && onExplore && <button disabled={busy || stale || pendingAnswers || !!addition.trim() || !!edit}
+                onClick={() => onExplore(saved.id)}>この仕事を会社の中で見る →</button>}
             </aside>
           )}
           {review && (
