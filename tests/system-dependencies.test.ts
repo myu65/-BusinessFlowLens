@@ -22,6 +22,18 @@ function declaredGraph(scenario: "current" | "future" = "current") {
   return { review, graph };
 }
 
+test("a sign-in context grounds the authentication direction but not denial, plans, log use or a different clause", () => {
+  const statement = "TeamsのチャットへサインインするときもEntra IDで認証します。";
+  assert(groundedDependency({ ...dependency(), evidence: statement }, statement));
+  assert(!groundedDependency({ ...dependency(), system: "Entra ID", prerequisite: "Teams", evidence: statement }, statement));
+  for (const evidence of [
+    "TeamsのチャットへサインインするときもEntra IDでは認証しません。",
+    "TeamsのチャットへサインインするときもEntra IDで認証する予定です。",
+    "TeamsのチャットへサインインするときもEntra IDの認証ログを参照します。",
+    "Teamsのチャットへサインインします。別のアプリはEntra IDで認証します。",
+  ]) assert(!groundedDependency({ ...dependency(), evidence }, evidence), evidence);
+});
+
 test("source-grounded platform dependencies need a direction, not co-use, transfer, negation or future assumptions", () => {
   assert(groundedDependency(dependency(), source));
   assert(groundedDependency(dependency("SharePoint"), source));
@@ -91,7 +103,9 @@ test("future-only platform identity, uncertain aliases, source corrections and h
   assert.equal(reread.systemDependencies![0].humanEdits![0].field, "rejected");
   const excluded = previewReviewGraph(graph, graph.workflows[0], reread);
   assert.equal(knowledgeIndex(excluded, "future").systemProfile(entra.id).indirect.length, 0);
-  assert(diffReviews(review, corrected).addedConnections.some(s => s.includes("除外")));
+  const difference = diffReviews(review, corrected);
+  assert.equal(difference.addedConnections.length, 0);
+  assert(difference.changedConnections.some(change => change.after.includes("除外")));
 });
 
 test("a platform-only story remains searchable and visible without counting its declaration as performed business use", () => {
