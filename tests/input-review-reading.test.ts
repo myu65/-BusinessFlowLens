@@ -12,6 +12,9 @@ import type {
 import {
   hasUnreflectedNotes,
   insertNoteAfterEvidence,
+  previewInputDrafts,
+  previewReviewGraph,
+  NEW_MEMO_ID,
 } from "../lib/review-workbench";
 
 const step: ExtractionReviewStep = {
@@ -61,6 +64,25 @@ const review: ExtractionReview = {
   questions: [],
   warnings: [],
 };
+
+test("a saved producer shows the unsaved consumer and its return step as a pending connection", () => {
+  const producer = { id: "order", name: "注文を登録する" };
+  const produced: ExtractionReview = { ...review, steps: [{ ...step, data: [{ name: "注文書", operation: "create", evidence: step.evidence }] }] };
+  const saved = previewReviewGraph(graph, producer, produced);
+  const consumer = { id: "new-picking", name: "倉庫でそろえる" };
+  const read: ExtractionReview = { ...review, steps: [{ ...step, stepKey: "receive" }], incomingHandoffs: [{
+    sourceWorkflowId: producer.id, sourceStepKey: step.stepKey, toStepKey: "receive", via: "reference", data: ["注文書"],
+    description: "登録済み注文を参照", evidence: step.evidence, certainty: "inferred",
+  }] };
+  const preview = previewInputDrafts(saved, { [NEW_MEMO_ID]: { workflow: consumer, review: read, sourceNotes: step.evidence,
+    provider: "test", answers: {}, answerHistory: [], baseline: null } });
+  const html = renderToStaticMarkup(createElement(InputReviewFlow, { review: produced, selected: produced.steps[0],
+    graph: preview, workflowId: producer.id, unsavedWorkflowIds: [consumer.id], busy: false, choose: () => {},
+    onEdit: () => {}, onExclude: () => {}, onWorkflow: () => {} }));
+  assert.ok(html.includes("情報を使う業務：倉庫でそろえる"));
+  assert.ok(html.includes("保存前の候補を含む接続"));
+  assert.ok(html.includes("注文書"));
+});
 
 test("a zero-step input review offers clarification and saving without a workflow setup or fake flow", () => {
   const memo = "購買の仕事を整理したいが、作業はまだ分からない。";

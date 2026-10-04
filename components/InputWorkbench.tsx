@@ -23,6 +23,8 @@ import {
   insertNoteAfterEvidence,
   NEW_MEMO_ID,
   previewReviewGraph,
+  previewInputDrafts,
+  inputKeyForWorkflow,
   type InputDraft,
   transcriptsForSave,
 } from "@/lib/review-workbench";
@@ -220,10 +222,11 @@ export function InputWorkbench({
       cancelled = true;
     };
   }, [projectId, saved, draft]);
+  const navigationGraph = useMemo(() => previewInputDrafts(graph, drafts), [graph, drafts]);
   const preview = useMemo(
     () =>
-      workflow && review ? previewReviewGraph(graph, workflow, review) : graph,
-    [graph, workflow, review],
+      workflow && review ? previewReviewGraph(navigationGraph, workflow, review) : navigationGraph,
+    [navigationGraph, workflow, review],
   );
   const steps = [...(review?.steps ?? [])].sort((a, b) => a.order - b.order);
   const selected = steps.find((s) => s.stepKey === stepKey) ?? steps[0];
@@ -1062,6 +1065,7 @@ export function InputWorkbench({
                   review={review}
                   selected={selected}
                   graph={preview}
+                  unsavedWorkflowIds={Object.values(drafts).map(d => d.workflow.id)}
                   workflowId={workflow!.id}
                   busy={busy}
                   choose={choose}
@@ -1077,11 +1081,11 @@ export function InputWorkbench({
                   }}
                   onExclude={removeStep}
                   onWorkflow={(id, stepKey) => {
-                    const step = getWorkflowProcesses(graph, id).find(
+                    const step = getWorkflowProcesses(preview, id).find(
                       (p) => p.canonicalKey.split(":").at(-1) === stepKey,
                     );
                     if (step) onFocusStep?.(id, step.id);
-                    onSelect(id);
+                    onSelect(inputKeyForWorkflow(drafts, id));
                   }}
                 />
                 {selectedChange && selectedChange.details.length > 0 && (

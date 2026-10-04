@@ -76,6 +76,18 @@ export type InputDraft = {
   answerHistory: import("./graph").FollowUpAnswer[];
   baseline: ExtractionReview | null;
 };
+
+// Navigation can read other unsaved candidates without making them saved
+// context for extraction or publishing them when a different story is saved.
+export function previewInputDrafts(graph: LensGraph, drafts: Record<string, InputDraft>): LensGraph {
+  return Object.values(drafts).reduce((preview, draft) =>
+    previewReviewGraph(preview, draft.workflow, draft.review), graph);
+}
+
+export function inputKeyForWorkflow(drafts: Record<string, InputDraft>, workflowId: string): string {
+  return Object.entries(drafts).find(([, draft]) => draft.workflow.id === workflowId)?.[0] ?? workflowId;
+}
+
 export function reviewSlug(value: string) {
   return value
     .normalize("NFKC")
