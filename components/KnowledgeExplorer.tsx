@@ -17,6 +17,7 @@ import { termExplanation } from "@/lib/knowledge-guide";
 import { KnowledgeEditor } from "./KnowledgeEditor";
 import { createChemicalCompany } from "@/lib/chemical-company";
 import { inputSystemRoles } from "@/lib/input-knowledge";
+import { SystemLandscapeCards } from "./SystemLandscapeCards";
 
 type Focus =
   | { kind: "company" | "systems" }
@@ -830,9 +831,8 @@ export function KnowledgeExplorer({
       )}
       {focus.kind === "systems" && (
         <>
-          <h2>会社を支えるシステム・道具</h2>
           <p>
-            業務システムだけでなく、Teams・Excel・認証・ネットワークも会社を動かす道具です。ひとつ選ぶと、誰がどの仕事で使い、何と情報をやり取りしているかがわかります。
+            道具を選ぶと、支える仕事・人・情報を辿れます。Teams・Excel・認証・ネットワークも含みます。
           </p>
           {query && (
             <p className="kg-context">
@@ -858,39 +858,7 @@ export function KnowledgeExplorer({
               ))}
             </select>
           </label>
-          <div className="kg-cards">
-            {systems.map((n) => {
-              const profile = graph.knowledge?.systems.find(
-                (s) => s.systemId === n.id,
-              );
-              const related = view.systemProfile(n.id);
-              const roles = inputSystemRoles(
-                graph,
-                n.id,
-                related.direct.map((r) => r.workflow.id),
-              );
-              const purpose = profile?.purpose || roles[0]?.purpose;
-              return (
-                <button
-                  key={n.id}
-                  onClick={() => go({ kind: "asset", id: n.id })}
-                >
-                  <strong>{n.label}</strong>
-                  <p>{purpose || termExplanation(n.label) || n.description}</p>
-                  {!profile?.purpose && roles.length > 0 && (
-                    <small>入力で分かった役割の一例</small>
-                  )}
-                  <span>
-                    {graph.knowledge?.categories.find(
-                      (c) => c.id === profile?.categoryId,
-                    )?.name ?? "分類未登録"}{" "}
-                    · 直接 {related.direct.length}業務 · 間接{" "}
-                    {related.indirect.length}業務
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+          <SystemLandscapeCards graph={graph} systems={systems} view={view} page={page} onPage={setPage} onSelect={id => go({kind: "asset", id})} />
           {graph.knowledge && (
             <details>
               <summary>システム・道具の分類を追加・変更する</summary>

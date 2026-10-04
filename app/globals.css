@@ -3141,6 +3141,9 @@ button:disabled { cursor:not-allowed; opacity:.45; }
 .kg-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin: 20px 0; }
 .kg-cards button { padding: 20px; }
 .kg-cards strong { font-size: 18px; }
+.system-landscape-reading .kg-cards small,
+.system-landscape-reading .kg-cards span { display: block; margin-top: 6px; }
+.system-landscape-reading .kg-cards small { color: #657167; font-size: 12px; }
 .kg-cards span, .kg-workflows span, .kg-steps span { color: #52657a; font-size: 13px; }
 .kg-workflows { display: grid; gap: 12px; }
 .kg-workflows article, .kg-links article { border: 1px solid #d9e2ec; padding: 16px; border-radius: 8px; background: #fff; }
