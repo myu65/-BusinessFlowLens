@@ -493,7 +493,7 @@ export function WorkflowReading({
               disabled={!context.next}
               onClick={() => context.next && select(context.next.id)}
             >
-              {context.outgoing.length > 1 ? "分岐先を選ぶ ↓" : "次の手順 →"}
+              {context.outgoing.length > 1 ? "分岐先を選ぶ ↓" : context.outgoing[0]?.edge.holdEffect === "response" ? "停止中の対応へ →" : context.outgoing[0]?.edge.holdEffect === "resume" ? "再開する手順へ →" : "次の手順 →"}
             </button>
           </div>
           <label className="kg-edit-field">
@@ -512,12 +512,13 @@ export function WorkflowReading({
           <aside className="flow-connections" aria-label="条件と次の仕事">
             <strong>
               {selected.meaning?.halt
-                ? "停止・保留 / 再開条件を確認"
+                ? context.outgoing.length > 0 && context.outgoing.every(o => o.edge.holdEffect === "response") ? "停止・保留中に進む対応" : "停止・保留 / 再開条件を確認"
                 : "この結果から進む仕事"}
             </strong>
             {context.outgoing.map(({ edge, step }) => (
               <button key={edge.id} onClick={() => select(step.id)}>
-                {edge.label ? `条件：${edge.label}` : "順に進む"} → {step.label}{" "}
+                {edge.holdEffect === "response" ? "停止中の対応 · " : edge.holdEffect === "resume" ? "再開 · " : ""}
+                {edge.label ? `条件：${edge.label}` : edge.holdEffect ? "接続を辿る" : "順に進む"} → {step.label}{" "}
                 ·{" "}
                 {edge.status === "confirmed"
                   ? "確認済み"
@@ -525,6 +526,12 @@ export function WorkflowReading({
                     ? "接続は推定"
                     : "根拠を確認"}
               </button>
+            ))}
+            {selected.meaning?.halt && context.outgoing.some(o => o.edge.holdEffect === "response") && !context.outgoing.some(o => o.edge.holdEffect === "resume") && (
+              <p>停止・保留を続けたまま行う対応です。解除・再開の条件は別に確かめられます。</p>
+            )}
+            {context.incoming.filter(o => o.edge.holdEffect === "response" && o.step.meaning?.halt).slice(0, 3).map(o => (
+              <p key={o.edge.id}>「{o.step.meaning?.result || o.step.label}」への対応です。停止・保留を続けています。{o.edge.status !== "confirmed" && "この接続の根拠は要確認です。"}</p>
             ))}
             {connections(context.outgoingHandoffs)}
             {!context.outgoing.length && !context.outgoingHandoffs.length && (
@@ -686,7 +693,7 @@ export function WorkflowReading({
                     )}
                   </section>
                   <section>
-                    <h4>③ 作る・更新する情報</h4>
+                    <h4>③ 作る・更新する・渡す情報</h4>
                     {context.outputs.length ? (
                       assetList(context.outputs)
                     ) : (

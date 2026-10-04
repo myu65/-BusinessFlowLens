@@ -34,7 +34,7 @@ export function InputFlowCanvas({ review, selected, page, onPage, choose, added 
         const other = byKey.get(from.stepKey)?.context === false ? to : from;
         return <article key={i}>
           <p>{from.order}. {inputStepName(from)} → {to.order}. {inputStepName(to)}</p>
-          <p>{edge.condition || "順に進む"} · {edge.certainty === "confirmed" ? "確認済みの接続" : edge.certainty === "inferred" ? "接続は推定" : "接続は未確認"}{to.meaning?.halt && " · 停止・保留"}</p>
+          <p>{edge.holdEffect === "response" ? "停止中の対応 · " : edge.holdEffect === "resume" ? "再開 · " : ""}{edge.condition || (edge.holdEffect ? "接続を辿る" : "順に進む")} · {edge.certainty === "confirmed" ? "確認済みの接続" : edge.certainty === "inferred" ? "接続は推定" : "接続は未確認"}{to.meaning?.halt && " · 停止・保留"}</p>
           <button onClick={() => choose(other)}>手順{other.order}「{inputStepName(other)}」のページへ</button>
         </article>;
       })}</div>
@@ -52,16 +52,17 @@ export function InputFlowCanvas({ review, selected, page, onPage, choose, added 
             const from = byKey.get(edge.fromStepKey)!, to = byKey.get(edge.toStepKey)!;
             const geometry = inputCanvasEdge(from, to, layout.nodes, i);
             const halt = to.step.meaning?.halt;
-            return <g key={i} data-from={edge.fromStepKey} data-to={edge.toStepKey} data-certainty={edge.certainty ?? "unknown"} data-halt={halt || undefined}>
+            const caption = `${edge.holdEffect === "response" ? "停止中の対応" : edge.holdEffect === "resume" ? "再開" : ""}${edge.condition ? `${edge.holdEffect ? " · " : ""}${edge.condition}` : ""}`;
+            return <g key={i} data-from={edge.fromStepKey} data-to={edge.toStepKey} data-certainty={edge.certainty ?? "unknown"} data-halt={halt || undefined} data-hold-effect={edge.holdEffect}>
               <path d={geometry.path} markerEnd={`url(#${marker})`} />
-              {edge.condition && <text x={geometry.x} y={geometry.labelY ?? geometry.y - 15} textAnchor="middle"><title>{edge.condition}</title>{edge.condition.length > 14 ? `${edge.condition.slice(0, 14)}…` : edge.condition}</text>}
+              {caption && <text x={geometry.x} y={geometry.labelY ?? geometry.y - 15} textAnchor="middle"><title>{caption}</title>{caption.length > 14 ? `${caption.slice(0, 14)}…` : caption}</text>}
             </g>;
           })}
         </svg>
         {onInsert && <div className="input-canvas-insertions">{layout.edges.map((edge, i) => {
           const from = byKey.get(edge.fromStepKey)!, to = byKey.get(edge.toStepKey)!;
           const geometry = inputCanvasEdge(from, to, layout.nodes, i);
-          const label = `「${inputStepName(from.step)}」→「${inputStepName(to.step)}」の間に作業を追加${edge.condition ? `（${edge.condition}）` : ""}`;
+          const label = `「${inputStepName(from.step)}」→「${inputStepName(to.step)}」の間に作業を追加${edge.condition ? `（${edge.condition}）` : ""}${edge.holdEffect === "response" ? " · 停止中の対応" : edge.holdEffect === "resume" ? " · 再開" : ""}`;
           return <button key={i} className="input-canvas-insert" type="button" title={label} aria-label={label} disabled={editingDisabled}
             style={{ left: geometry.x - 11, top: geometry.y - 11 }} onClick={() => onInsert(edge)}>＋</button>;
         })}</div>}
