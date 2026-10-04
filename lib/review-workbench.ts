@@ -477,19 +477,24 @@ export function diffReviews(
       }),
     ),
     ...(r?.systemDependencies ?? []).map(d => ({
-      key: `依存:${d.system}→${d.prerequisite}/${d.reason}/${d.certainty}/${d.rejected ?? false}`,
+      key: `依存:${d.system}→${d.prerequisite}`,
       label: `${d.system} → 必要な仕組み：${d.prerequisite} · ${d.rejected ? "この関係を除外" : certainty(d.certainty)} · ${d.reason}`,
     })),
   ]; };
   const a = relations(before),
     b = relations(after);
   const aKeys = new Set(a.map(r => r.key)), bKeys = new Set(b.map(r => r.key));
+  const previousRelations = new Map(a.map(r => [r.key, r.label]));
   return {
     added,
     removed,
     changed,
     addedConnections: b.filter(x => !aKeys.has(x.key)).map(x => x.label),
     removedConnections: a.filter(x => !bKeys.has(x.key)).map(x => x.label),
+    changedConnections: b.flatMap(x => {
+      const previous = previousRelations.get(x.key);
+      return previous && previous !== x.label ? [{ before: previous, after: x.label }] : [];
+    }),
     removedQuestions: (before?.questions ?? []).filter(q => !after.questions.some(n => n.question === q.question)),
     addedQuestions: after.questions.filter(q => !before?.questions.some(p => p.question === q.question)),
   };

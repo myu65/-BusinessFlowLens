@@ -259,6 +259,7 @@ export function InputWorkbench({
     ? diffReviews(draft?.baseline ?? currentReview, review, graph)
     : null, [draft?.baseline, currentReview, review, graph]);
   const selectedChange = draft ? diff?.changed.find(c => c.after.stepKey === selected?.stepKey) : undefined;
+  const pendingAnswers = !!review?.questions.some(q => draft?.answers[q.question]?.trim());
   const stale = draft
     ? draft.sourceNotes !== memo
     : !!saved && (savedTranscripts[key] ?? "") !== memo;
@@ -343,11 +344,15 @@ export function InputWorkbench({
     const beforeDraft = draft ?? null, source = memo;
     if (!placement.transition && before.transitions.some(t => t.fromStepKey === placement.afterStepKey)) return;
     setOperation("addition"); setBusy(true); setError("");
+    let additionFailure: "failure" | "unusable" = "failure";
     try {
       const response = await fetch("/api/extract", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ interview: note, workflow, graph: preview, previousReview: null, followUpAnswers: [], additionContext: reviewAdditionContext(before, placement) }) });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error ?? "追加した話を読み取れませんでした。");
+      if (!response.ok) {
+        additionFailure = payload.code === "invalid_response" ? "unusable" : "failure";
+        throw new Error(payload.error ?? "追加した話を読み取れませんでした。");
+      }
       const result = addReviewNote(before, payload.review, placement, note, crypto.randomUUID());
       const text = appendReviewSource(source, note);
       const next: InputDraft = { ...ensureDraft(result.review), baseline: before, sourceNotes: text, provider: payload.provider };
@@ -358,13 +363,13 @@ export function InputWorkbench({
         setUndoAddition({ draft: beforeDraft, memo: source, review: result.review });
         setAddition(""); setInsertion(null); setWorkbenchTab("flow"); setMobilePane("flow");
         try { sessionStorage.removeItem(`lens-addition:${projectId}:${requestKey}`); } catch { /* The source is already retained in the input draft. */ }
-        setAdditionNotice(result.addedKeys.length ? `${result.addedKeys.length}手順を追加しました。図で選ぶと、担当や道具を確認・編集できます。` : "追加した話を残しました。新しい作業はまだ読み取れていません。確認事項を見て補足できます。");
+        setAdditionNotice(result.addedKeys.length ? `${result.addedKeys.length}手順を追加しました。図で選ぶと、担当や道具を確認・編集できます。` : "話を追加しました。手順の数は変わりません。関連する情報・システムや確認事項で、反映した内容を確かめられます。");
         const focus = result.review.steps.find(s => s.stepKey === result.addedKeys[0]);
         if (focus) { setStepKey(focus.stepKey); setStepPage(Math.floor(result.review.steps.indexOf(focus) / REVIEW_PAGE_SIZE)); }
         requestAnimationFrame(() => { detailPaneRef.current?.scrollTo({ top: 0 }); });
       }
     } catch (cause) {
-      if (aiConfig?.configured) setAIResponse("failure");
+      if (aiConfig?.configured) setAIResponse(additionFailure);
       setError(cause instanceof Error ? cause.message : "追加した話を読み取れませんでした。");
     } finally { setBusy(false); }
   }
@@ -459,6 +464,7 @@ export function InputWorkbench({
     }
   }
   async function save() {
+    if (pendingAnswers) { setError("入力した回答を、確認事項の見直しで流れへ反映してから保存してください。"); return; }
     if (!draft || stale || busy || addition.trim()) return;
     setOperation("save");
     setBusy(true);
@@ -1347,6 +1353,7 @@ export function InputWorkbench({
                   busy ||
                   stale ||
                   !!addition.trim() ||
+                  pendingAnswers ||
                   !!edit ||
                   !draft.workflow.name.trim()
                 }
@@ -1354,7 +1361,7 @@ export function InputWorkbench({
               >
                 {busy
                   ? operation === "save" ? "道具・情報を照合して保存中…" : "話を整理中…"
-                  : addition.trim() ? "追記を反映してから保存" : edit
+                  : addition.trim() ? "追記を反映してから保存" : pendingAnswers ? "回答を反映してから保存" : edit
                     ? "訂正を反映してから保存"
                     : draft
                       ? review.steps.length ? "3 この流れを保存" : "3 話と確認事項を保存"
@@ -1442,8 +1449,11 @@ export function InputWorkbench({
               {draft && diff && (
                 <details className="input-diff">
                   <summary>
-                    今回の反映：追加 {diff.added.length}件 · 訂正{" "}
+                    今回の反映：手順の追加 {diff.added.length}件 · 訂正{" "}
                     {diff.changed.length}件 · 除外 {diff.removed.length}件
+                    {diff.addedConnections.length > 0 && <> · 関係の追加 {diff.addedConnections.length}件</>}
+                    {diff.changedConnections.length > 0 && <> · 関係の訂正 {diff.changedConnections.length}件</>}
+                    {diff.removedConnections.length > 0 && <> · 関係の除外 {diff.removedConnections.length}件</>}
                   </summary>
                   <div className="input-diff-items">
                     {(diff.removedQuestions.length > 0 || diff.addedQuestions.length > 0) && (
@@ -1474,6 +1484,9 @@ export function InputWorkbench({
                     ))}
                     {diff.removedConnections.map((s, i) => (
                       <p key={`r${i}`}>− {s}</p>
+                    ))}
+                    {diff.changedConnections.map((change, i) => (
+                      <p key={`c${i}`}>関係を更新<br />変更前：{change.before}<br />変更後：{change.after}</p>
                     ))}
                     {diff.removedQuestions.map((q, i) => <p key={`rq${i}`}>候補から外れた確認事項：{q.question}</p>)}
                     {diff.addedQuestions.map((q, i) => <p key={`aq${i}`}>新しい確認事項：{q.question}</p>)}
@@ -1509,7 +1522,7 @@ export function InputWorkbench({
               </details>
               <div className="input-save-actions">
                 <p>
-                  {addition.trim() ? "入力中の追記は、まだ図に反映されていません。追加する場所を選んで続けられます。" : stale
+                  {addition.trim() ? "入力中の追記は、まだ図に反映されていません。追加する場所を選んで続けられます。" : pendingAnswers ? "入力した回答は、まだ流れに反映されていません。下の確認事項を見直すと、反映を確認できます。" : stale
                     ? "メモの変更は、まだ流れへ反映されていません。"
                     : draft
                       ? "確認できたところまで保存できます。未確認の内容も、そのまま残ります。"
@@ -1546,6 +1559,10 @@ export function InputWorkbench({
                   未確認・矛盾を確かめる · {review.questions.length}質問 /{" "}
                   {review.warnings.length}注意
                 </summary>
+                <button className="button-secondary" disabled={busy || !!edit || !!addition.trim() || !memo.trim()}
+                  onClick={() => { if (draft) void refine(); else void organize(); }}>ここまでの話で確認事項を見直す</button>
+                <p className="input-growing-hint">追記した話と入力した回答も含めて見直します。流れの変更は、保存前に確認できます。</p>
+                {(edit || !!addition.trim()) && <p className="input-growing-hint">入力中の追記・訂正を反映すると、確認事項を見直せます。</p>}
                 {review.warnings.map((w, i) => {
                   const shared = w.match(/^共有資産の同一性を要確認: (.*?) — ([\s\S]*)$/);
                   return shared ? <div key={i}>

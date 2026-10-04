@@ -4,7 +4,7 @@ import { sourceEvidence } from "./source-evidence";
 
 const compact = (s: string) => s.normalize("NFKC").replace(/[\s「」『』]/g, "").toLowerCase();
 const pair = (d: ReviewSystemDependency) => `${compact(d.system)}\0${compact(d.prerequisite)}`;
-const uncertain = /未確認|不明|分から|未定|かもしれ|とは限|予定|検討|使わない|使いません|使っていない|使っていません|利用しない|利用しません|依存しない|依存しません|不要|必要ない|認証しない|unknown|unclear|planned|maydepend|coulddepend|doesnot|donot/;
+const uncertain = /未確認|不明|分から|未定|かもしれ|とは限|予定|検討|使わない|使いません|使っていない|使っていません|利用しない|利用しません|依存しない|依存しません|不要|必要ない|認証(?:しない|しません|していない|していません|せず)|unknown|unclear|planned|maydepend|coulddepend|doesnot|donot/;
 
 // A narrow source check, not a general dependency parser. A co-mention or
 // transfer alone cannot establish which system needs which prerequisite.
@@ -20,7 +20,8 @@ export function groundedDependency(d: ReviewSystemDependency, source: string) {
   const between = text.slice(start + system.length, end), tail = text.slice(end + prerequisite.length);
   if (/[。！？\n]|から|へ送|へ渡|入力し|登録し|確認し|承認し/.test(between)) return false;
   if (/と一緒|とともに|併用|から|へ送|へ渡|受信|受け取|(?:ログ|記録|ファイル|一覧|結果)を(?:使|利用|確認|参照)/.test(tail)) return false;
-  return (/(?:は|には|のログイン|の認証|の接続|の動作|の稼働|を動かす)/.test(between) &&
+  const signInContext = /(?:へ|に)(?:サインイン|ログイン)(?:するとき|する際)(?:には|は|も)[、,]?$/.test(between);
+  return ((/(?:は|には|のログイン|の認証|の接続|の動作|の稼働|を動かす)/.test(between) || signInContext) &&
     /依存|使[いうっ]|利用|必要|認証(?:し|する)|接続(?:し|する)/.test(tail)) || /dependson|requires|authenticatesusing/.test(between);
 }
 

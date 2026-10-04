@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { ExtractionReview, ExtractionReviewStep, LensGraph } from "../lib/graph";
 import { buildWorkflowReviewFromGraph } from "../lib/graph";
 import { addReviewNote, appendReviewSource } from "../lib/review-addition";
-import { editReviewStep, previewReviewGraph } from "../lib/review-workbench";
+import { diffReviews, editReviewStep, previewReviewGraph } from "../lib/review-workbench";
 import { preserveRefinements } from "../lib/refinement";
 import { resolveWorkflowReviewLocally } from "../lib/ai/provider";
 import { mkdtempSync } from "node:fs";
@@ -103,4 +103,23 @@ test("a stale arrow is rejected without changing the graph, and fact-only input 
   assert.deepEqual(fact.review.transitions, base.transitions);
   assert.equal(fact.addedKeys.length, 0);
   assert.equal(fact.review.questions.length, 1);
+});
+
+test("a platform-only addition and a dependency explanation update are distinct from adding or removing tasks and relations", () => {
+  const note = "SharePointの認証にはEntra IDを使います。";
+  const addition: ExtractionReview = { ...blank, systemDependencies: [{ system: "SharePoint", prerequisite: "Entra ID", reason: "契約フォルダの認証に必要", certainty: "confirmed", evidence: note }] };
+  const added = addReviewNote(base, addition, { afterStepKey: "check", transition: base.transitions[0] }, note, "platform").review;
+  const diff = diffReviews(base, added);
+  assert.equal(diff.added.length, 0);
+  assert.equal(diff.changed.length, 0);
+  assert.equal(diff.addedConnections.length, 1);
+  const reworded: ExtractionReview = { ...added, systemDependencies: added.systemDependencies!.map(d => ({ ...d, reason: "契約フォルダの閲覧時にSSOで認証する" })) };
+  const updated = diffReviews(added, reworded);
+  assert.equal(updated.addedConnections.length, 0);
+  assert.equal(updated.removedConnections.length, 0);
+  assert.equal(updated.changedConnections.length, 1);
+  assert.ok(updated.changedConnections[0].after.includes("閲覧時にSSO"));
+  const excluded = diffReviews(reworded, { ...reworded, systemDependencies: reworded.systemDependencies!.map(d => ({ ...d, rejected: true })) });
+  assert.equal(excluded.changedConnections.length, 1);
+  assert.ok(excluded.changedConnections[0].after.includes("この関係を除外"));
 });
