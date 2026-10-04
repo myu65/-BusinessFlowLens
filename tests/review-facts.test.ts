@@ -41,6 +41,18 @@ test("known actions remain when their actor, tool or continuation is unknown", (
   }
 });
 
+test("an undecided time remains a question rather than a task to decide or stop access", () => {
+  for (const evidence of ["古い部署のSharePointへのアクセスをいつ止めるかは、まだ決まっていません。", "アクセスを停止する時期は未定です。", "停止期限は、まだ分かりません。"]) {
+    const result = separateMissingFacts(review([step("time", evidence, "旧部署のアクセス停止時期を決める")]), evidence);
+    assert.equal(result.steps.length, 0, evidence);
+    assert.equal(result.questions.length, 1);
+    assert(result.questions[0].question.includes(evidence.slice(0, -1)));
+  }
+  for (const evidence of ["担当が停止時期を確認します。", "担当がいつ止めるかを課長に尋ねます。", "停止時期は未定です。情報システム担当が課長に照会します。", "いつ止めるかは確認したが、まだ決まっていません。"]) {
+    assert.equal(separateMissingFacts(review([step("action", evidence)]), evidence).steps.length, 1, evidence);
+  }
+});
+
 test("ungrounded model quotes and human corrections are preserved", () => {
   const evidence = "再開先は未確認です。";
   assert.equal(separateMissingFacts(review([step("invented", evidence)]), "再開先は計画担当です。").steps.length, 1);
