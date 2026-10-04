@@ -178,6 +178,7 @@ export function validateAITransitions<T extends ExtractionReview>(
     const evidence = compact(t.evidence);
     const restart = evidence && original.includes(evidence) &&
       (repeat.test(evidence) || /解除|再開|戻す|戻る|resume|restart/i.test(evidence)) &&
+      !/(?:解除|再開|再実行|再試行)(?:しない|しません|せず|されない|しなかった)/.test(evidence) &&
       !/不明|分から|分かりません|未確認|unknown/i.test(evidence);
     const target = review.steps.find(s => s.stepKey === t.toStepKey);
     const statedContinuation = evidence && original.includes(evidence) &&
@@ -233,6 +234,24 @@ export function validateAITransitions<T extends ExtractionReview>(
       sourceAt >= 0 && targetAt >= sourceAt &&
       (original.slice(sourceAt + compact(sourceStepEvidence).length, targetAt).match(/[。！？]/g)?.length ?? 0)
         <= (/[。！？]$/.test(compact(sourceStepEvidence)) ? 0 : 1);
+    // "物流へメールで確認する" is an inquiry, unlike checking a system's
+    // stock or approving a release. Require both literal endpoints in the
+    // same stopped clause; do not create a connection the model did not offer.
+    const inquiryUnknown = /確認(?:しない|しません|していない|していません|しなかった|する(?:予定|つもり|必要)(?:は|が)?(?:ない|ありません))|不明|分から|未確認|未定/;
+    const inquiryParty = (text: string) => {
+      if (inquiryUnknown.test(text)) return undefined;
+      return text.match(/([\p{Script=Han}\p{Script=Katakana}A-Za-z0-9ー]{1,30})(?:へ|に)(?:メール|Teams|電話|チャット|メッセージ)で[^。！？\n]{0,24}確認(?:する|します)/iu)?.[1]
+        ?? text.match(/(?:メール|Teams|電話|チャット|メッセージ)で([\p{Script=Han}\p{Script=Katakana}A-Za-z0-9ー]{1,30})(?:へ|に)[^。！？\n]{0,24}確認(?:する|します)/iu)?.[1];
+    };
+    const party = targetEvidence && inquiryParty(compact(targetEvidence));
+    const targetInquiry = party && !inquiryUnknown.test(target?.action ?? "") &&
+      new RegExp(`(?:^|[^\\p{Script=Han}\\p{Script=Katakana}A-Za-z0-9ー])${party}(?:へ|に)[^。！？\\n]{0,24}確認(?:する|します)`, "iu").test(target?.action ?? "");
+    const heldInquiry = sameHeldEpisode && evidence && original.includes(evidence) &&
+      /保留|停止|止め/.test(evidence) && targetEvidence && evidence.includes(compact(targetEvidence)) &&
+      (original.slice(sourceAt + compact(sourceStepEvidence!).length, targetAt).match(/[。！？]/g)?.length ?? 0) === 0 &&
+      review.steps.filter(s => s.meaning?.halt && sourceEvidence(source, s.evidence) === sourceStepEvidence).length === 1 &&
+      party && inquiryParty(evidence) === party && targetInquiry &&
+      !completion.test(target?.action ?? "") && !/(?:登録|保存|更新)(?:する|します|して|し、)|書き込/.test(target?.action ?? "");
     const quotedResponse = quotes.length === 2 &&
       !t.evidence.replace(/[「『][^」』]+[」』]/g, "").replace(/[\s、,・/]/g, "") &&
       quotes.every(q => q.length >= 5 && original.includes(q)) &&
@@ -245,7 +264,7 @@ export function validateAITransitions<T extends ExtractionReview>(
       !completion.test(target?.action ?? "");
     // A conditional check may have a normal path and a hold inside it. A step
     // executed only on the hold condition needs an explicit release to proceed.
-    if (step?.meaning?.halt && step.meaning.condition && !restart && !statedContinuation && !continuedHold && !handover && !exceptionResponse && !scopedResponse) {
+    if (step?.meaning?.halt && step.meaning.condition && !restart && !statedContinuation && !continuedHold && !handover && !exceptionResponse && !scopedResponse && !heldInquiry) {
       warnings.push(`${step.name}：停止・保留の解除を原文で確認できないため、その先へ進む線を保留しました。`);
       questions.push({
         question: `${step.name}の後は、どの条件・判断で再開し、どの手順へ進みますか？`,
@@ -255,7 +274,7 @@ export function validateAITransitions<T extends ExtractionReview>(
       return false;
     }
     if (step?.meaning?.halt && step.meaning.condition) {
-      t.holdEffect = scopedResponse ? "response" : restart || statedContinuation ? "resume" : continuedHold || handover || exceptionResponse ? "response" : undefined;
+      t.holdEffect = scopedResponse ? "response" : restart || statedContinuation ? "resume" : continuedHold || handover || exceptionResponse || heldInquiry ? "response" : undefined;
       if (scopedResponse) t.evidence = `「${sourceEvidence(source, step.evidence)}」「${targetEvidence}」`;
       if (scopedResponse || ((quotedResponse || explicitWhileHeld) && exceptionResponse)) t.certainty = "inferred";
     } else if (restart && sourceStepEvidence && targetEvidence && /再開|resume|restart/i.test(evidence)) {
