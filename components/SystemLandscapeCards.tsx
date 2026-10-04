@@ -35,11 +35,14 @@ export function SystemLandscapeCards({ graph, systems, view, page, onPage, onSel
           const profileInScope = !profile?.sourceWorkflowId || view.rows.some(r => r.workflow.id === profile.sourceWorkflowId);
           const purpose = (profileInScope ? profile?.purpose : "") || roles[0]?.purpose;
           const example = Boolean(purpose && (profile?.sourceWorkflowId || !profile?.purpose));
+          const description = purpose || (node.status === "unknown"
+            ? related.direct[0] ? `「${related.direct[0].workflow.name}」で使う道具` : "役割と対応づけはまだ未確認です。"
+            : termExplanation(node.label) || node.description);
           return (
             <button key={node.id} onClick={() => onSelect(node.id)}>
               <strong>{node.label}</strong>
               {node.status === "unknown" && <small>同じ道具か、対応づけは要確認</small>}
-              <p>{purpose || termExplanation(node.label) || node.description}</p>
+              <p>{description}</p>
               {example && <small>入力で分かった使い方の一例</small>}
               <span>{graph.knowledge?.categories.find(c => c.id === profile?.categoryId)?.name ?? "分類未登録"} · 直接 {related.direct.length}業務 · 間接 {related.indirect.length}業務</span>
             </button>

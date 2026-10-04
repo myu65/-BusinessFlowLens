@@ -921,7 +921,7 @@ export function KnowledgeExplorer({
           {termExplanation(asset.label) && (
             <p className="kg-term">{termExplanation(asset.label)}</p>
           )}
-          <p>{impact.profile?.purpose ?? asset.description}</p>
+          <p>{impact.profile?.purpose ?? (asset.kind === "system" && asset.status === "unknown" ? "同じ道具か確認してください。ここでは、その話で使う道具として扱います。" : asset.description)}</p>
           {impact.profile?.certainty && (
             <p>
               {impact.profile.certainty === "confirmed"

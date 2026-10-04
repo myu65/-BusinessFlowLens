@@ -35,7 +35,7 @@ test("a company landscape is limited to six cards and every registered tool rema
 
 test("widely used tools appear before an unused tool and counts keep direct and platform impact separate", () => {
   const graph = createChemicalCompany();
-  const unused = { ...graph.nodes.find(n => n.kind === "system")!, id: "unused", label: "利用未確認の道具", status: "unknown" as const };
+  const unused = { ...graph.nodes.find(n => n.kind === "system")!, id: "unused", label: "利用未確認の道具", status: "unknown" as const, description: "要確認: 既存資産とキーが重なる" };
   graph.nodes.unshift(unused);
   const html = render(graph);
   assert.match(html, /<strong>Outlook \/ Mail \/ Calendar<\/strong>/);
@@ -44,6 +44,7 @@ test("widely used tools appear before an unused tool and counts keep direct and 
   assert.match(html, /直接 10業務 · 間接 290業務/);
   assert.match(html, /直接・間接の業務数は、何を数えている/);
   assert.match(render(graph, 0, "current", "利用未確認の道具"), /同じ道具か、対応づけは要確認/);
+  assert.doesNotMatch(render(graph, 0, "current", "利用未確認の道具"), /キーが重なる/);
 });
 
 test("a profile drawn from one input is a use example and its current-only purpose does not describe the future", () => {
