@@ -18,6 +18,7 @@ import { KnowledgeEditor } from "./KnowledgeEditor";
 import { createChemicalCompany } from "@/lib/chemical-company";
 import { inputSystemRoles } from "@/lib/input-knowledge";
 import { SystemLandscapeCards } from "./SystemLandscapeCards";
+import { SystemRelationshipMap } from "./SystemRelationshipMap";
 
 type Focus =
   | { kind: "company" | "systems" }
@@ -143,6 +144,20 @@ export function KnowledgeExplorer({
       {graph.workflows.find((w) => w.id === id)?.name ?? id}
     </button>
   );
+  const processButton = (p: LensNode) => <button key={p.id} onClick={() => go({ kind: "process", id: p.id })}>
+    {p.label} · {mode[p.executionMode ?? "unknown"]} · {graph.workflows.find(w => w.id === p.workflowId)?.name}
+  </button>;
+  const flowCard = (f: LensGraph["dataFlows"][number]) => <article key={f.id}>
+    <div>{view.nodeById.get(f.sourceSystemId) && assetButton(view.nodeById.get(f.sourceSystemId)!)}
+      <span aria-label="受渡しの方向"> → </span>{view.nodeById.get(f.targetSystemId) && assetButton(view.nodeById.get(f.targetSystemId)!)}
+      <span> · {{ manual: "人が転記・受渡し", email: "メール", api: "システム間連携", file: "ファイル",
+        database: "データベース", message: "メッセージ", unknown: "受渡し方法は未確認" }[f.transferType]} / {mode[f.automation]}</span>
+    </div>
+    <div>{f.dataIds.map(id => view.nodeById.get(id)!).filter(Boolean).map(assetButton)}</div>
+    <p>{f.evidence}</p>
+    {f.workflowIds.filter(id => view.rows.some(r => r.workflow.id === id)).slice(0, 3).map(workflowButton)}
+    {f.workflowIds.filter(id => view.rows.some(r => r.workflow.id === id)).length > 3 && <p>ほかの関連業務は下の一覧・レポートで確認できます。</p>}
+  </article>;
   const download = () => {
     const content = knowledgeReport(
       graph,
@@ -379,7 +394,7 @@ export function KnowledgeExplorer({
             value={scope}
             onChange={(e) => {
               setScope(e.target.value as KnowledgeScope);
-              if (focus.kind !== "asset") setFocus({ kind: "company" });
+              if (focus.kind !== "asset" && focus.kind !== "systems") setFocus({ kind: "company" });
               setHistory([]);
               setPage(0);
             }}
@@ -434,14 +449,14 @@ export function KnowledgeExplorer({
           scope={scope}
           rows={view.rows}
           workflowIds={view.rows.map((r) => r.workflow.id)}
-          onWorkflow={(id) => go({ kind: "workflow", id })}
+          onWorkflow={(id, stepId) => { setReadStep(stepId ?? ""); setReaderJourney(undefined); setReadData(""); go({ kind: "workflow", id }); }}
           onSystems={() => go({ kind: "systems" })}
           onActivity={(id) => go({ kind: "activity", id })}
           onSystem={(id) => go({ kind: "asset", id })}
           onInput={onInput ? () => onInput() : undefined}
         />
       )}
-      {focus.kind !== "company" && (
+      {focus.kind !== "company" && focus.kind !== "systems" && (
         <p className="kg-trail" aria-label="現在の探索位置">
           会社全体
           {activity
@@ -452,9 +467,7 @@ export function KnowledgeExplorer({
                 ? ` → ${row.capabilities.map((c) => `${c.activity.name} → ${c.capability.name}`).join(" / ")} → ${row.workflow.name}`
                 : asset
                   ? ` → ${asset.kind === "process" ? "ひとつの手順" : asset.kind === "system" ? "システム・道具" : "業務で使う情報"} → ${asset.label}`
-                  : focus.kind === "systems"
-                    ? " → システム・道具の全体像"
-                    : ""}
+                  : ""}
         </p>
       )}
       {(row || processRow || cap || activity) && (
@@ -829,9 +842,6 @@ export function KnowledgeExplorer({
       )}
       {focus.kind === "systems" && (
         <>
-          <p>
-            道具を選ぶと、支える仕事・人・情報を辿れます。Teams・Excel・認証・ネットワークも含みます。
-          </p>
           {query && (
             <p className="kg-context">
               {namedSystems.size
@@ -856,7 +866,16 @@ export function KnowledgeExplorer({
               ))}
             </select>
           </label>
-          <SystemLandscapeCards graph={graph} systems={systems} view={view} page={page} onPage={setPage} onSelect={id => go({kind: "asset", id})} />
+          <SystemRelationshipMap graph={graph} scope={scope} systems={systems} view={view}
+            onSelect={id => go({ kind: "asset", id })} onActivity={id => go({ kind: "activity", id })}
+            onWorkflow={(id, stepId) => {
+              setReadStep(stepId ?? ""); setReaderJourney(undefined); setReadData("");
+              go({ kind: "workflow", id });
+              if (!view.rows.some(r => r.workflow.id === id)) { setQuery(""); setDepartment(""); }
+            }} />
+          <details><summary>登録された道具の一覧から探す（{systems.length}件・この範囲の利用0件も含む）</summary>
+            <SystemLandscapeCards graph={graph} systems={systems} view={view} page={page} onPage={setPage} onSelect={id => go({kind: "asset", id})} />
+          </details>
           {graph.knowledge && (
             <details>
               <summary>システム・道具の分類を追加・変更する</summary>
@@ -1074,16 +1093,11 @@ export function KnowledgeExplorer({
           </p>
           <h3>自動処理・個別工程（{impact.processes.length}）</h3>
           <div className="kg-links">
-            {impact.processes.slice(0, 30).map((p) => (
-              <button
-                key={p.id}
-                onClick={() => go({ kind: "process", id: p.id })}
-              >
-                {p.label} · {mode[p.executionMode ?? "unknown"]} ·{" "}
-                {graph.workflows.find((w) => w.id === p.workflowId)?.name}
-              </button>
-            ))}
+            {impact.processes.slice(0, 6).map(processButton)}
           </div>
+          {impact.processes.length > 6 && <details><summary>ほか{Math.min(30, impact.processes.length) - 6}工程を読む</summary>
+            <div className="kg-links">{impact.processes.slice(6, 30).map(processButton)}</div>
+          </details>}
           {impact.processes.length > 30 && (
             <p>
               先頭30工程を表示。部署・検索で絞るか、関連業務からすべての工程を読めます。
@@ -1099,47 +1113,11 @@ export function KnowledgeExplorer({
             </p>
           )}
           <div className="kg-links">
-            {impact.flows.slice(0, 30).map((f) => (
-              <article key={f.id}>
-                <div>
-                  {view.nodeById.get(f.sourceSystemId) &&
-                    assetButton(view.nodeById.get(f.sourceSystemId)!)}
-                  <span aria-label="受渡しの方向"> → </span>
-                  {view.nodeById.get(f.targetSystemId) &&
-                    assetButton(view.nodeById.get(f.targetSystemId)!)}
-                  <span>
-                    {" "}
-                    ·{" "}
-                    {(
-                      {
-                        manual: "人が転記・受渡し",
-                        email: "メール",
-                        api: "システム間連携",
-                        file: "ファイル",
-                      } as Record<string, string>
-                    )[f.transferType] ?? f.transferType}{" "}
-                    / {mode[f.automation]}
-                  </span>
-                </div>
-                <div>
-                  {f.dataIds
-                    .map((id) => view.nodeById.get(id)!)
-                    .filter(Boolean)
-                    .map(assetButton)}
-                </div>
-                <p>{f.evidence}</p>
-                {f.workflowIds
-                  .filter((id) => view.rows.some((r) => r.workflow.id === id))
-                  .slice(0, 3)
-                  .map(workflowButton)}
-                {f.workflowIds.filter((id) =>
-                  view.rows.some((r) => r.workflow.id === id),
-                ).length > 3 && (
-                  <p>ほかの関連業務は下の一覧・レポートで確認できます。</p>
-                )}
-              </article>
-            ))}
+            {impact.flows.slice(0, 4).map(flowCard)}
           </div>
+          {impact.flows.length > 4 && <details><summary>ほか{Math.min(30, impact.flows.length) - 4}受渡しを読む</summary>
+            <div className="kg-links">{impact.flows.slice(4, 30).map(flowCard)}</div>
+          </details>}
           {impact.flows.length > 30 && (
             <p>
               先頭30受渡しを表示。レポートにはこの条件の全受渡しを出力します。

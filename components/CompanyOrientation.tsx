@@ -20,7 +20,7 @@ export function CompanyOrientation({
   scope: KnowledgeScope;
   workflowIds: string[];
   rows: ReturnType<typeof knowledgeIndex>["rows"];
-  onWorkflow: (id: string) => void;
+  onWorkflow: (id: string, stepId?: string) => void;
   onSystems: () => void;
   onActivity: (id: string) => void;
   onSystem: (id: string) => void;

@@ -155,6 +155,69 @@
 .kg-view[data-focus="company"] .company-filters :is(input, select) { padding: 6px 8px; font-size: 12px; min-height: 32px; }
 .kg-view[data-focus="company"] .company-filters > span { font-size: 10px; padding-bottom: 5px; }
 .company-overview-map { border: 0; padding: 0; background: transparent; }
+.relationship-scroll { overflow-x: auto; background: #fff; border: 1px solid #d8e4dc; border-radius: 14px; }
+.relationship-scroll:focus-visible { outline: 3px solid #7daa92; outline-offset: 3px; }
+.relationship-stage { position: relative; height: 360px; width: 920px; margin: 0 auto; }
+.relationship-lines { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.relationship-edge { cursor: pointer; }
+.relationship-hit { fill: none; stroke: transparent; stroke-width: 18; }
+.relationship-line { fill: none; stroke: #669580; stroke-width: 2; }
+.relationship-edge--dependency .relationship-line { stroke: #8d79a9; }
+.relationship-arrow { fill: #669580; }
+.relationship-arrow--dependency { fill: #8d79a9; }
+.relationship-edge rect { fill: #fff; stroke: #d6e4dd; }
+.relationship-edge text { font-size: 11px; fill: #385f4b; font-weight: 600; }
+.relationship-edge--dependency text { fill: #75628d; }
+.relationship-edge:hover .relationship-line, .relationship-edge:focus-visible .relationship-line { stroke-width: 4; }
+.relationship-edge:focus-visible { outline: none; }
+.relationship-edge:focus-visible rect { stroke: #264a37; stroke-width: 2; }
+.kg-view .relationship-node { position: absolute; transform: translate(-50%, -50%); width: 194px; min-height: 92px; padding: 10px 12px; display: grid; gap: 4px; border: 1px solid #c8dcd0; border-radius: 10px; background: #f1f7f3; color: #234b36; box-shadow: 0 2px 5px #263a2f08; }
+.relationship-node strong { font-size: 14px; line-height: 1.45; }
+.relationship-node :is(span,small) { color: #65776c; font-size: 11px; line-height: 1.45; }
+.relationship-node .relationship-node-kind { color: #6d8675; font-size: 10px; }
+.kg-view .relationship-node--tool { background: #f3f7fb; border-color: #cbdde9; color: #285779; }
+.kg-view .relationship-node[aria-pressed="true"] { background: #365c48; color: white; border-color: #365c48; box-shadow: 0 0 0 3px #d5e8dc; }
+.relationship-node[aria-pressed="true"] :is(span,small) { color: #e0e9e2; }
+.kg-view .relationship-node:focus-visible { outline: 3px solid #709a84; outline-offset: 3px; }
+.relationship-caption, .relationship-pagination { font-size: 12px; line-height: 1.7; color: #65776c; }
+.relationship-pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 10px 0 18px; }
+.relationship-pagination button { font-size: 12px; padding: 6px 9px; }
+.relationship-legend { display: flex; flex-wrap: wrap; gap: 16px; color: #47775f; font-size: 12px; margin: 16px 0 8px; }
+.relationship-dependency-legend { color: #75628d; }
+.relationship-layer-control { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; }
+.relationship-layer-control > span { font-size: 11px; color: #6f7d72; margin-left: 6px; }
+.kg-view .relationship-layer-control button { font-size: 12px; padding: 7px 12px; }
+.kg-view .relationship-layer-control button[aria-pressed="true"] { background: #365c48; border-color: #365c48; color: #fff; }
+.kg-view[data-focus="systems"] { max-width: 1540px; padding: 18px 24px; display: grid; grid-template-columns: minmax(240px,1fr) auto; column-gap: 20px; }
+.kg-view[data-focus="systems"] > * { grid-column: 1 / -1; }
+.kg-view[data-focus="systems"] > .company-page-header { grid-column: 1; grid-row: 1; margin: 0 0 10px; }
+.kg-view[data-focus="systems"] .company-heading-kicker { font-size: 10px; margin-bottom: 3px; }
+.kg-view[data-focus="systems"] .company-page-header h1 { font-size: 22px; }
+.kg-view[data-focus="systems"] .company-page-header > button { display: none; }
+.kg-view[data-focus="systems"] > .company-filters { grid-column: 2; grid-row: 1; padding: 0; margin: 0 0 10px; gap: 8px; border: 0; flex-wrap: nowrap; }
+.kg-view[data-focus="systems"] .company-filters label { font-size: 10px; }
+.kg-view[data-focus="systems"] .company-filters label:nth-child(3) { min-width: 180px; max-width: 230px; }
+.kg-view[data-focus="systems"] .company-filters :is(input,select) { padding: 6px 8px; font-size: 12px; min-height: 32px; }
+.kg-view[data-focus="systems"] .company-filters > span { font-size: 10px; }
+.kg-view[data-focus="systems"] .kg-explore-nav { margin: 4px 0 10px; gap: 8px; }
+.kg-view[data-focus="systems"] .kg-explore-nav button { font-size: 11px; padding: 6px 9px; }
+.kg-view[data-focus="systems"] > label { display: flex; align-items: center; gap: 10px; font-size: 12px; margin: 0 0 8px; }
+.kg-view[data-focus="systems"] > label select { padding: 5px 8px; font-size: 12px; }
+.relationship-evidence, .relationship-system-detail { border: 1px solid #d7e4dc; border-radius: 12px; padding: 20px; background: #fff; margin: 18px 0; }
+.relationship-evidence header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.relationship-evidence h3, .relationship-system-detail h3 { margin: 0; }
+.relationship-evidence article { border-top: 1px solid #e4ece6; padding: 12px 0; font-size: 13px; line-height: 1.7; }
+.relationship-evidence article span { color: #6f806e; }
+.relationship-evidence article > div { display: flex; gap: 8px; flex-wrap: wrap; }
+.relationship-evidence article button { display: grid; gap: 4px; text-align: left; }
+.relationship-evidence article button small { font-size: 11px; color: #65776c; }
+.relationship-evidence blockquote { margin: 12px 0; padding: 10px 14px; border-left: 3px solid #bdd4c6; background: #f4f8f5; }
+.relationship-system-detail > .kg-primary { margin-top: 18px; }
+.company-map-body.company-map-body--relations { grid-template-columns: 1fr; }
+@media(max-width: 1000px) {
+  .kg-view[data-focus="systems"] { grid-template-columns: 1fr; padding: 16px; }
+  .kg-view[data-focus="systems"] > .company-filters { grid-column: 1; grid-row: auto; flex-wrap: wrap; }
+}
 .company-map-heading { margin-bottom: 6px; }
 .company-map-heading h2 { font-size: 15px; }
 .company-map-heading p, .company-map-caption { font-size: 11px; margin: 4px 0 8px; }
