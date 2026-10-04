@@ -10,6 +10,10 @@ import {
   editReviewStep,
   stepToolsFromText,
   previewReviewGraph,
+  previewInputDrafts,
+  inputKeyForWorkflow,
+  NEW_MEMO_ID,
+  type InputDraft,
   recordReviewEdits,
   describeHumanEdit,
   transcriptsForSave,
@@ -32,6 +36,35 @@ import {
 } from "../lib/knowledge";
 
 const empty: LensGraph = { workflows: [], nodes: [], edges: [], dataFlows: [] };
+
+test("unsaved navigation includes the return connection and maps a new workflow back to its draft, without changing saved context", () => {
+  const producer = { id: "cost", name: "原価計算" };
+  const produced = extractGroundedLocal("SAPが製造原価を計算する。");
+  produced.steps[0].stepKey = "calculate";
+  produced.steps[0].data = [{ name: "製造原価", operation: "create", evidence: "製造原価を計算" }];
+  const saved = previewReviewGraph(empty, producer, produced);
+  const before = JSON.stringify(saved);
+  const consumer = { id: "new-close", name: "月次決算" };
+  const read = extractGroundedLocal("経理担当が製造原価をSAPで参照する。");
+  read.steps[0].stepKey = "read-cost";
+  read.steps[0].data = [{ name: "製造原価", operation: "read", evidence: "製造原価をSAPで参照" }];
+  read.incomingHandoffs = [{ sourceWorkflowId: producer.id, sourceStepKey: "calculate", toStepKey: "read-cost",
+    data: ["製造原価"], via: "reference", certainty: "inferred", evidence: "原価計算の製造原価を参照", description: "計算済みの原価を参照" }];
+  const draft: InputDraft = { workflow: consumer, review: read, provider: "test", sourceNotes: "経理担当が製造原価をSAPで参照する。", baseline: null, answers: {}, answerHistory: [] };
+  const drafts = { [NEW_MEMO_ID]: draft };
+  const preview = previewInputDrafts(saved, drafts);
+  assert.equal(preview.knowledge?.handoffs?.length, 1);
+  assert.equal(preview.knowledge!.handoffs![0].sourceWorkflowId, producer.id);
+  assert.equal(preview.knowledge!.handoffs![0].targetWorkflowId, consumer.id);
+  assert.equal(inputKeyForWorkflow(drafts, consumer.id), NEW_MEMO_ID);
+  assert.equal(inputKeyForWorkflow(drafts, producer.id), producer.id);
+  assert.equal(JSON.stringify(saved), before);
+  const resolved = resolveWorkflowReviewLocally({ review: produced, workflow: producer, graph: saved });
+  const savedAgain = replaceWorkflowGraph(saved, producer, resolved.patch);
+  assert.equal(savedAgain.workflows.length, 1);
+  assert.ok(!savedAgain.nodes.some(n => n.workflowId === consumer.id));
+  assert.equal(savedAgain.knowledge?.handoffs?.length ?? 0, 0);
+});
 const workflow = {
   id: "ambiguous-note",
   name: "入力した話",

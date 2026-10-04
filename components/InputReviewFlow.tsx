@@ -27,6 +27,7 @@ export function InputReviewFlow({
   onEdit,
   onExclude,
   onWorkflow,
+  unsavedWorkflowIds = [],
 }: {
   review: ExtractionReview;
   selected: ExtractionReviewStep;
@@ -38,6 +39,7 @@ export function InputReviewFlow({
   onEdit: () => void;
   onExclude: () => void;
   onWorkflow: (id: string, stepKey?: string) => void;
+  unsavedWorkflowIds?: string[];
 }) {
   const inputs = selected.data.filter(
     (d) => d.operation === "read" || d.operation === "receive",
@@ -215,6 +217,7 @@ export function InputReviewFlow({
                   {h.certainty === "confirmed" ? "原文に明示" : "接続は要確認"}
                 </p>
                 <span>{h.data.join(" / ")}</span>
+                {(unsavedWorkflowIds.includes(workflowId ?? "") || unsavedWorkflowIds.includes(h.sourceWorkflowId)) && <small>保存前の候補を含む接続</small>}
                 {source && (
                   <button
                     onClick={() => onWorkflow(source.id, h.sourceStepKey)}
@@ -319,6 +322,7 @@ export function InputReviewFlow({
                 {h.certainty === "confirmed" ? "原文に明示" : "接続は要確認"}
               </small>
               <span>{h.data.join(" / ")}</span>
+              {(unsavedWorkflowIds.includes(workflowId ?? "") || unsavedWorkflowIds.includes(h.targetWorkflowId)) && <small>保存前の候補を含む接続</small>}
               {target && (
                 <button onClick={() => onWorkflow(target.id, h.targetStepKey)}>
                   {h.via === "reference" ? "情報を使う業務：" : "次の業務："}

@@ -113,6 +113,44 @@ test("a named read points to the unique writer as a reference, not a delivered h
   assert.equal(preview.dataFlows.length, graph.dataFlows.length);
 });
 
+test("a Data's literal read evidence can connect the writer when the combined step quotes separate clause fragments", () => {
+  const { graph, review, reader, producer } = referenceFixture();
+  const source = `経理担当がSAPの売上と、${producer.name}で更新した日次経営データを参照し、Excelの調整表に差を記録します。`;
+  review.steps[0].evidence = "「経理担当がSAPの売上と」「Excelの調整表に差を記録します」";
+  review.steps[0].data = [{ name: "日次経営データ", operation: "read", evidence: "日次経営データを参照" }];
+  const next = suggestMissingSourceConnections(review, graph, reader, source);
+  assert.equal(next.incomingHandoffs?.length, 1);
+  assert.equal(next.incomingHandoffs![0].via, "reference");
+  assert.equal(next.incomingHandoffs![0].certainty, "inferred");
+  assert.equal(next.incomingHandoffs![0].evidence, source.slice(0, -1));
+  assert.equal(next.incomingHandoffs![0].sourceStepKey, "update-daily-data");
+  assert.equal(next.dataFlows.length, review.dataFlows.length);
+});
+
+test("Data evidence cannot move a read onto a different, reversed, fabricated or ungrounded step", () => {
+  const { graph, review, reader, producer } = referenceFixture();
+  const clause = `経理担当がSAPの売上と、${producer.name}で更新した日次経営データを参照し、Excelの調整表に差を記録します。`;
+  review.steps[0].data = [{ name: "日次経営データ", operation: "read", evidence: "日次経営データを参照" }];
+  for (const evidence of [
+    "「Excelの調整表に差を記録します」「経理担当がSAPの売上と」",
+    "承認済みなので「経理担当がSAPの売上と」「Excelの調整表に差を記録します」",
+    "倉庫担当が製品ロットを確認します。",
+    "「経理担当がSAPの売上と」「倉庫担当が製品ロットを確認します」",
+  ]) {
+    review.steps[0].evidence = evidence;
+    assert.equal(suggestMissingSourceConnections(review, graph, reader, clause + "倉庫担当が製品ロットを確認します。").incomingHandoffs?.length, 0, evidence);
+  }
+  review.steps[0].evidence = "「経理担当がSAPの売上と」「Excelの調整表に差を記録します」";
+  for (const ending of ["を参照しないで", "を参照するか未確認で"]) {
+    const denied = clause.replace("を参照し、", ending + "、");
+    assert.equal(suggestMissingSourceConnections(review, graph, reader, denied).incomingHandoffs?.length, 0);
+  }
+  for (const evidence of ["日次経営データを受け取りました", "日次経営データ", "参照"]) {
+    review.steps[0].data[0].evidence = evidence;
+    assert.equal(suggestMissingSourceConnections(review, graph, reader, clause).incomingHandoffs?.length, 0, evidence);
+  }
+});
+
 test("two writers or a send without a recorded write leave the reference source unresolved", () => {
   const { source, graph, review, producer, reader, produced } = referenceFixture();
   const twoWriters = previewReviewGraph(graph, producer, { ...produced, steps: [produced.steps[0],

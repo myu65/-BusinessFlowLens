@@ -70,18 +70,40 @@ export function suggestMissingSourceConnections<T extends ExtractionReview>(
     const isReceipt = datum.operation === "receive";
     const received = [datum.name];
     const stepEvidence = sourceEvidence(source, step.evidence) ?? step.evidence;
+    const dataEvidence = sourceEvidence(source, datum.evidence);
+    const fragments = [...step.evidence.matchAll(/[「『]([^」』]+)[」』]/g)].map(m => literal(m[1]));
+    const quotedStep = fragments.length >= 2 && fragments.every(part => part.length >= 5) &&
+      !step.evidence.replace(/[「『][^」』]+[」』]/g, "").replace(/[\s、,・/]/g, "");
+    const belongsToStep = (clause: string) => {
+      const text = literal(clause), evidence = literal(stepEvidence);
+      if (text.includes(evidence) || evidence.includes(text)) return true;
+      if (!quotedStep) return false;
+      let after = 0;
+      for (const part of fragments) {
+        const at = text.indexOf(part, after);
+        if (at < 0) return false;
+        after = at + part.length;
+      }
+      return true;
+    };
     if (incoming.some(h => h.toStepKey === step.stepKey && h.data.some(name => aliases(datum.name).includes(normalizeAssetName(name))))) continue;
     const verb = isReceipt ? /受け取|受領|受信/ : /読み込|読む|読ん|参照|確認/;
     const denied = isReceipt
       ? /受け取ら|受領しない|受信しない|受け取るか|受領するか|受信するか/
       : /読まな|読みません|読んでいな|読んでいません|読み込まな|読み込みません|読み込んでいな|読み込んでいません|(?:参照|確認)し(?:ない|ません|ていない|ていません|ておら)|(?:参照|確認)でき(?:ない|ません|ていない|ていません)|(?:読む|読み込む|参照する|参照できる|確認する|確認できる)か/;
-    if (!received.length || !verb.test(stepEvidence)) continue;
+    // A model can quote the start/end of a combined check separately and put
+    // the actual read in this Data's own evidence. Keep that literal evidence
+    // usable, but only inside the same grounded step clause.
+    const groundedDataRead = dataEvidence && verb.test(dataEvidence) &&
+      aliases(datum.name).some(name => normalizeAssetName(dataEvidence).includes(name));
+    if (!received.length || (!verb.test(stepEvidence) && !groundedDataRead)) continue;
     const matches: Array<{ workflow: Workflow; processId: string; evidence: string }> = [];
     const named = new Map<string, string>();
     for (const candidate of candidates) {
       const evidence = clauses.find(clause =>
         clause.includes(candidate.name) && verb.test(clause) &&
-        (literal(clause).includes(literal(stepEvidence)) || literal(stepEvidence).includes(literal(clause))) &&
+        belongsToStep(clause) &&
+        (verb.test(stepEvidence) || (groundedDataRead && literal(clause).includes(literal(dataEvidence!)))) &&
         !denied.test(clause) && !/後で説明|あとで説明|未確認|不明|分から/.test(clause) &&
         received.every(name => aliases(name).some(alias => referenceInformation(clause, candidate.name).includes(alias))),
       );
