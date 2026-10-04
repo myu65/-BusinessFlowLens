@@ -173,6 +173,8 @@ export function validateAITransitions<T extends ExtractionReview>(
   const responseWork = (text: string) => repair(text) ||
     (/条項.{0,16}調整/.test(text) && !/調整(?:しない|しません|していない|していません|せず|しなかった)|不明|分から|未確認|未定/.test(text));
   const completion = /確定|承認|完了|公開|納品|出荷|反映|再開|再実行|再試行|解除|配信/;
+  const namedSystems = new Set(review.steps.flatMap(s => [...s.systems.map(system => compact(system.name)),
+    ...(s.executingSystem ? [compact(s.executingSystem)] : [])]).concat((review.systemProfiles ?? []).map(system => compact(system.name))));
   const transitions = review.transitions.map<ExtractionTransition>(t => ({ ...t, holdEffect: undefined, evidence: sourceEvidence(source, t.evidence) ?? t.evidence })).filter((t) => {
     const step = review.steps.find((s) => s.stepKey === t.fromStepKey);
     const evidence = compact(t.evidence);
@@ -201,6 +203,18 @@ export function validateAITransitions<T extends ExtractionReview>(
       warnings.push(`${step!.name}：承認前の作業が承認の後につながるため、この線を保留しました。確認と承認を分けて確かめられます。`);
       questions.push({ question: `${step!.name}の確認と承認を分け、承認前の作業をどこから始めますか？`,
         reason: `原文で承認前と説明されています。接続候補の根拠：${preApprovalEvidence}`, target: "rule" });
+      return false;
+    }
+    const approvalQuote = step && sourceEvidence(source, step.evidence);
+    const deniedQuote = targetEvidence && compact(targetEvidence);
+    const notApproved = /未承認|不承認|承認され(?:ない|なかった)|承認(?:していない|されていない)|承認が(?:ない|下りない|得られない)/;
+    const afterApproval = /承認(?:した|された|する)後|承認後|承認.{0,16}(?:取り消|取消|撤回)/;
+    const statedAfterApproval = [sourceEvidence(source, t.evidence), targetEvidence].some(quote => quote && afterApproval.test(compact(quote)) &&
+      !/不明|分から|未確認|未定|承認(?:した|された|する)?後(?:ではない|ではなく|ではありません)/.test(compact(quote)));
+    if (approves && approvalQuote && /承認/.test(approvalQuote) && target?.meaning?.halt && deniedQuote && notApproved.test(deniedQuote) && !statedAfterApproval) {
+      warnings.push(`${step!.name}：承認完了から未承認時の保留へ進む根拠を確認できないため、この線を保留しました。作業と原文は残っています。`);
+      questions.push({ question: `「${target.name}」は、どの確認・判断から分かれますか？`,
+        reason: `承認後の状態変更は原文では未確認です。保留の根拠：${targetEvidence}`, target: "rule" });
       return false;
     }
     // A direct answer may omit the question's "after approval is held" prefix.
@@ -240,8 +254,11 @@ export function validateAITransitions<T extends ExtractionReview>(
     const inquiryUnknown = /確認(?:しない|しません|していない|していません|しなかった|する(?:予定|つもり|必要)(?:は|が)?(?:ない|ありません))|不明|分から|未確認|未定/;
     const inquiryParty = (text: string) => {
       if (inquiryUnknown.test(text)) return undefined;
-      return text.match(/([\p{Script=Han}\p{Script=Katakana}A-Za-z0-9ー]{1,30})(?:へ|に)(?:メール|Teams|電話|チャット|メッセージ)で[^。！？\n]{0,24}確認(?:する|します)/iu)?.[1]
+      const withChannel = text.match(/([\p{Script=Han}\p{Script=Katakana}A-Za-z0-9ー]{1,30})(?:へ|に)(?:メール|Teams|電話|チャット|メッセージ)で[^。！？\n]{0,24}確認(?:する|します)/iu)?.[1]
         ?? text.match(/(?:メール|Teams|電話|チャット|メッセージ)で([\p{Script=Han}\p{Script=Katakana}A-Za-z0-9ー]{1,30})(?:へ|に)[^。！？\n]{0,24}確認(?:する|します)/iu)?.[1];
+      if (withChannel) return withChannel;
+      const party = text.match(/([\p{Script=Han}\p{Script=Katakana}A-Za-z0-9ー]{1,30})(?:へ|に)[^。！？\n]{0,24}確認(?:する|します)/iu)?.[1];
+      return party && !namedSystems.has(party) ? party : undefined;
     };
     const party = targetEvidence && inquiryParty(compact(targetEvidence));
     const targetInquiry = party && !inquiryUnknown.test(target?.action ?? "") &&
