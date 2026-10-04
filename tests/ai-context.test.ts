@@ -189,7 +189,7 @@ test("a selected insertion position does not freeze an AI's combined check and a
   assert(!("name" in context.steps[0]));
   assert(!("result" in context.steps[0]));
   assert.deepEqual(context.steps[0].humanEdits?.map(edit => edit.field), ["actor"]);
-  assert.equal(context.steps[0].humanPlacements?.[0].position.afterStepKey, "record");
+  assert.deepEqual(context.steps[0].humanPlacements?.[0].position, { afterStepKey: "record", addedStepKeys: ["check"] });
   const result = preserveRefinements({ ...previous, steps: [
     { ...previous.steps[0], humanEdits: undefined, name: "確度を確認する", action: "確度を確認する", actor: "担当" },
     { ...previous.steps[0], humanEdits: undefined, stepKey: "approve", order: 2, name: "承認する", action: "承認する", evidence: "承認します" },

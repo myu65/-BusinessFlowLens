@@ -3,6 +3,7 @@ import test from "node:test";
 import { preApprovalRepair, retainSplitCheckKeys } from "../lib/ai/draft-quality";
 import { extractGroundedLocal } from "../lib/local-review";
 import { preserveRefinements } from "../lib/refinement";
+import type { ExtractionReview } from "../lib/graph";
 
 const approval = "営業部長が大型案件の確度を確認し、承認します。";
 const before = "確認した後、迷った場合は承認する前に営業部長へ判断を頼みます。";
@@ -28,12 +29,12 @@ test("splitting retains the uniquely grounded check identity and its position, w
     { field: "actor", before: "営業部長", after: "部長代理", evidence: "部長代理が確認します" },
     { field: "placement", before: null, after: { afterStepKey: "record" }, evidence: approval },
   ];
-  const candidate = { ...previous, steps: [
+  const candidate: ExtractionReview = { ...previous, steps: [
     { ...previous.steps[0], stepKey: "new-check", humanEdits: undefined, action: "大型案件の確度を確認する", name: "確度確認" },
     { ...previous.steps[0], stepKey: "approve", humanEdits: undefined, action: "承認する", name: "承認" },
-  ], transitions: [{ fromStepKey: "new-check", toStepKey: "approve", condition: null }],
+  ], transitions: [{ fromStepKey: "new-check", toStepKey: "approve", condition: null, evidence: approval }],
     dataFlows: [{ sourceSystem: "SAP", targetSystem: "Excel", data: [], transferType: "manual" as const,
-      direction: "push" as const, automation: "manual" as const, evidence: "転記する", certainty: "explicit" as const, relatedStepKeys: ["new-check"] }] };
+      direction: "push", automation: "manual", frequency: null, evidence: "転記する", certainty: "explicit", relatedStepKeys: ["new-check"] }] };
   const result = retainSplitCheckKeys(candidate, previous, approval + before);
   assert.equal(result.steps[0].stepKey, "check");
   assert.equal(result.transitions[0].fromStepKey, "check");
