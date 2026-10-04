@@ -239,8 +239,8 @@ export function InputReviewFlow({
       <div className="input-information-change">
         <section>
           <h4>受け取る・判断の根拠</h4>
-          {inputs.map((d) => (
-            <span className="input-data-tag" key={d.name}>
+          {inputs.map((d, i) => (
+            <span className="input-data-tag" key={`${d.name}:${d.operation}:${i}`}>
               {d.name}
             </span>
           ))}
@@ -265,8 +265,8 @@ export function InputReviewFlow({
             {selected.meaning?.result ||
               "この作業の結果は、まだ確認できていません"}
           </p>
-          {outputs.map((d) => (
-            <span className="input-data-tag" key={d.name}>
+          {outputs.map((d, i) => (
+            <span className="input-data-tag" key={`${d.name}:${d.operation}:${i}`}>
               {
                 { send: "渡す情報：", create: "新しい情報：", update: "更新する情報：" }[
                   d.operation as "send" | "create" | "update"
