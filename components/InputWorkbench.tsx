@@ -230,6 +230,7 @@ export function InputWorkbench({
   const diff = useMemo(() => review
     ? diffReviews(draft?.baseline ?? currentReview, review, graph)
     : null, [draft?.baseline, currentReview, review, graph]);
+  const selectedChange = draft ? diff?.changed.find(c => c.after.stepKey === selected?.stepKey) : undefined;
   const stale = draft
     ? draft.sourceNotes !== memo
     : !!saved && (savedTranscripts[key] ?? "") !== memo;
@@ -1077,6 +1078,12 @@ export function InputWorkbench({
                     onSelect(id);
                   }}
                 />
+                {selectedChange && (
+                  <details className="input-review-changes" key={selectedChange.after.stepKey}>
+                    <summary>この手順はどう変わったか · {selectedChange.details.length}項目</summary>
+                    <ul>{selectedChange.details.map((detail, i) => <li key={i}>{detail}</li>)}</ul>
+                  </details>
+                )}
               </div>
               {edit && (
                 <fieldset

@@ -5,7 +5,8 @@ import { buildAssetResolutionContext, scopedAssetNodes } from "./asset-context";
 import type { AIConfigurationStatus } from "./status";
 import { AIProviderError } from "./errors";
 import { separateMissingFacts } from "../review-facts";
-import { validateSystemDependencies } from "../system-dependencies";
+import { supplementSourceDependencies, validateSystemDependencies } from "../system-dependencies";
+import { distinguishRegistrationInputs, separateDependencyDescriptions } from "../review-source-semantics";
 import { callCodexModel } from "./codex";
 import {
   validateReviewConnections,
@@ -728,6 +729,7 @@ Rules:
 4. Data may be explicit ("order data", "customer master", "Excel row") or strongly implied by an explicit read/write operation. Mark the containing step inferred when the business object itself is inferred.
 4a. Receiving or reading an existing decision/quantity is receive/read, not create. A person entering it into a system may also update a record, but must not appear to originate the upstream decision. Include the named incoming information on the receiving step.
 4b. Saving an already received document in SharePoint does not create its original contents. Represent receipt and storage/update, or distinctly name a newly created archive record only if the source states one. Do not describe the received signed receipt as newly authored by the receiving person.
+4c. Entering/registering a machine number or a user does not create that number or person. Distinguish the existing values used as input from the registration record or assignment that changes. For "機器番号と利用者を登録", describe the recorded assignment/registration, not "機器番号を作る" or "利用者を作る". Do not invent number generation or new people. A record name strongly implied by registration remains inferred; preserve the actual result and leave unspecified fields empty.
 5. Do not invent integrations, APIs, databases, owners, approval rules, automation, or master-data sources.
 6. Evidence must be a short phrase grounded in the interview. Do not paraphrase invented detail into evidence.
 7. Separate actor, department/team, responsible person, and system. "営業部の田中さんがERPに入力" => department=営業部; responsiblePerson=田中さん; actor may be 営業担当; system=ERP. Do not infer department/person when not stated.
@@ -769,6 +771,7 @@ Rules:
 24a. activity is broader than the individual workflow and should group several types of work. For example a production-planning story might have activity '製品をつくる' and capability '製造計画'; this is a grouping proposal only. Do not copy this story's detailed actions or quantities into the activity label. Prefer short, familiar words. Do not put a planning story into a sales activity merely because sales is its upstream source.
 25. systemProfiles describe each named tool's category and purpose in THIS interview. Categories are editable organization labels; reuse suitable catalog category names. Include groupware, infrastructure and local tools as named tools, not miscellaneous. Mark classifications inferred unless explicit; explain only the stated role, and never assume dependencies, owners or integrations from product knowledge. Use empty strings for unknown role/category. System names must match the draft mentions.
 25a. systemDependencies capture ONLY dependencies explicitly described by this source: the system needs the named prerequisite to operate, log in or connect. For example "TeamsとSharePointはEntra IDのSSOを使う" has Teams → Entra ID and SharePoint → Entra ID. Quote the complete clause naming both ends and the direction. These facts are not tasks, transfers or simultaneous use. Do not infer a dependency from vendor knowledge, common technology, another interview, a future plan, negation or unknown authentication. Use an empty array when none is stated. Human corrections and rejected relationships remain authoritative.
+25a1. Capture the dependency even when the same interview also describes business actions. "VPNはログイン時にEntra IDの認証を使います" explains VPN → Entra ID. It does not say that the administrator performs a VPN login between registering a user and checking a connection test. Keep that specification in systemDependencies, without inventing a login/authentication task or its position. Preserve an actual login/authentication action when the source narrates who or what executes it as part of the work. Include the named dependent tool even if no task directly uses it.
 25b. When the source only explains system dependencies and does not describe business actions, use steps=[] with the grounded systemDependencies. Do not invent a login/check/registration task to fill a workflow.
 25c. A category groups the stated role, not an assumed vendor architecture. When the role is clear, propose a short editable category with certainty=inferred. For example, notices and collaboration can be '連絡・共同作業', transaction records '取引・業務処理', spreadsheet adjustments '部門の作業道具', and laboratory judgments '検査・品質管理'. These are examples, not a fixed taxonomy. Keep category empty only when there is no basis to organize the stated role. An unknown category must never erase a known purpose.
 26. Keep the draft concise. Use short phrases for meaning (usually 10-35 Japanese characters), summaries under 120 Japanese characters, and minimal verbatim evidence phrases. Do not repeat the whole action in purpose, basis, result and next; leave absent facts empty. A single business check can have several ordered child operations instead of turning every small interaction into a separate top-level step, but preserve separate human judgments, automatic system decisions and exception branches. System/Data mention evidence should be just the relevant short source phrase. Never shorten by dropping a stated condition or changing its meaning.
@@ -1431,8 +1434,13 @@ export async function extractWorkflowReviewWithAI(args: {
   const additionalEvidence = effectiveFollowUpAnswers(followUpAnswers).flatMap(a =>
     a.referenceReading ? groundedReferenceReading(a, a.referenceReading).facts.flatMap(f => f.evidence) : [a.answer]);
   const evidenceSource = [args.interview, ...additionalEvidence].join("\n");
+  const sourceSemantics = distinguishRegistrationInputs(separateDependencyDescriptions(
+    supplementSourceDependencies(validateSystemDependencies(
+      separateMissingFacts(normalizeDraft(rawDraft), evidenceSource), evidenceSource, false), evidenceSource,
+      scopedAssetNodes(args.graph, args.workflow).filter(n => n.kind === "system").flatMap(n => [n.label, ...(n.aliases ?? [])])),
+    evidenceSource), evidenceSource);
   const sourceDraft = validateAITransitions(
-    scopeReferenceDataFlows(validateSystemDependencies(separateMissingFacts(normalizeDraft(rawDraft), evidenceSource), evidenceSource, false), args.graph, args.workflow.id, args.interview, args.followUpAnswers ?? []),
+    scopeReferenceDataFlows(sourceSemantics, args.graph, args.workflow.id, args.interview, args.followUpAnswers ?? []),
     evidenceSource,
   );
 

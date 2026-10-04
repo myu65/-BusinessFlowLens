@@ -594,6 +594,7 @@ export function describeHumanEdit(edit: import("./graph").HumanEdit): string[] {
     department: "部署",
     responsiblePerson: "責任者",
     executionMode: "実行方法",
+    certainty: "根拠の確かさ",
     executingSystem: "実行するSystem",
     executionContext: "開始条件・ルール・例外",
     systems: "使う道具",
@@ -636,6 +637,8 @@ export function describeHumanEdit(edit: import("./graph").HumanEdit): string[] {
             ? "詳細を更新"
             : String(v);
   const fieldValue = (v: unknown) => {
+    if (edit.field === "certainty" || edit.field.endsWith(".certainty"))
+      return { explicit: "原文に明示", confirmed: "根拠あり", inferred: "推定・要確認", unknown: "未確認" }[String(v)] ?? value(v);
     if (["data", "systems"].includes(edit.field) && Array.isArray(v)) {
       const actions: Record<string, string> = edit.field === "data"
         ? { read: "参照する", receive: "受け取る", create: "新しく作る", update: "更新する", send: "渡す" }

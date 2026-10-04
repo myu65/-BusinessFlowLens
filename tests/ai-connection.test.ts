@@ -16,6 +16,42 @@ import { knowledgeIndex } from "../lib/knowledge";
 const empty: LensGraph = { workflows: [], nodes: [], edges: [], dataFlows: [] };
 const workflow = { id: "new", name: "入力した話" };
 
+test("the AI adapter separates a runtime specification and registration values before constructing structure", async () => {
+  const registration = "情報システム担当がネットワーク管理システムへVPN利用者を登録します。";
+  const specification = "VPNはログイン時にEntra IDの認証を使います。";
+  const testAction = "情報システム担当が接続テストを確認します。";
+  const base = extractGroundedLocal("担当が確認する。").steps[0];
+  const draft = { summary: "接続の設定", trigger: null, outcome: null, questions: [], warnings: [], dataFlows: [],
+    steps: [
+      { ...base, stepKey: "register", name: "利用者を登録する", action: "VPN利用者を登録する", order: 1, evidence: registration,
+        data: [{ name: "VPN利用者", operation: "create", evidence: "VPN利用者を登録" }] },
+      { ...base, stepKey: "spec", name: "認証を使う", action: "VPNでEntra IDの認証を使う", order: 2, evidence: specification,
+        actor: null, responsiblePerson: null, executingSystem: null, executionMode: "unknown",
+        systems: [{ name: "VPN", interaction: "other", evidence: specification }, { name: "Entra ID", interaction: "other", evidence: specification }], data: [] },
+      { ...base, stepKey: "test", name: "接続テストを確認する", action: "接続テストを確認する", order: 3, evidence: testAction, data: [] },
+    ], transitions: [{ fromStepKey: "register", toStepKey: "spec", condition: null, evidence: specification },
+      { fromStepKey: "spec", toStepKey: "test", condition: null, evidence: specification }],
+  };
+  const server = createServer((_request, response) => {
+    response.setHeader("Content-Type", "application/json");
+    response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(draft) } }] }));
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    await withConfig({ AI_MODEL: "mock", AI_API_KEY: "test-only", AI_BASE_URL: `http://127.0.0.1:${(server.address() as { port: number }).port}` }, async () => {
+      const result = await extractWorkflowReviewWithAI({ interview: registration + specification + testAction, workflow, graph: empty });
+      assert.deepEqual(result.review.steps.map(s => s.stepKey), ["register", "test"]);
+      assert.equal(result.review.transitions.length, 0);
+      assert.equal(result.review.steps[0].data[0].operation, "read");
+      assert.equal(result.review.systemDependencies![0].evidence, specification);
+      assert.equal(result.review.systemDependencies![0].certainty, "confirmed");
+    });
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
 test("an AI dependency-only explanation becomes platform structure, while an ungrounded zero-task result is rejected", async () => {
   const source = "TeamsはEntra IDのSSOを使います。";
   const draft = { summary: source, trigger: null, outcome: null, steps: [], transitions: [], dataFlows: [], questions: [], warnings: [], systemDependencies: [{ system: "Teams", prerequisite: "Entra ID", reason: "SSO認証", evidence: source, certainty: "confirmed" }] };
