@@ -1,4 +1,4 @@
-import type { ExtractionReview, LensGraph, Workflow } from "./graph";
+import type { ExtractionReview, ExtractionTransition, LensGraph, Workflow } from "./graph";
 import { normalizeAssetName } from "./refinement";
 import { sourceEvidence } from "./source-evidence";
 
@@ -134,7 +134,17 @@ export function validateAITransitions<T extends ExtractionReview>(
   const warnings = [...review.warnings],
     questions = [...review.questions];
   const repeat = /再試行|再実行|再確認|やり直|繰り返|もう一度|retry|repeat/i;
-  const transitions = review.transitions.map(t => ({ ...t, evidence: sourceEvidence(source, t.evidence) ?? t.evidence })).filter((t) => {
+  const repair = (text: string) => {
+    // Uncertainty about a later restart does not make the preceding repair
+    // unknown. Only scope this specific "after repair, restart is unknown" form.
+    const after = text.match(/(?:直した|修正した|調べた|調査した|切り分けた)後(?:に|、|は)/);
+    const later = after ? text.slice(after.index! + after[0].length) : "";
+    const scoped = after && /再開|再実行|再試行|再処理/.test(later) && /不明|分から|分かりません|未確認|未定/.test(later)
+      ? text.slice(0, after.index! + after[0].length) : text;
+    return /原因.{0,16}(?:調べ|調査|直|修正)|障害.{0,16}(?:調べ|調査|切り分け)/.test(scoped) &&
+      !/(?:調べ|調査|修正)(?:ない|しない|ません|しません|しなかった)|直(?:さない|さず|さなかった|しません)|不明|分から|分かりません|未確認|未定/.test(scoped);
+  };
+  const transitions = review.transitions.map<ExtractionTransition>(t => ({ ...t, holdEffect: undefined, evidence: sourceEvidence(source, t.evidence) ?? t.evidence })).filter((t) => {
     const step = review.steps.find((s) => s.stepKey === t.fromStepKey);
     const evidence = compact(t.evidence);
     const restart = evidence && original.includes(evidence) &&
@@ -151,11 +161,32 @@ export function validateAITransitions<T extends ExtractionReview>(
       !/(?:通知|連絡|依頼|照会|報告)(?:は|を)?しない|知らせない|渡さない|引き継がない|問い?合わせない/.test(text);
     const handover = evidence && original.includes(evidence) &&
       isHandoff(evidence) && isHandoff(target?.action ?? "");
-    const repair = (text: string) => /原因.{0,16}(?:調べ|調査|直|修正)|障害.{0,16}(?:調べ|調査|切り分け)/.test(text) &&
-      !/(?:調べ|直|修正|調査)(?:ない|しない|ません)|不明|分から|未確認/.test(text);
     const targetEvidence = target && sourceEvidence(source, target.evidence);
-    const exceptionResponse = evidence && original.includes(evidence) && repair(evidence) &&
-      targetEvidence && repair(targetEvidence) && repair(target?.action ?? "") &&
+    // Two quoted clauses can support an inferred response after a stop, even
+    // when joining those clauses would not be a literal source quotation.
+    // Require a quote for each endpoint, in adjacent source sentences.
+    const quotes = [...t.evidence.matchAll(/[「『]([^」』]+)[」』]/g)].map(m => compact(m[1]));
+    const sourceStepEvidence = step && sourceEvidence(source, step.evidence);
+    const sourceAt = sourceStepEvidence ? original.indexOf(compact(sourceStepEvidence)) : -1;
+    const targetAt = targetEvidence ? original.indexOf(compact(targetEvidence)) : -1;
+    const explicitWhileHeld = evidence && original.includes(evidence) && repair(evidence) &&
+      /停止中|保留中|止まっている間/.test(evidence) && targetEvidence && compact(targetEvidence).includes(evidence) &&
+      sourceStepEvidence && /保留|停止|止め|使用不可|隔離/.test(compact(sourceStepEvidence)) &&
+      review.steps.filter(s => s.meaning?.halt && s.meaning.condition).length === 1;
+    const sameHeldEpisode = sourceStepEvidence && targetEvidence &&
+      /保留|停止|止め|使用不可|隔離/.test(compact(sourceStepEvidence)) &&
+      sourceAt >= 0 && targetAt >= sourceAt &&
+      (original.slice(sourceAt + compact(sourceStepEvidence).length, targetAt).match(/[。！？]/g)?.length ?? 0)
+        <= (/[。！？]$/.test(compact(sourceStepEvidence)) ? 0 : 1);
+    const quotedResponse = quotes.length === 2 &&
+      !t.evidence.replace(/[「『][^」』]+[」』]/g, "").replace(/[\s、,・/]/g, "") &&
+      quotes.every(q => q.length >= 5 && original.includes(q)) &&
+      sourceStepEvidence && compact(sourceStepEvidence).includes(quotes[0]) &&
+      targetEvidence && compact(targetEvidence).includes(quotes[1]) && repair(quotes[1]) &&
+      original.indexOf(quotes[0]) < original.indexOf(quotes[1]) &&
+      (original.slice(original.indexOf(quotes[0]) + quotes[0].length, original.indexOf(quotes[1])).match(/[。！？]/g)?.length ?? 0) <= 1;
+    const exceptionResponse = (sameHeldEpisode && ((evidence && original.includes(evidence) && repair(evidence)) || quotedResponse) || explicitWhileHeld) &&
+      targetEvidence && repair(compact(targetEvidence)) && repair(target?.action ?? "") &&
       !/確定|承認|完了|公開|納品|出荷|反映|再開|再実行|再試行|解除|配信/.test(target?.action ?? "");
     // A conditional check may have a normal path and a hold inside it. A step
     // executed only on the hold condition needs an explicit release to proceed.
@@ -167,6 +198,10 @@ export function validateAITransitions<T extends ExtractionReview>(
         target: "exception",
       });
       return false;
+    }
+    if (step?.meaning?.halt && step.meaning.condition) {
+      t.holdEffect = restart || statedContinuation ? "resume" : continuedHold || handover || exceptionResponse ? "response" : undefined;
+      if ((quotedResponse || explicitWhileHeld) && exceptionResponse) t.certainty = "inferred";
     }
     if (t.fromStepKey !== t.toStepKey) return true;
     if (evidence && repeat.test(evidence) && original.includes(evidence))

@@ -175,6 +175,7 @@ export type LensEdge = {
   workflowIds: string[];
   evidence?: string;
   status?: Confidence;
+  holdEffect?: "response" | "resume";
 };
 
 export type DataFlowTransferType =
@@ -248,6 +249,7 @@ export type GraphPatchEdge = {
   label?: string | null;
   evidence?: string;
   status?: Confidence;
+  holdEffect?: LensEdge["holdEffect"];
 };
 
 export type GraphPatchDataFlow = {
@@ -331,6 +333,7 @@ export type ExtractionTransition = {
   condition: string | null;
   evidence: string;
   certainty?: Confidence;
+  holdEffect?: LensEdge["holdEffect"];
 };
 
 export type ExtractionReview = {
@@ -559,6 +562,7 @@ export function replaceWorkflowGraph(
       workflowIds: [workflow.id],
       evidence: patchEdge.evidence,
       status: patchEdge.status,
+      holdEffect: patchEdge.holdEffect,
     });
   }
 
@@ -1486,6 +1490,7 @@ export function buildWorkflowReviewFromGraph(
       condition: edge.label ?? null,
       evidence: edge.evidence ?? "",
       certainty: edge.status,
+      holdEffect: edge.holdEffect,
     }));
 
   const dataFlows: ExtractionDataFlow[] = (graph.dataFlows ?? [])
