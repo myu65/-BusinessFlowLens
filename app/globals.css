@@ -3249,6 +3249,7 @@ button:disabled { cursor:not-allowed; opacity:.45; }
 .input-empty-structure { padding:32px 0; line-height:1.8; color:#607467; }
 .flow-decision,.flow-journey,.flow-connections { padding:14px; background:#f0f6f2; border:1px solid #d5e3d8; border-radius:8px; margin:12px 0; }
 .flow-meaning-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }.flow-meaning-grid h4 { margin:0 0 6px; }
+.flow-result-connections button { max-width:100%; white-space:normal; overflow-wrap:anywhere; text-align:left; line-height:1.6; }
 .flow-connections button { display:block; margin:8px 0; padding:10px; text-align:left; }
 @media(max-width:1000px) { .input-workbench-grid { grid-template-columns:1fr; gap:16px; }.input-note-pane { position:static; }.input-main-note textarea { min-height:170px; } }
 @media(max-width:700px) { .flow-meaning-grid { grid-template-columns:1fr; }.input-workbench { padding:12px; }.input-note-pane,.input-structure-pane { padding:12px; } }
