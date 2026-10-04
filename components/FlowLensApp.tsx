@@ -5,7 +5,7 @@ import { DataFlowExplorer } from "./DataFlowExplorer";
 import { KnowledgeExplorer, type KnowledgeExploration } from "./KnowledgeExplorer";
 import { InputWorkbench } from "./InputWorkbench";
 import { AssetExplorer, CrossBusinessOverview, type AssetExploration } from "./ScopedExplorers";
-import { NEW_MEMO_ID, hasUnreflectedNotes, previewReviewGraph, recordReviewEdits, type InputDraft } from "@/lib/review-workbench";
+import { NEW_MEMO_ID, hasUnreflectedNotes, inputKeyForWorkflow, previewReviewGraph, recordReviewEdits, type InputDraft } from "@/lib/review-workbench";
 
 import { StepDetailEditor, TechnicalDetails, WorkflowExplorer } from "./ProgressiveWorkflow";
 
@@ -1896,7 +1896,7 @@ function WorkflowView({
 
 function DataFlowView({ graph, initialWorkflowId }: { graph: LensGraph; initialWorkflowId: string }) {
   const [scope, setScope] = useState<WorkflowScenario>(graph.workflows.find(w => w.id === initialWorkflowId)?.scenario ?? "current");
-  const [workflowId, setWorkflowId] = useState(initialWorkflowId);
+  const [workflowId, setWorkflowId] = useState(graph.workflows.some(w => w.id === initialWorkflowId) ? initialWorkflowId : "");
   const [pair, setPair] = useState("");
   const [page, setPage] = useState(0);
   const [ownership, setOwnership] = useState<OwnershipState>({
@@ -2396,14 +2396,14 @@ function Workspace() {
           focusedStepId={focusedSteps[visibleWorkflowId]} onFocusStep={(id,step)=>setFocusedSteps(s=>({...s,[id]:step}))}
           graph={visibleGraph}
           workflowId={visibleWorkflowId}
-          setWorkflowId={setSelectedWorkflowId}
+          setWorkflowId={id => setSelectedWorkflowId(inputKeyForWorkflow(drafts, id))}
           onEdit={() => setSection("interviews")}
           onGraphApply={activeDraft ? () => setSection("interviews") : setGraph}
         />
         </>
       ) : null}
 
-      {section === "dataflow" ? <><div hidden={!activeDraft} className="input-preview-banner">保存前の候補を表示しています。<button onClick={()=>setSection("interviews")}>入力と構造の確認へ戻る</button></div><DataFlowExplorer graph={visibleGraph} initialWorkflowId={visibleWorkflowId} onSelectWorkflow={setSelectedWorkflowId} onGraphApply={activeDraft ? ()=>setSection("interviews") : setGraph} onEdit={id => {setSelectedWorkflowId(id===activeDraft?.workflow.id ? selectedWorkflowId : id);setSection("interviews");}}><DataFlowView graph={visibleGraph} initialWorkflowId={visibleWorkflowId} /></DataFlowExplorer></> : null}
+      {section === "dataflow" ? <>{activeDraft && <div className="input-preview-banner" role="status">保存前の候補を表示しています。<button onClick={()=>setSection("interviews")}>入力と構造の確認へ戻る</button></div>}<DataFlowExplorer graph={visibleGraph} initialWorkflowId={visibleWorkflowId} onSelectWorkflow={id => setSelectedWorkflowId(inputKeyForWorkflow(drafts, id))} onGraphApply={activeDraft ? ()=>setSection("interviews") : setGraph} onEdit={id => {setSelectedWorkflowId(inputKeyForWorkflow(drafts, id));setSection("interviews");}}><DataFlowView graph={visibleGraph} initialWorkflowId={visibleWorkflowId} /></DataFlowExplorer></> : null}
 
       {section === "assets" ? <AssetExplorer exploration={assetExploration} onExplorationChange={keepAssetExploration} graph={graph} onGraphApply={setGraph} onEdit={id=>{setSelectedWorkflowId(id);setSection("interviews");}} /> : null}
       {section === "overview" ? <CrossBusinessOverview graph={graph} onOpen={id=>{setSelectedWorkflowId(id);setSection("interviews");}} /> : null}

@@ -1,5 +1,5 @@
 "use client";
-import { useState, type ReactNode } from "react";
+import React, { useState, type ReactNode } from "react";
 import type { LensGraph, WorkflowScenario } from "@/lib/graph";
 import { aggregateDataFlows, scopedDataFlows } from "@/lib/knowledge";
 import { transferSteps } from "@/lib/flow-context";
@@ -21,7 +21,11 @@ export function DataFlowExplorer({
   children?: ReactNode;
 }) {
   const [advanced, setAdvanced] = useState(false);
-  const [workflowId, setWorkflow] = useState(initialWorkflowId);
+  const [workflowId, setWorkflow] = useState(
+    graph.workflows.some((w) => w.id === initialWorkflowId)
+      ? initialWorkflowId
+      : "",
+  );
   const [scope, setScope] = useState<WorkflowScenario>(
     graph.workflows.find((w) => w.id === initialWorkflowId)?.scenario ??
       "current",
