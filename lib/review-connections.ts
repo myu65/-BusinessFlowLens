@@ -189,7 +189,7 @@ export function validateAITransitions<T extends ExtractionReview>(
     const continuedHold = target?.meaning?.halt && evidence && original.includes(evidence) &&
       /保留|停止/.test(evidence) && !/不明|分から|未確認/.test(evidence);
     const isHandoff = (text: string) =>
-      /通知|連絡|依頼|渡す|引き継|照会|問い?合わせ|知らせ|報告|inform|request|handoff/i.test(text) &&
+      /通知|連絡|依頼|渡(?:す|します)|引き継|照会|問い?合わせ|知らせ|報告|inform|request|handoff/i.test(text) &&
       !/(?:通知|連絡|依頼|照会|報告)(?:は|を)?しない|知らせない|渡さない|引き継がない|問い?合わせない/.test(text);
     const handover = evidence && original.includes(evidence) &&
       isHandoff(evidence) && isHandoff(target?.action ?? "");
