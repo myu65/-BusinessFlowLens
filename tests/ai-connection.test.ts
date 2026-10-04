@@ -16,6 +16,37 @@ import { knowledgeIndex } from "../lib/knowledge";
 const empty: LensGraph = { workflows: [], nodes: [], edges: [], dataFlows: [] };
 const workflow = { id: "new", name: "入力した話" };
 
+test("the AI adapter keeps an unmatched model quote as a proposal rather than confirmed source text", async () => {
+  const source = "検査担当がLIMSに保管場所を記録します。";
+  const draft = extractGroundedLocal(source);
+  draft.steps[0].evidence = "検査担当が保管場所をLIMSへ記録します。";
+  draft.steps[0].meaning = { purpose: "", basis: "", result: "保管場所を記録する", next: "", condition: "",
+    halt: false, certainty: "confirmed", evidence: "LIMSへ保管場所を登録しました" };
+  const server = createServer((_request, response) => {
+    response.setHeader("Content-Type", "application/json");
+    response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(draft) } }] }));
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    await withConfig({ AI_MODEL: "mock", AI_API_KEY: "test-only", AI_BASE_URL: `http://127.0.0.1:${(server.address() as { port: number }).port}` }, async () => {
+      const result = await extractWorkflowReviewWithAI({ interview: source, workflow, graph: empty });
+      const step = result.review.steps[0];
+      assert.equal(step.action, draft.steps[0].action);
+      assert.equal(step.evidence, "");
+      assert.equal(step.certainty, "inferred");
+      assert.equal(step.meaning!.result, "保管場所を記録する");
+      assert.equal(step.meaning!.evidence, "");
+      assert.equal(step.meaning!.certainty, "inferred");
+      assert(result.review.warnings.some(w => w.includes(draft.steps[0].evidence)));
+      const graph = previewReviewGraph(empty, workflow, result.review);
+      assert.equal(graph.nodes.find(n => n.kind === "process")!.status, "inferred");
+    });
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
 test("a source-backed pre-approval contradiction gets at most one AI repair, with human corrections preserved", async () => {
   const approval = "営業部長が大型案件の確度を確認し、承認します。";
   const before = "確認した後、迷った場合は承認する前にTeamsで営業部長へ判断を頼みます。";
