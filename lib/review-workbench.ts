@@ -595,8 +595,11 @@ export function describeHumanEdit(edit: import("./graph").HumanEdit): string[] {
     responsiblePerson: "責任者",
     executionMode: "実行方法",
     certainty: "根拠の確かさ",
-    executingSystem: "実行するSystem",
+    executingSystem: "実行するシステム",
     executionContext: "開始条件・ルール・例外",
+    trigger: "開始条件",
+    rule: "実行・判断のルール",
+    exception: "例外の扱い",
     systems: "使う道具",
     data: "情報",
     order: "順序",
@@ -654,6 +657,11 @@ export function describeHumanEdit(edit: import("./graph").HumanEdit): string[] {
         }[String(v)] ?? value(v))
       : value(v);
   };
+  if (edit.field === "executionContext") {
+    const before = (edit.before ?? {}) as Record<string, unknown>, after = (edit.after ?? {}) as Record<string, unknown>;
+    return ["trigger", "rule", "exception"].filter(field => value(before[field]) !== value(after[field]))
+      .map(field => `${labels[field]}：${value(before[field])} → ${value(after[field])}`);
+  }
   if (edit.field === "meaning")
     return Object.entries(edit.after as Record<string, unknown>)
       .filter(

@@ -1078,7 +1078,7 @@ export function InputWorkbench({
                     onSelect(id);
                   }}
                 />
-                {selectedChange && (
+                {selectedChange && selectedChange.details.length > 0 && (
                   <details className="input-review-changes" key={selectedChange.after.stepKey}>
                     <summary>この手順はどう変わったか · {selectedChange.details.length}項目</summary>
                     <ul>{selectedChange.details.map((detail, i) => <li key={i}>{detail}</li>)}</ul>
