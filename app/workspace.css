@@ -82,6 +82,13 @@
 .input-canvas-step[data-change="changed"] small { color: #986d35; }
 .input-canvas-tools { color: #72867a; margin-top: auto; }
 .input-canvas-footnote { font-size: 10px; color: #839087; line-height: 1.6; margin: 6px 0 12px; }
+.input-workbench .input-canvas-step[data-context="true"] { opacity: .8; }
+.input-canvas-boundaries { margin: 10px 0; border: 1px solid #d8e1db; border-radius: 7px; padding: 9px; background: #f5f8f6; }
+.input-canvas-boundaries h3 { font-size: 12px; margin: 0 0 6px; }
+.input-canvas-boundaries > div:first-of-type { display: grid; gap: 6px; }
+.input-canvas-boundaries article { border-top: 1px solid #e1e9e3; padding-top: 6px; }
+.input-canvas-boundaries p { font-size: 11px; line-height: 1.5; margin: 3px 0; }
+.input-workbench .input-canvas-boundaries article button { padding: 4px 8px; min-height: 26px; font-size: 11px; text-align: left; }
 .input-flow-canvas .input-canvas-insert { position: absolute; z-index: 2; width: 22px; height: 22px; min-height: 22px; padding: 0; border-radius: 50%; border: 1px solid #fafcf9; background: #4f876b; color: white; font-size: 16px; line-height: 20px; }
 .input-canvas-insert:hover, .input-canvas-insert:focus-visible { outline: 2px solid #4487b5; outline-offset: 2px; }
 .input-canvas-insert:disabled { opacity: .4; }

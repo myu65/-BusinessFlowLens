@@ -6,8 +6,22 @@ const ROW_PITCH = 184;
 // Layout only recorded connections. Order is a reading hint, never an inferred edge.
 export function inputCanvasLayout(review: ExtractionReview, page = 0) {
   const steps = [...review.steps].sort((a, b) => a.order - b.order);
-  const safePage = Math.max(0, Math.min(page, Math.ceil(steps.length / INPUT_CANVAS_PAGE_SIZE) - 1));
-  const visible = steps.slice(safePage * INPUT_CANVAS_PAGE_SIZE, (safePage + 1) * INPUT_CANVAS_PAGE_SIZE);
+  const lastPage = Math.max(0, Math.ceil(steps.length / INPUT_CANVAS_PAGE_SIZE) - 1);
+  const safePage = Number.isFinite(page) ? Math.max(0, Math.min(Math.floor(page), lastPage)) : 0;
+  const core = steps.slice(safePage * INPUT_CANVAS_PAGE_SIZE, (safePage + 1) * INPUT_CANVAS_PAGE_SIZE);
+  const coreKeys = new Set(core.map(s => s.stepKey));
+  const visible = [...core];
+  // Spare slots can keep the previous check and its alternative branch visible.
+  // Only one-hop, registered neighbors are context; never synthesize an edge.
+  const addContext = (key: string) => {
+    const step = steps.find(s => s.stepKey === key);
+    if (step && visible.length < INPUT_CANVAS_PAGE_SIZE && !visible.some(s => s.stepKey === key)) visible.push(step);
+  };
+  const incoming = review.transitions.filter(t => coreKeys.has(t.toStepKey) && !coreKeys.has(t.fromStepKey));
+  for (const edge of incoming) addContext(edge.fromStepKey);
+  const parents = new Set(incoming.map(t => t.fromStepKey));
+  for (const edge of review.transitions.filter(t => parents.has(t.fromStepKey))) addContext(edge.toStepKey);
+  for (const edge of review.transitions.filter(t => coreKeys.has(t.fromStepKey))) addContext(edge.toStepKey);
   const keys = new Set(visible.map(s => s.stepKey));
   const edges = review.transitions.filter(t => keys.has(t.fromStepKey) && keys.has(t.toStepKey));
   const rank = new Map<string, number>();
@@ -53,13 +67,13 @@ export function inputCanvasLayout(review: ExtractionReview, page = 0) {
   }
   const nodes = visible.map(step => {
     return {
-      step, ...positions.get(step.stepKey)!, isolated: isolated(step),
+      step, ...positions.get(step.stepKey)!, isolated: isolated(step), context: !coreKeys.has(step.stepKey),
     };
   });
   return {
-    nodes, edges, page: safePage, total: steps.length,
+    nodes, edges, page: safePage, total: steps.length, coreCount: core.length,
     width: Math.max(540, 518 + edges.length * 3), height: Math.max(220, ...nodes.map(n => n.y + 158)),
-    outside: review.transitions.filter(t => keys.has(t.fromStepKey) !== keys.has(t.toStepKey)),
+    outside: review.transitions.filter(t => coreKeys.has(t.fromStepKey) !== coreKeys.has(t.toStepKey)),
   };
 }
 

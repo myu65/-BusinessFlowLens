@@ -90,6 +90,40 @@ test("a long or cyclic review stays bounded and every step and out-of-page edge 
   assert.equal(inputCanvasLayout(review, 99).page, 4);
 });
 
+test("a hold on the next page keeps the original common check, normal alternative and condition visible without changing step IDs", () => {
+  const steps = Array.from({ length: 7 }, (_, i) => step(`s${i}`, i + 1));
+  steps[6].meaning = { purpose: "", basis: "", result: "使用を保留する", next: "", condition: "前の製品が不明", halt: true, certainty: "confirmed", evidence: "不明なら保留" };
+  const review = { ...empty, steps, transitions: [[0,1],[1,2],[2,3],[3,4],[4,5],[2,6]].map(([from,to]) => ({ fromStepKey: `s${from}`, toStepKey: `s${to}`, condition: to === 6 ? "前の製品が不明" : null, evidence: "原文", certainty: "confirmed" as const })) };
+  const before = JSON.stringify(review), last = inputCanvasLayout(review, 1);
+  assert.equal(last.coreCount, 1); assert.ok(last.nodes.length <= 6);
+  assert.deepEqual(last.nodes.filter(n => !n.context).map(n => n.step.stepKey), ["s6"]);
+  assert.deepEqual(last.nodes.filter(n => n.context).map(n => n.step.stepKey), ["s2", "s3"]);
+  assert.ok(last.edges.some(e => e.fromStepKey === "s2" && e.toStepKey === "s6" && e.condition === "前の製品が不明"));
+  assert.ok(last.edges.some(e => e.fromStepKey === "s2" && e.toStepKey === "s3"));
+  assert.ok(!last.edges.some(e => e.fromStepKey === "s3" && e.toStepKey === "s6"));
+  const html = renderToStaticMarkup(createElement(InputFlowCanvas, { review, selected: steps[6], page: 1, onPage: () => {}, choose: () => {}, onInsert: () => {} }));
+  assert.match(html, /別のページの手順/); assert.match(html, /手順3「s2」のページへ/);
+  assert.match(html, /data-from="s2" data-to="s6" data-certainty="confirmed" data-halt="true"/);
+  assert.match(html, /の間に作業を追加（前の製品が不明）/);
+  const first = renderToStaticMarkup(createElement(InputFlowCanvas, { review, selected: steps[2], page: 0, onPage: () => {}, choose: () => {} }));
+  assert.match(first, /手順7「s6」のページへ/);
+  assert.doesNotMatch(first, /手順3「s2」のページへ/);
+  assert.equal(JSON.stringify(review), before);
+});
+
+test("a full page shows its boundary before the diagram, caps dense boundary links at six, and never interprets an off-page edge as unknown work", () => {
+  const review = { ...empty, steps: Array.from({ length: 300 }, (_, i) => step(`s${i}`, i + 1)),
+    transitions: Array.from({ length: 294 }, (_, i) => ({ fromStepKey: "s2", toStepKey: `s${i + 6}`, condition: `条件${i}`, evidence: "原文", certainty: "inferred" as const })) };
+  const layout = inputCanvasLayout(review, 0);
+  assert.equal(layout.nodes.length, 6); assert.equal(layout.outside.length, 294); assert.equal(layout.nodes[2].isolated, false);
+  const html = renderToStaticMarkup(createElement(InputFlowCanvas, { review, selected: review.steps[2], page: 0, onPage: () => {}, choose: () => {} }));
+  assert.equal((html.match(/<article>/g) ?? []).length, 6); assert.match(html, /1–6 \/ 294接続/);
+  assert.ok(html.indexOf('aria-label="ページをまたぐつながり"') < html.indexOf('aria-label="入力が作った手順"'));
+  assert.doesNotMatch(html, /矢印がない手順は、前後がまだ分かっていません/);
+  assert.match(html, /点線は、推定または未確認です/);
+  for (let p = 0; p < 50; p++) assert.ok(inputCanvasLayout(review, p).nodes.length <= 6);
+});
+
 test("the information perspective explains manual tool transfer and the changed result without registering a new draft", () => {
   const review: ExtractionReview = { ...empty, steps: [{ ...step("copy", 1, "容器数と重量を転記する"), systems: [{ name: "Excel", interaction: "input", evidence: "" }],
     data: [{ name: "重量", operation: "read", evidence: "WMSの重量" }], meaning: { purpose: "", basis: "", result: "梱包明細が用意できる", next: "", condition: "", halt: false, certainty: "confirmed", evidence: "" } }],
