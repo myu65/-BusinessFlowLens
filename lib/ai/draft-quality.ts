@@ -21,6 +21,34 @@ export function preApprovalRepair(review: ExtractionReview, source: string) {
   } : null;
 }
 
+// Only flag a literal denied-approval hold that the draft puts after a
+// source-backed combined check/approval. The model still decides the repair.
+export function approvalDenialRepair(review: ExtractionReview, source: string) {
+  if (!Array.isArray(review.transitions)) return null;
+  const bothActions = /確認(?:し|して|した後|したら).{0,24}承認(?:する|します|し(?=[、。]))/;
+  const denied = /承認(?:され)?(?:ない|なければ|なかった)/;
+  const held = /保留(?:する|します|し(?=[て、。]))|(?:配信|送付|処理)を(?:止める|止めます|止め[て、])/;
+  const clauses = source.split(/(?<=[。\n])/);
+  const flagged: Array<{ stepKey: string; check: string; denial: string }> = [];
+  for (const step of review.steps) {
+    if (typeof step.action !== "string" || typeof step.evidence !== "string"
+      || !bothActions.test(step.action) || !bothActions.test(sourceEvidence(source, step.evidence) ?? "")
+      || /承認(?:しない|しません|しなかった|していない|していません)/.test(step.action)) continue;
+    for (const edge of review.transitions) {
+      if (edge.fromStepKey !== step.stepKey || edge.toStepKey === step.stepKey || typeof edge.evidence !== "string") continue;
+      const clause = clauses.filter(c => sourceEvidence(c, edge.evidence)).at(-1);
+      if (!clause || !denied.test(clause) || !held.test(clause)
+        || /不明|分から|未確認|未定|(?:保留|止め)(?:しない|しません|ない|ません)/.test(clause)) continue;
+      const target = review.steps.find(s => s.stepKey === edge.toStepKey);
+      if (!target || typeof target.evidence !== "string" || !sourceEvidence(clause, target.evidence)) continue;
+      flagged.push({ stepKey: step.stepKey, check: step.evidence, denial: clause.trim() });
+      break;
+    }
+  }
+  return flagged.length ? { stepKeys: flagged.map(f => f.stepKey),
+    checkAndApprovalEvidence: flagged.map(f => f.check), denialEvidence: flagged.map(f => f.denial) } : null;
+}
+
 // Decomposition may rename a key even when the model keeps the literal source.
 // Reuse identity only for one checking action grounded in the same sentence.
 // This changes keys, never actions or business connections.
