@@ -248,12 +248,12 @@ export function InputReviewFlow({
           </p>
           {outputs.map((d) => (
             <span className="input-data-tag" key={d.name}>
-              {d.name}
               {
-                { send: "を渡す", create: "を作る", update: "を更新する" }[
+                { send: "渡す情報：", create: "新しい情報：", update: "更新する情報：" }[
                   d.operation as "send" | "create" | "update"
                 ]
               }
+              {d.name}
             </span>
           ))}
         </section>

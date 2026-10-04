@@ -641,7 +641,7 @@ export function describeHumanEdit(edit: import("./graph").HumanEdit): string[] {
       return { explicit: "原文に明示", confirmed: "根拠あり", inferred: "推定・要確認", unknown: "未確認" }[String(v)] ?? value(v);
     if (["data", "systems"].includes(edit.field) && Array.isArray(v)) {
       const actions: Record<string, string> = edit.field === "data"
-        ? { read: "参照する", receive: "受け取る", create: "新しく作る", update: "更新する", send: "渡す" }
+        ? { read: "参照する", receive: "受け取る", create: "情報を新たに作る", update: "更新する", send: "渡す" }
         : { view: "見る", search: "探す", input: "入力する", approve: "承認する", send: "送る", receive: "受け取る", other: "使う" };
       return v.map(item => `${item.name} · ${actions[item.operation ?? item.interaction] ?? "使い方は未確認"}`).join("、") || "未確認";
     }
