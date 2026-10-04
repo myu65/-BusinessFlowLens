@@ -3,14 +3,38 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ExtractionReview, ExtractionReviewStep } from "../lib/graph";
-import { inputCanvasLayout } from "../lib/input-canvas";
+import { inputCanvasEdge, inputCanvasLabel, inputCanvasLayout, inputStepName } from "../lib/input-canvas";
 import { InputFlowCanvas } from "../components/InputFlowCanvas";
 import { InputRelations } from "../components/InputRelations";
+import { InputReviewFlow } from "../components/InputReviewFlow";
 
 const step = (key: string, order: number, name = key): ExtractionReviewStep => ({
   stepKey: key, order, name, action: name, actor: "経理課長", department: null,
   responsiblePerson: null, executionMode: "manual", executingSystem: null,
   certainty: "explicit", evidence: name, systems: [], data: [],
+});
+
+test("a linear wrap takes one row and an overview uses only a grounded result, with the original task kept accessible", () => {
+  const review: ExtractionReview = { ...empty, steps: Array.from({ length: 5 }, (_, i) => step(`s${i}`, i + 1)), transitions: Array.from({ length: 3 }, (_, i) => ({ fromStepKey: `s${i}`, toStepKey: `s${i+1}`, condition: null, evidence: "", certainty: "confirmed" })) };
+  const layout = inputCanvasLayout(review);
+  assert.equal(layout.nodes[3].lane, layout.nodes[2].lane + 1, "wrapping must not add a blank row twice");
+  const wrap = inputCanvasEdge(layout.nodes[2], layout.nodes[3], layout.nodes, 2);
+  assert.ok((wrap.labelY ?? wrap.y - 15) - 10 > layout.nodes[2].y + 130, "condition text clears the card and its selection outline");
+  assert.ok(layout.height < 400);
+  assert.equal(layout.nodes[4].isolated, true);
+  const base = { ...step("prepare", 1, "経理課長が帳票の数字を確認する"), meaning: { purpose: "", basis: "", result: "価格案が用意できる", next: "", condition: "", halt: false, certainty: "confirmed" as const, evidence: "価格案を作る" } };
+  assert.equal(inputCanvasLabel(base), "価格案が用意できる");
+  assert.equal(inputCanvasLabel({ ...base, meaning: { ...base.meaning, certainty: "inferred", result: "価格を確定する" } }), "帳票の数字を確認する");
+  const corrected = { ...base, actor: "経理係長", humanEdits: [{ field: "actor", before: "経理課長", after: "経理係長", evidence: "人が担当を訂正" }] };
+  assert.equal(inputStepName(corrected), "帳票の数字を確認する", "a title must not contradict the corrected actor shown separately");
+  assert.equal(corrected.name, "経理課長が帳票の数字を確認する", "the recorded name and source are retained");
+  const detail = renderToStaticMarkup(createElement(InputReviewFlow, { review: { ...empty, steps: [corrected] }, selected: corrected,
+    graph: { workflows: [], nodes: [], edges: [], dataFlows: [] }, busy: false, choose: () => {}, onEdit: () => {}, onExclude: () => {}, onWorkflow: () => {} }));
+  assert.equal(detail.match(/<h3[^>]*>(.*?)<\/h3>/)?.[1], "帳票の数字を確認する");
+  assert.match(detail, /経理係長/);
+  const html = renderToStaticMarkup(createElement(InputFlowCanvas, { review: { ...empty, steps: [base] }, selected: base, page: 0, onPage: () => {}, choose: () => {} }));
+  assert.match(html, /title="経理課長が帳票の数字を確認する"/);
+  assert.match(html, /価格案が用意できる/);
 });
 const empty: ExtractionReview = { summary: "", trigger: null, outcome: null, steps: [], transitions: [], dataFlows: [], questions: [], warnings: [] };
 
@@ -26,13 +50,29 @@ test("a shared check displays approval and hold as independent branches, with un
   assert.equal(layout.edges.length, 2);
   assert.equal(layout.nodes.find(n => n.step.stepKey === "unknown")?.isolated, true);
   assert.equal(new Set(layout.nodes.map(n => `${n.x}:${n.y}`)).size, 4);
-  assert.ok(layout.height <= 400, "both branches fit the same compact map");
+  assert.ok(layout.height <= 600, "two branches and the separate unknown task stay bounded");
+  assert.equal(layout.nodes.find(n => n.step.stepKey === "approve")?.y, layout.nodes.find(n => n.step.stepKey === "hold")?.y);
   const html = renderToStaticMarkup(createElement(InputFlowCanvas, { review, selected: review.steps[0], page: 0, onPage: () => {}, choose: () => {} }));
   assert.match(html, /data-from="check" data-to="approve" data-certainty="inferred"/);
   assert.match(html, /data-from="check" data-to="hold" data-certainty="confirmed" data-halt="true"/);
   assert.doesNotMatch(html, /data-from="approve" data-to="hold"/);
   assert.match(html, /推定・要確認/);
   assert.equal(JSON.stringify(review), before);
+});
+
+test("after a three-step stem, normal work reads left to right beside the separate exception branch and each arrow offers insertion", () => {
+  const review: ExtractionReview = { ...empty, steps: Array.from({ length: 6 }, (_, i) => step(`s${i}`, i + 1)), transitions: [[0,1],[1,2],[2,3],[3,4],[2,5]].map(([a,b]) => ({ fromStepKey: `s${a}`, toStepKey: `s${b}`, condition: b === 5 ? "空きがない" : null, evidence: "", certainty: "confirmed" })) };
+  const layout = inputCanvasLayout(review);
+  assert.ok(layout.nodes[3].x < layout.nodes[4].x);
+  assert.ok(layout.nodes[4].x < layout.nodes[5].x);
+  assert.equal(layout.nodes[3].y, layout.nodes[5].y);
+  assert.ok(layout.height < 400);
+  const geometry = inputCanvasEdge(layout.nodes[2], layout.nodes[5], layout.nodes, 4);
+  assert.ok(geometry.y > layout.nodes[2].y + 128 && geometry.y < layout.nodes[5].y);
+  const html = renderToStaticMarkup(createElement(InputFlowCanvas, { review, selected: review.steps[2], page: 0, onPage: () => {}, choose: () => {}, onInsert: () => {} }));
+  assert.equal((html.match(/class="input-canvas-insert"/g) ?? []).length, 5);
+  assert.match(html, /の間に作業を追加（空きがない）/);
+  assert.doesNotMatch(html, /data-from="s4" data-to="s5"/);
 });
 
 test("a long or cyclic review stays bounded and every step and out-of-page edge remains reachable", () => {

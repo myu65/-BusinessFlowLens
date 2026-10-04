@@ -19,7 +19,6 @@ import {
   diffReviews,
   editReviewStep,
   stepToolsFromText,
-  insertNoteAfterEvidence,
   NEW_MEMO_ID,
   previewReviewGraph,
   previewInputDrafts,
@@ -30,7 +29,8 @@ import {
 import { InputReviewFlow } from "./InputReviewFlow";
 import { InputFlowCanvas } from "./InputFlowCanvas";
 import { InputRelations } from "./InputRelations";
-import { INPUT_CANVAS_PAGE_SIZE } from "@/lib/input-canvas";
+import { INPUT_CANVAS_PAGE_SIZE, inputStepName } from "@/lib/input-canvas";
+import { addReviewNote, appendReviewSource, reviewAdditionContext, type ReviewInsertion } from "@/lib/review-addition";
 import { aiStatusLabel, type AIConfigurationStatus } from "@/lib/ai/status";
 import { reviewedWorkflowName } from "@/lib/input-knowledge";
 import { InputOrganization } from "./InputOrganization";
@@ -98,7 +98,7 @@ export function InputWorkbench({
   const [stepKey, setStepKey] = useState("");
   const [stepPage, setStepPage] = useState(0);
   const [busy, setBusy] = useState(false);
-  const [operation, setOperation] = useState<"organize" | "save">("organize");
+  const [operation, setOperation] = useState<"organize" | "addition" | "save">("organize");
   const [waitingSeconds, setWaitingSeconds] = useState(0);
   useEffect(() => {
     if (!busy) return;
@@ -130,6 +130,11 @@ export function InputWorkbench({
   const detailPaneRef = useRef<HTMLElement>(null);
   const [noteQuery, setNoteQuery] = useState("");
   const [addition, setAddition] = useState("");
+  const [insertion, setInsertion] = useState<ReviewInsertion | null>(null);
+  const [rememberedInsertion, setRememberedInsertion] = useState<ReviewInsertion | null>(null);
+  const [additionNotice, setAdditionNotice] = useState("");
+  const [undoAddition, setUndoAddition] = useState<{ draft: InputDraft | null; memo: string; review: ExtractionReview } | null>(null);
+  const additionRef = useRef<HTMLTextAreaElement>(null);
   const [target, setTarget] = useState("");
   const [targetStep, setTargetStep] = useState("");
   const [handoffText, setHandoffText] = useState("");
@@ -187,9 +192,23 @@ export function InputWorkbench({
     setWorkbenchTab("flow");
     setQuestionsOpen(false);
     setTarget("");
-    setAddition("");
+    setRememberedInsertion(null);
+    try {
+      const raw = sessionStorage.getItem(`lens-addition:${projectId}:${key}`);
+      if (!raw) setAddition("");
+      else {
+        try {
+          const pending = JSON.parse(raw) as { note?: string; placement?: ReviewInsertion };
+          setAddition(typeof pending.note === "string" ? pending.note : "");
+          if (typeof pending.placement?.afterStepKey === "string") setRememberedInsertion(pending.placement);
+        } catch { setAddition(raw); }
+      }
+    } catch { setAddition(""); }
+    setInsertion(null);
+    setAdditionNotice("");
+    setUndoAddition(null);
     setRevisionDetail(null);
-  }, [key]);
+  }, [key, projectId]);
   useEffect(() => {
     if (!questionDestination || questionDestination !== key) return;
     setQuestionsOpen(true);
@@ -290,6 +309,65 @@ export function InputWorkbench({
     if (window.matchMedia("(max-width: 900px)").matches) setMobilePane("details");
     requestAnimationFrame(() => detailPaneRef.current?.scrollTo({ top: 0 }));
   };
+  function openAddition(placement?: ReviewInsertion) {
+    if (!selected || !review || busy || stale) return;
+    if (!placement && addition.trim()) {
+      if (!rememberedInsertion || !review.steps.some(s => s.stepKey === rememberedInsertion.afterStepKey) ||
+        (rememberedInsertion.transition && !review.transitions.some(t => JSON.stringify(t) === JSON.stringify(rememberedInsertion.transition)))) {
+        setError("追加する場所を、図の＋で選んでください。入力中の話は残っています。"); return;
+      }
+      placement = rememberedInsertion;
+    }
+    const outgoing = review.transitions.filter(t => t.fromStepKey === selected.stepKey);
+    const next = placement ?? { afterStepKey: selected.stepKey, ...(outgoing.length === 1 ? { transition: outgoing[0] } : {}) };
+    setInsertion(next); setRememberedInsertion(next);
+    const anchor = review.steps.find(s => s.stepKey === next.afterStepKey);
+    if (anchor) choose(anchor);
+    if (addition.trim()) try { sessionStorage.setItem(`lens-addition:${projectId}:${key}`, JSON.stringify({ note: addition, placement: next })); } catch { /* The text remains in the editor. */ }
+    setEdit(null);
+    setError("");
+    setMobilePane("details");
+    requestAnimationFrame(() => { detailPaneRef.current?.scrollTo({ top: 0 }); additionRef.current?.focus({ preventScroll: true }); });
+  }
+  function nameForStep(stepKey: string) {
+    const step = review?.steps.find(s => s.stepKey === stepKey);
+    return step ? inputStepName(step) : "手順は未確認";
+  }
+  function writeAddition(value: string) {
+    setAddition(value);
+    try { sessionStorage.setItem(`lens-addition:${projectId}:${key}`, JSON.stringify({ note: value, placement: insertion ?? rememberedInsertion })); } catch { /* Keep the text in the current editor if browser storage is unavailable. */ }
+  }
+  async function addNote() {
+    if (!insertion || !review || !workflow || !addition.trim() || busy || stale) return;
+    const requestKey = key, before = review, placement = insertion, note = addition.trim();
+    const beforeDraft = draft ?? null, source = memo;
+    if (!placement.transition && before.transitions.some(t => t.fromStepKey === placement.afterStepKey)) return;
+    setOperation("addition"); setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/extract", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ interview: note, workflow, graph: preview, previousReview: null, followUpAnswers: [], additionContext: reviewAdditionContext(before, placement) }) });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "追加した話を読み取れませんでした。");
+      const result = addReviewNote(before, payload.review, placement, note, crypto.randomUUID());
+      const text = appendReviewSource(source, note);
+      const next: InputDraft = { ...ensureDraft(result.review), baseline: before, sourceNotes: text, provider: payload.provider };
+      onDraft(requestKey, next);
+      onTranscripts({ ...latest.current.transcripts, [requestKey]: text });
+      if (payload.provider !== "local-demo-extractor") setAIResponse("success");
+      if (latest.current.key === requestKey) {
+        setUndoAddition({ draft: beforeDraft, memo: source, review: result.review });
+        setAddition(""); setInsertion(null); setWorkbenchTab("flow"); setMobilePane("flow");
+        try { sessionStorage.removeItem(`lens-addition:${projectId}:${requestKey}`); } catch { /* The source is already retained in the input draft. */ }
+        setAdditionNotice(result.addedKeys.length ? `${result.addedKeys.length}手順を追加しました。図で選ぶと、担当や道具を確認・編集できます。` : "追加した話を残しました。新しい作業はまだ読み取れていません。確認事項を見て補足できます。");
+        const focus = result.review.steps.find(s => s.stepKey === result.addedKeys[0]);
+        if (focus) { setStepKey(focus.stepKey); setStepPage(Math.floor(result.review.steps.indexOf(focus) / REVIEW_PAGE_SIZE)); }
+        requestAnimationFrame(() => { detailPaneRef.current?.scrollTo({ top: 0 }); });
+      }
+    } catch (cause) {
+      if (aiConfig?.configured) setAIResponse("failure");
+      setError(cause instanceof Error ? cause.message : "追加した話を読み取れませんでした。");
+    } finally { setBusy(false); }
+  }
   async function organize(
     answers = draft?.answerHistory ??
       saved?.reviewContext?.followUpAnswers ??
@@ -381,7 +459,7 @@ export function InputWorkbench({
     }
   }
   async function save() {
-    if (!draft || stale || busy) return;
+    if (!draft || stale || busy || addition.trim()) return;
     setOperation("save");
     setBusy(true);
     setError("");
@@ -417,6 +495,7 @@ export function InputWorkbench({
       onDraft(key, null);
       onSelect(draft.workflow.id);
       setLastSavedId(draft.workflow.id);
+      setUndoAddition(null);
       requestAnimationFrame(() =>
         stripRef.current?.scrollIntoView({
           behavior: "smooth",
@@ -512,7 +591,7 @@ export function InputWorkbench({
                 onTranscripts({ ...transcripts, [key]: e.target.value })
               }
               placeholder={
-                "例えば…\n注文がメールで届く。\n担当者がExcelで確認し、SAPへ入力する。\n足りないときは、生産管理に相談する。\n\n箇条書きでも、まだ曖昧な話でも大丈夫です。"
+                "例えば「注文はメールで届いて、営業担当がExcelで確認します」\n\n分かったことをひとつ書くだけで始められます。続きは図を見ながら足せます。"
               }
             />
           </label>
@@ -764,38 +843,7 @@ export function InputWorkbench({
                   <button onClick={() => setEdit(null)}>閉じる</button>
                 </fieldset>
               )}
-              <details className="input-addition">
-                <summary>この手順の後に、話の続きを足す</summary>
-                <label className="kg-edit-field">
-                  続きの話
-                  <textarea
-                    value={addition}
-                    onChange={(e) => setAddition(e.target.value)}
-                  />
-                </label>
-                <button
-                  className="button-primary"
-                  disabled={busy || !addition.trim()}
-                  onClick={async () => {
-                    const text = insertNoteAfterEvidence(
-                      memo,
-                      selected.evidence,
-                      addition,
-                    );
-                    if (text === null) {
-                      setError(
-                        "メモ中の位置を一つに特定できません。メモに直接続きを書き足し、「変更を流れに反映」を押してください。",
-                      );
-                      return;
-                    }
-                    onTranscripts({ ...transcripts, [key]: text });
-                    setAddition("");
-                    await organize(undefined, text);
-                  }}
-                >
-                  続きを構造につなぐ
-                </button>
-              </details>
+              <button className="input-add-work" disabled={busy || stale || !!edit} onClick={() => openAddition()}>＋ この手順の続きに作業を足す</button>
               {known.length > 0 && (
                 <details>
                   <summary>前後の業務との接続を補足・訂正する</summary>
@@ -1099,11 +1147,11 @@ export function InputWorkbench({
           <strong>
             {operation === "save"
               ? "道具・情報を既存の構造と照合して保存しています"
-              : "話を読み取り、人・道具・情報の流れを整理しています"}
+              : operation === "addition" ? "追加した話だけを読み取っています" : "話を読み取り、人・道具・情報の流れを整理しています"}
           </strong>
           <span aria-hidden="true"> · {waitingSeconds}秒</span>
           <p>メモと前の候補を保ったまま、結果を待っています。</p>
-          {waitingSeconds >= 20 && operation === "organize" && aiConfig?.configured && (
+          {waitingSeconds >= 20 && operation !== "save" && aiConfig?.configured && (
             <p>AIの応答を待っています。結果が届いたら、保存前に内容を確かめられます。</p>
           )}
         </aside>
@@ -1142,7 +1190,9 @@ export function InputWorkbench({
               </button>
             )}
           </div>
-          {key === NEW_MEMO_ID && memoComposer}
+          {!review && memoComposer}
+          {review && selected && <button className="input-add-work" disabled={busy || stale} onClick={() => openAddition()}>{addition.trim() ? "入力中の話を続ける" : "＋ 分かったことを足す"}</button>}
+          {review && <p className="input-growing-hint">図の＋から、途中の作業も一つずつ足せます。</p>}
           <nav className="input-memo-filters" aria-label="メモの絞り込み">
             {([["all", "すべて"], ["drafts", "保存前"], ["questions", "未確認あり"]] as const).map(([value, label]) => <button key={value} aria-pressed={memoFilter === value} onClick={() => { setMemoFilter(value); setMemoPage(0); }}>{label}</button>)}
           </nav>
@@ -1210,7 +1260,7 @@ export function InputWorkbench({
                 ))}
             </details>
           )}
-          {key !== NEW_MEMO_ID && memoComposer}
+          {review && <details className="input-original-source" open={stale}><summary>これまでの話を読む・書き直す</summary>{memoComposer}</details>}
           {workflow && (
             <details>
               <summary>業務名・表示する状態を整える（任意）</summary>
@@ -1296,6 +1346,7 @@ export function InputWorkbench({
                   !draft ||
                   busy ||
                   stale ||
+                  !!addition.trim() ||
                   !!edit ||
                   !draft.workflow.name.trim()
                 }
@@ -1303,7 +1354,7 @@ export function InputWorkbench({
               >
                 {busy
                   ? operation === "save" ? "道具・情報を照合して保存中…" : "話を整理中…"
-                  : edit
+                  : addition.trim() ? "追記を反映してから保存" : edit
                     ? "訂正を反映してから保存"
                     : draft
                       ? review.steps.length ? "3 この流れを保存" : "3 話と確認事項を保存"
@@ -1317,13 +1368,13 @@ export function InputWorkbench({
               {review.extraction.method === "ai"
                 ? `${review.extraction.model ?? review.extraction.provider}（AI）`
                 : "簡易整理"}
-              {review.steps.some((s) => s.humanEdits?.length) ||
+              {review.steps.some((s) => s.humanEdits?.some(e => e.field !== "placement")) ||
               review.organization?.origin === "human" ||
               review.systemDependencies?.some(d => d.origin === "human") ||
               review.handoffs?.some((h) => h.origin === "human") ||
               review.incomingHandoffs?.some((h) => h.origin === "human")
                 ? " · 人の訂正を含む"
-                : ""}
+                : review.steps.some(s => s.humanEdits?.some(e => e.field === "placement")) ? " · 追加位置は人が指定" : ""}
             </p>
           )}
           {review && <>
@@ -1437,7 +1488,12 @@ export function InputWorkbench({
               )}
               <div ref={stripRef as React.RefObject<HTMLDivElement>} hidden={workbenchTab !== "flow"} className="input-canvas-anchor">
                 <InputFlowCanvas review={review} selected={selected} page={stepPage} onPage={page => choose(steps[page * REVIEW_PAGE_SIZE])} choose={choose}
-                  added={draft ? diff?.added.map(s => s.stepKey) : []} changed={draft ? diff?.changed.map(c => c.after.stepKey) : []} />
+                  added={draft ? diff?.added.map(s => s.stepKey) : []} changed={draft ? diff?.changed.map(c => c.after.stepKey) : []}
+                  onInsert={transition => openAddition({ afterStepKey: transition.fromStepKey, transition })} editingDisabled={busy || stale || !!edit} />
+                {additionNotice && <aside className="input-addition-notice" role="status"><p>{additionNotice}</p>{undoAddition && <button disabled={busy || draft?.review !== undoAddition.review || stale} onClick={() => {
+                  onDraft(key, undoAddition.draft); onTranscripts({ ...transcripts, [key]: undoAddition.memo });
+                  setUndoAddition(null); setAdditionNotice("今回の追加を取り消しました。"); setStepKey(""); setStepPage(0);
+                }}>今回の追加を取り消す</button>}</aside>}
               </div>
               <details onToggle={(e) => setAdvanced(e.currentTarget.open)}>
                 <summary>システム・情報・接続を詳しく編集する</summary>
@@ -1448,12 +1504,12 @@ export function InputWorkbench({
                     onSave: save,
                     onDiscard: () => onDraft(key, null),
                     onRefine: refine,
-                    busy: busy || stale,
+                    busy: busy || stale || !!addition.trim(),
                   })}
               </details>
               <div className="input-save-actions">
                 <p>
-                  {stale
+                  {addition.trim() ? "入力中の追記は、まだ図に反映されていません。追加する場所を選んで続けられます。" : stale
                     ? "メモの変更は、まだ流れへ反映されていません。"
                     : draft
                       ? "確認できたところまで保存できます。未確認の内容も、そのまま残ります。"
@@ -1490,9 +1546,13 @@ export function InputWorkbench({
                   未確認・矛盾を確かめる · {review.questions.length}質問 /{" "}
                   {review.warnings.length}注意
                 </summary>
-                {review.warnings.map((w, i) => (
-                  <p key={i}>{w}</p>
-                ))}
+                {review.warnings.map((w, i) => {
+                  const shared = w.match(/^共有資産の同一性を要確認: (.*?) — ([\s\S]*)$/);
+                  return shared ? <div key={i}>
+                    <p>「{shared[1]}」が、すでにある情報・道具と同じかは未確認です。</p>
+                    <details><summary>同じものと判断できなかった理由</summary><p>{shared[2]}</p></details>
+                  </div> : <p key={i}>{w}</p>;
+                })}
                 {review.questions.map((q, i) => (
                   <article key={i} aria-label={`確認事項：${q.question}`}>
                   <label className="kg-edit-field">
@@ -1612,8 +1672,22 @@ export function InputWorkbench({
 
         </section>
         <section ref={detailPaneRef} className="input-detail-pane" aria-label="手順の確認と訂正">
-          <header><h2>{edit ? "ステップの編集" : "選んだ手順"}</h2>{selected && <small>{selected.humanEdits?.length ? "人が訂正" : selected.certainty === "explicit" ? "原文に明示" : "推定・要確認"}</small>}</header>
-          {stepDetail}
+          <header><h2>{insertion ? "作業を追加" : edit ? "手順を編集" : "選んだ手順"}</h2>{!insertion && selected && <small>{selected.humanEdits?.some(e => e.field !== "placement") ? "人が訂正" : selected.certainty === "explicit" ? "原文に明示" : "推定・要確認"}</small>}</header>
+          {insertion && review ? <form className="input-insertion-form" onSubmit={e => { e.preventDefault(); void addNote(); }}>
+            <h3>追加する場所</h3>
+            <ol className="input-insertion-place">
+              <li>{nameForStep(insertion.afterStepKey)}</li>
+              <li>ここに作業を追加</li>
+              <li>{insertion.transition ? nameForStep(insertion.transition.toStepKey) : "その後の接続は未確認"}</li>
+            </ol>
+            {insertion.transition?.condition && <p>この分岐の条件<br /><strong>{insertion.transition.condition}</strong></p>}
+            {!insertion.transition && review.transitions.some(t => t.fromStepKey === insertion.afterStepKey) && <fieldset disabled={busy} className="input-insertion-branches"><legend>どの続きに追加しますか？</legend>{review.transitions.filter(t => t.fromStepKey === insertion.afterStepKey).map((t, i) => <button type="button" key={i} onClick={() => openAddition({ afterStepKey: insertion.afterStepKey, transition: t })}>{t.condition || "次の手順"}<br />→ {nameForStep(t.toStepKey)}</button>)}</fieldset>}
+            <label className="kg-edit-field">追加する作業<textarea ref={additionRef} value={addition} disabled={busy} onChange={e => writeAddition(e.target.value)} placeholder="例えば「送る前に、物流担当がExcelで重量を確認します」" maxLength={4000} /></label>
+            <p>分かった作業を一つから追加できます。図で場所を選んだことと、入力した話を記録します。</p>
+            <button type="submit" className="button-primary" disabled={busy || !addition.trim() || (!insertion.transition && review.transitions.some(t => t.fromStepKey === insertion.afterStepKey))}>{busy ? "追加した話を読んでいます…" : "ここに追加して見る"}</button>
+            <button type="button" disabled={busy} onClick={() => setInsertion(null)}>あとで続ける</button>
+            {!!addition.trim() && <button type="button" disabled={busy} onClick={() => { writeAddition(""); setInsertion(null); }}>追記を取り消す</button>}
+          </form> : stepDetail}
         </section>
       </div>
     </section>
