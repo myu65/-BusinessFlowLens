@@ -92,12 +92,15 @@ export type ProcessMeaning = {
   evidence: string;
 };
 export type HumanEdit = { field: string; before: unknown; after: unknown; evidence: string };
+/** A person's correspondence for one connection, never a global alias. Empty dataId deliberately leaves it unconfirmed. */
+export type HandoffDataBinding = { name: string; dataId: string; evidence: string };
 export type ReviewHandoff = {
   via?: "handoff" | "reference";
   fromStepKey: string;
   targetWorkflowId: string;
   targetStepKey?: string;
   data: string[];
+  dataBindings?: HandoffDataBinding[];
   description: string;
   evidence: string;
   certainty: Confidence;
@@ -110,6 +113,7 @@ export type ReviewIncomingHandoff = {
   sourceStepKey?: string;
   toStepKey: string;
   data: string[];
+  dataBindings?: HandoffDataBinding[];
   description: string;
   evidence: string;
   certainty: Confidence;
@@ -220,7 +224,7 @@ export type CompanyKnowledge = {
     certainty?: Confidence; evidence?: string; sourceWorkflowId?: string;
     dependsOn: Array<{ systemId: string; reason: string; evidence?: string; certainty?: Confidence; sourceWorkflowId?: string; origin?: "ai" | "human" }> }>;
   criticalWorkflows: Array<{ workflowId: string; reason: string }>;
-  handoffs?: Array<{ id: string; sourceWorkflowId: string; targetWorkflowId: string; sourceProcessId?: string; targetProcessId?: string; dataIds: string[]; description: string; kind: 'information' | 'material'; evidence: string; status?: Confidence; reviewedWorkflowId?: string; origin?: "ai" | "human"; via?: "handoff" | "reference" }>;
+  handoffs?: Array<{ id: string; sourceWorkflowId: string; targetWorkflowId: string; sourceProcessId?: string; targetProcessId?: string; dataIds: string[]; dataNames?: string[]; dataBindings?: HandoffDataBinding[]; description: string; kind: 'information' | 'material'; evidence: string; status?: Confidence; reviewedWorkflowId?: string; origin?: "ai" | "human"; via?: "handoff" | "reference" }>;
 };
 
 export type GraphPatchNode = {
@@ -1539,14 +1543,16 @@ export function buildWorkflowReviewFromGraph(
       sourceWorkflowId: h.sourceWorkflowId,
       sourceStepKey: byId.get(h.sourceProcessId ?? "")?.canonicalKey.split(":").at(-1),
       toStepKey: processKeyById.get(h.targetProcessId!) ?? "",
-      data: h.dataIds.map(id => byId.get(id)?.label ?? id),
+      data: h.dataNames ?? h.dataIds.map(id => byId.get(id)?.label ?? id),
+      ...(h.dataBindings?.length ? { dataBindings: h.dataBindings } : {}),
       description: h.description, evidence: h.evidence, certainty: h.status ?? "unknown", origin: h.origin, via:h.via,
     })),
     handoffs: (graph.knowledge?.handoffs ?? []).filter(h => h.sourceWorkflowId === workflowId && h.sourceProcessId && (!h.reviewedWorkflowId || h.reviewedWorkflowId === workflowId)).map(h => ({
       fromStepKey: processKeyById.get(h.sourceProcessId!) ?? "",
       targetWorkflowId: h.targetWorkflowId,
       targetStepKey: graph.nodes.find(n => n.id === h.targetProcessId)?.canonicalKey.split(":").at(-1),
-      data: h.dataIds.map(id => byId.get(id)?.label ?? id),
+      data: h.dataNames ?? h.dataIds.map(id => byId.get(id)?.label ?? id),
+      ...(h.dataBindings?.length ? { dataBindings: h.dataBindings } : {}),
       description: h.description, evidence: h.evidence, certainty: h.status ?? "unknown", origin: h.origin, via:h.via,
     })),
   };

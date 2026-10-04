@@ -36,6 +36,7 @@ import { reviewedWorkflowName } from "@/lib/input-knowledge";
 import { InputOrganization } from "./InputOrganization";
 import { InputSystemDependencies } from "./InputSystemDependencies";
 import { createQuestionReferenceFinder, referenceAnswer } from "@/lib/question-evidence";
+import { confirmHandoffInformation } from "@/lib/handoff-information";
 
 const REVIEW_PAGE_SIZE = INPUT_CANVAS_PAGE_SIZE;
 
@@ -138,9 +139,11 @@ export function InputWorkbench({
   const [target, setTarget] = useState("");
   const [targetStep, setTargetStep] = useState("");
   const [handoffText, setHandoffText] = useState("");
+  const [handoffData, setHandoffData] = useState<string[]>([]);
   const [handoffDirection, setHandoffDirection] = useState<
     "outgoing" | "incoming" | "reference"
   >("outgoing");
+  useEffect(() => setHandoffData([]), [key, stepKey, handoffDirection]);
   const [revisions, setRevisions] = useState<
     Array<{
       id: number;
@@ -650,6 +653,18 @@ export function InputWorkbench({
                     setToolText(null);
                   }}
                   onExclude={removeStep}
+                  onConfirmIncomingData={(handoff, name, dataId) => update({
+                    ...review,
+                    incomingHandoffs: review.incomingHandoffs?.map(h => h === handoff ? {
+                      ...h, dataBindings: confirmHandoffInformation(preview, h.sourceWorkflowId, h.sourceStepKey, h.data, h.dataBindings, name, dataId),
+                    } : h),
+                  })}
+                  onConfirmOutgoingData={(handoff, name, dataId) => update({
+                    ...review,
+                    handoffs: review.handoffs?.map(h => h === handoff ? {
+                      ...h, dataBindings: confirmHandoffInformation(preview, workflow!.id, h.fromStepKey, h.data, h.dataBindings, name, dataId),
+                    } : h),
+                  })}
                   onWorkflow={(id, stepKey) => {
                     const step = getWorkflowProcesses(preview, id).find(
                       (p) => p.canonicalKey.split(":").at(-1) === stepKey,
@@ -898,6 +913,14 @@ export function InputWorkbench({
                       onChange={(e) => setQuery(e.target.value)}
                     />
                   </label>
+                  <fieldset>
+                    <legend>つながる情報（分かる範囲で選ぶ）</legend>
+                    {[...new Set(selected.data.filter(d => handoffDirection !== "outgoing"
+                      ? ["read", "receive"].includes(d.operation) : ["send", "update", "create"].includes(d.operation)).map(d => d.name))]
+                      .map(name => <label key={name}><input type="checkbox" checked={handoffData.includes(name)}
+                        onChange={e => setHandoffData(e.target.checked ? [...handoffData, name] : handoffData.filter(item => item !== name))} />{name}</label>)}
+                    <small>選ばない場合も、業務への接続と説明を残して、情報は未確認にできます。</small>
+                  </fieldset>
                   <label className="kg-edit-field">
                     {handoffDirection !== "outgoing"
                       ? handoffDirection === "reference"
@@ -979,11 +1002,7 @@ export function InputWorkbench({
                               sourceWorkflowId: target,
                               sourceStepKey: targetStep || undefined,
                               toStepKey: selected.stepKey,
-                              data: selected.data
-                                .filter((d) =>
-                                  ["read", "receive"].includes(d.operation),
-                                )
-                                .map((d) => d.name),
+                              data: selected.data.filter(d => ["read", "receive"].includes(d.operation) && handoffData.includes(d.name)).map(d => d.name),
                               description: handoffText,
                               evidence: `利用者の補足：${handoffText}`,
                               certainty: "confirmed",
@@ -1009,13 +1028,7 @@ export function InputWorkbench({
                             fromStepKey: selected.stepKey,
                             targetWorkflowId: target,
                             targetStepKey: targetStep || undefined,
-                            data: selected.data
-                              .filter((d) =>
-                                ["send", "update", "create"].includes(
-                                  d.operation,
-                                ),
-                              )
-                              .map((d) => d.name),
+                            data: selected.data.filter(d => ["send", "update", "create"].includes(d.operation) && handoffData.includes(d.name)).map(d => d.name),
                             description: handoffText,
                             evidence: `利用者の補足：${handoffText}`,
                             certainty: "confirmed",
