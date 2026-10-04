@@ -115,3 +115,33 @@ test("a pending approval after stated cancellation and negated pending wording a
     assert.ok(!checked.warnings.some(w => w.includes("承認完了から未承認時")), quote);
   }
 });
+
+test("a literal result handoff in dictionary or polite form continues the hold without inventing a release or person", () => {
+  for (const verb of ["渡す", "渡します"]) {
+    const held = "条件を超えた原料は隔離を維持して", transfer = `購買へTeamsで検査結果を${verb}。`, text = held + transfer;
+    const r = inquiryDraft("購買へTeamsで検査結果を渡す", transfer, text);
+    r.steps[0] = { ...r.steps[0], name: "原料の隔離を維持する", action: "原料の隔離を維持する", evidence: held,
+      meaning: { purpose: "", basis: "", result: "原料の隔離を維持する", next: "", condition: "条件を超えた原料", halt: true, certainty: "confirmed", evidence: held } };
+    const before = JSON.stringify(r), checked = validateAITransitions(r, text);
+    assert.equal(checked.transitions[0]?.holdEffect, "response", verb);
+    assert.deepEqual(checked.steps, r.steps);
+    assert.equal(JSON.stringify(r), before);
+    assert.equal(checked.steps[1].actor, null);
+    assert.equal(checked.steps[1].executionMode, "unknown");
+    assert.equal(validateAITransitions({ ...r, transitions: [] }, text).transitions.length, 0);
+    const workflow = { id: "temperature", name: "輸入原料の温度確認" };
+    const graph = previewReviewGraph({ workflows: [], nodes: [], edges: [], dataFlows: [] }, workflow, checked);
+    const target = graph.nodes.find(n => n.kind === "process" && n.stepOrder === 2)!;
+    const html = renderToStaticMarkup(createElement(WorkflowReading, { graph, workflowId: workflow.id, initialStepId: target.id, onDetail: () => {} }));
+    assert.match(html, /停止・保留を続けています/);
+    assert.doesNotMatch(html, /再開 ·/);
+  }
+});
+
+test("a negated result handoff cannot make a held step proceed", () => {
+  for (const verb of ["渡さない", "渡しません", "渡していません"]) {
+    const quote = `購買へTeamsで検査結果を${verb}。`;
+    const checked = validateAITransitions(inquiryDraft("購買へTeamsで検査結果を渡す", quote, stopQuote + quote), stopQuote + quote);
+    assert.equal(checked.transitions.length, 0, verb);
+  }
+});
