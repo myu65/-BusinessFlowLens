@@ -515,9 +515,10 @@ export function InputWorkbench({
     }
   }
   function applyEdit() {
-    if (!edit || !review || !selected) return;
-    const corrected = toolText === null ? edit : {
-      ...edit, systems: stepToolsFromText(edit.systems, toolText),
+    if (!edit || !review || !selected || edit.data.some(data => !data.name.trim())) return;
+    const corrected = {
+      ...edit, data: edit.data.map(data => ({ ...data, name: data.name.trim() })),
+      systems: toolText === null ? edit.systems : stepToolsFromText(edit.systems, toolText),
     };
     const patch = Object.fromEntries(
       Object.entries(corrected).filter(
@@ -767,24 +768,35 @@ export function InputWorkbench({
                       </select>
                     </label>
                     {edit.data.map((data, i) => (
-                      <label className="kg-edit-field" key={i}>
-                        {data.name}の使い方
-                        <select aria-label={`${i + 1}番目の情報・${data.name}の使い方`}
-                          value={data.operation} onChange={e => setEdit({ ...edit,
-                            data: e.target.value === "unused" ? edit.data.filter((_, index) => index !== i)
-                              : edit.data.map((d, index) => index === i ? { ...d,
-                                operation: e.target.value as typeof d.operation,
-                              } : d),
-                          })}>
-                          <option value="read">参照する</option>
-                          <option value="receive">受け取る</option>
-                          <option value="create">情報を新たに作る</option>
-                          <option value="update">更新する</option>
-                          <option value="send">渡す</option>
-                          <option value="unused">この手順では使わない</option>
-                        </select>
-                        <small>根拠：{data.evidence}</small>
-                      </label>
+                      <div role="group" aria-label={`${i + 1}番目の情報を訂正`} key={i}>
+                        <label className="kg-edit-field">
+                          情報{i + 1}の名前
+                          <input aria-label={`${i + 1}番目の情報の名前`} value={data.name}
+                            aria-invalid={!data.name.trim()}
+                            onChange={e => setEdit({ ...edit,
+                              data: edit.data.map((d, index) => index === i ? { ...d, name: e.target.value } : d),
+                            })} />
+                          {!data.name.trim() && <small>名前を入れてください。不要な情報は、使い方から「この手順では使わない」を選べます。</small>}
+                        </label>
+                        <label className="kg-edit-field">
+                          {data.name.trim() || `情報${i + 1}`}の使い方
+                          <select aria-label={data.name.trim() ? `${i + 1}番目の情報・${data.name}の使い方` : `${i + 1}番目の情報の使い方`}
+                            value={data.operation} onChange={e => setEdit({ ...edit,
+                              data: e.target.value === "unused" ? edit.data.filter((_, index) => index !== i)
+                                : edit.data.map((d, index) => index === i ? { ...d,
+                                  operation: e.target.value as typeof d.operation,
+                                } : d),
+                            })}>
+                            <option value="read">参照する</option>
+                            <option value="receive">受け取る</option>
+                            <option value="create">情報を新たに作る</option>
+                            <option value="update">更新する</option>
+                            <option value="send">渡す</option>
+                            <option value="unused">この手順では使わない</option>
+                          </select>
+                          <small>根拠：{data.evidence}</small>
+                        </label>
+                      </div>
                     ))}
                     {(
                       [
@@ -843,7 +855,7 @@ export function InputWorkbench({
                     </label>
                   </details>
                   <p>原文の根拠と利用者の訂正を別々に保持します。</p>
-                  <button className="button-primary" onClick={applyEdit}>
+                  <button className="button-primary" disabled={edit.data.some(data => !data.name.trim())} onClick={applyEdit}>
                     訂正を構造へ反映
                   </button>
                   <button onClick={() => setEdit(null)}>閉じる</button>
