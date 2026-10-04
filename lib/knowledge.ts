@@ -1,11 +1,13 @@
 import {
   processMatchesOwnership,
+  getProcessExecutionMode,
   type OwnershipFilter,
   type LensGraph,
   type LensNode,
   type WorkflowScenario,
 } from "./graph";
 import { inputSystemDependencies } from "./system-dependencies";
+import { describeHumanEdit } from "./review-workbench";
 
 export type KnowledgeScope = WorkflowScenario;
 export function scenarioGraph(
@@ -389,19 +391,20 @@ function comparableProcess(graph: LensGraph, process: LensNode) {
     responsiblePerson: process.responsiblePerson, executionContext: process.executionContext, resources };
 }
 
-export function comparisonExecutor(graph: LensGraph, process: LensNode) {
-  const systems = graph.edges.filter(e => e.relation === "executes" && e.target === process.id)
+export function comparisonExecutor(graph: LensGraph, process: LensNode, edges = graph.edges) {
+  const systems = edges.filter(e => e.relation === "executes" && e.target === process.id)
     .map(e => graph.nodes.find(n => n.id === e.source)?.label).filter(Boolean);
   const human = process.actor || "担当未確認";
-  return process.executionMode === "automatic" ? systems.join(" / ") || "実行システム未確認"
-    : process.executionMode === "mixed" ? `${human}${systems.length ? ` / ${systems.join(" / ")}` : " / 実行システム未確認"}` : human;
+  const mode = getProcessExecutionMode(graph, process);
+  return mode === "automatic" ? systems.join(" / ") || "実行システム未確認"
+    : mode === "mixed" ? `${human}${systems.length ? ` / ${systems.join(" / ")}` : " / 実行システム未確認"}` : human;
 }
 
 export const executionLabels = { manual: "人が行う", automatic: "システムが自動実行", mixed: "人と自動処理", unknown: "実行方法未確認" };
 export const confidenceLabels = { confirmed: "確認済み", inferred: "推定", unknown: "未確認" };
 
-export function comparisonResources(graph: LensGraph, process: LensNode) {
-  const labels = (relations: string[]) => [...new Set(graph.edges
+export function comparisonResources(graph: LensGraph, process: LensNode, edges = graph.edges) {
+  const labels = (relations: string[]) => [...new Set(edges
     .filter(e => relations.includes(e.relation) && (e.source === process.id || e.target === process.id))
     .map(e => graph.nodes.find(n => n.id === (e.source === process.id ? e.target : e.source))?.label)
     .filter((label): label is string => !!label))].sort().join(" / ") || "未登録";
@@ -458,7 +461,20 @@ export function compareWorkflow(
   });
 }
 
-export function knowledgeReport(
+export type KnowledgeReportSection = { id: string; title: string; body: string[] };
+export type KnowledgeReportDocument = {
+  title: string;
+  introduction: string[];
+  counts: { workflows: number; steps: number; tools: number; data: number };
+  context: KnowledgeReportSection[];
+  workflows: KnowledgeReportSection[];
+};
+const reportScopes = { current: "現在の仕事", future: "改善後の案", alternative: "別の案" };
+const transferLabels = { api: "API連携", file: "ファイル", database: "データベース", message: "メッセージ",
+  email: "メール", manual: "手で転記・受渡し", unknown: "受渡し方法は未確認" };
+const reportQuote = (source?: string) => (source || "原文の根拠は未登録").split(/\r?\n/).map(line => `> ${line}`);
+
+export function knowledgeReportDocument(
   graph: LensGraph,
   scope: KnowledgeScope,
   query: string,
@@ -470,71 +486,117 @@ export function knowledgeReport(
   const rows = view.rows.filter(
     (r) => !workflowIds || workflowIds.includes(r.workflow.id),
   );
-  const title = assetId
+  const subject = assetId
     ? (view.nodeById.get(assetId)?.label ?? "資産")
     : "会社の活動";
-  const lines = [
-    `# ${graph.knowledge?.name ?? "BusinessFlowLens"} — ${title}`,
-    "",
-    `対象: ${scope} / 検索: ${query || "すべて"} / 部署: ${department || "すべて"} / 業務数: ${rows.length}`,
+  const assets = new Map(rows.flatMap(r => r.assets).map(n => [n.id, n]));
+  for (const row of rows) for (const d of row.systemDeclarations) for (const id of [d.systemId, d.prerequisiteId]) {
+    const node = view.nodeById.get(id); if (node) assets.set(id, node);
+  }
+  const selectedIds = new Set(rows.map(r => r.workflow.id));
+  for (const node of graph.nodes) {
+    if (node.kind !== "system" || assets.has(node.id)) continue;
+    const impact = view.systemProfile(node.id);
+    if (impact.indirect.some(r => selectedIds.has(r.workflow.id))) assets.set(node.id, node);
+  }
+  const counts = { workflows: rows.length, steps: rows.reduce((n, r) => n + r.processes.length, 0),
+    tools: [...assets.values()].filter(n => n.kind === "system").length,
+    data: [...assets.values()].filter(n => n.kind === "data").length };
+  const activities = new Map<string, { name: string; workflows: Set<string> }>();
+  for (const row of rows) for (const c of row.capabilities) {
+    const activity = activities.get(c.activity.id) ?? { name: c.activity.name, workflows: new Set<string>() };
+    activity.workflows.add(row.workflow.id); activities.set(c.activity.id, activity);
+  }
+  const introduction = [
+    `対象: ${reportScopes[scope]} / 検索: ${query || "すべて"} / 部署: ${department || "すべて"} / 業務数: ${rows.length}`,
     "",
     graph.knowledge?.description ?? "",
     "",
     "件数は登録された関係に基づく。未登録は依存がないことを意味しない。",
+    `概要: ${counts.workflows}業務 / ${counts.steps}手順 / 関係する道具${counts.tools}件 / 情報${counts.data}件。道具は手順・情報の受渡しと、その稼働を支える登録済みの基盤依存から数える。同じ道具は重複して数えない。`,
+    "活動別の業務数。複数の活動に属する業務はそれぞれに数える。活動には入力からの整理案を含む。",
+    ...[...activities.values()].map(a => `- ${a.name}: ${a.workflows.size}業務`),
+    ...(rows.some(r => !r.capabilities.length) ? [`- 活動は未分類: ${rows.filter(r => !r.capabilities.length).length}業務`] : []),
     "",
   ];
+  const context: KnowledgeReportSection[] = [], workflows: KnowledgeReportSection[] = [];
+  const edgesByProcess = new Map<string, LensGraph["edges"]>();
+  for (const edge of graph.edges) for (const id of [edge.source, edge.target]) if (view.nodeById.get(id)?.kind === "process") {
+    const edges = edgesByProcess.get(id) ?? []; edges.push(edge); edgesByProcess.set(id, edges);
+  }
+  const resources = (p: LensNode) => comparisonResources(graph, p, edgesByProcess.get(p.id) ?? []);
+  const executor = (p: LensNode) => comparisonExecutor(graph, p, edgesByProcess.get(p.id) ?? []);
+  const flowDescription = (f: LensGraph["dataFlows"][number]) =>
+    `- ${view.nodeById.get(f.sourceSystemId)?.label || "道具未確認"} ${f.direction === "bidirectional" ? "⇄" : "→"} ${view.nodeById.get(f.targetSystemId)?.label || "道具未確認"}: ${f.dataIds.map(d => view.nodeById.get(d)?.label).filter(Boolean).join(" / ") || "情報未確認"} / ${transferLabels[f.transferType]} / ${executionLabels[f.automation]} / ${ { push: "送り出す", pull: "取りに行く", bidirectional: "双方向", unknown: "取込みの方向は未確認" }[f.direction]} / 頻度: ${f.frequency || "未確認"} / 確かさ: ${confidenceLabels[f.status]} / 原文: ${f.evidence || "未登録"}`;
   if (assetId) {
     const impact = view.systemProfile(assetId);
-    lines.push(
-      `直接関連: ${impact.direct.length}業務 / 基盤依存を介した間接影響: ${impact.indirect.length}業務`,
+    const ids = new Set(rows.map(r => r.workflow.id));
+    const direct = impact.direct.filter(r => ids.has(r.workflow.id));
+    const indirect = impact.indirect.filter(r => ids.has(r.workflow.id));
+    const body = [
+      `直接関連: ${direct.length}業務 / 基盤依存を介した間接影響: ${indirect.length}業務`,
+      `直接関連の内訳: 手順で使う${impact.stepUse.filter(r => ids.has(r.workflow.id)).length}業務 / 受渡しで関わる${impact.flowUse.filter(r => ids.has(r.workflow.id)).length}業務。両方に含まれる業務は、直接関連の数では重複させない。`,
+      "件数と受渡しは出力した業務の範囲。基盤依存の説明は、同じ表示状態の保存済み入力から読む。",
       "",
-      `役割: ${impact.profile?.purpose ?? "未登録"}`,
-      `管理部署: ${impact.profile?.owner ?? "未登録"}`,
+      `役割: ${impact.profile?.purpose || "未登録"}`,
+      `管理部署: ${impact.profile?.owner || "未確認"}`,
       "",
-      "## System依存",
+      "### 稼働に必要な道具",
       ...(impact.profile?.dependsOn ?? []).map(
         (d) => `- ${view.nodeById.get(d.systemId)?.label}: ${d.reason}`,
       ),
       "",
-      "## 依存を説明した入力",
-      ...impact.declarations.map(d => `- ${view.nodeById.get(d.systemId)?.label} → ${view.nodeById.get(d.prerequisiteId)?.label}: ${d.reason} / 確度: ${d.certainty} / 話: ${d.sourceWorkflowName} / 原文: ${d.evidence}`),
+      "### 依存を説明した入力",
+      ...impact.declarations.map(d => `- ${view.nodeById.get(d.systemId)?.label} → ${view.nodeById.get(d.prerequisiteId)?.label}: ${d.reason} / 確かさ: ${confidenceLabels[d.certainty]} / 話: ${d.sourceWorkflowName} / 原文: ${d.evidence}`),
       "",
-      "## 入出力・転記",
-      ...impact.flows.map(
-        (f) =>
-          `- ${view.nodeById.get(f.sourceSystemId)?.label} → ${view.nodeById.get(f.targetSystemId)?.label}: ${f.dataIds.map((d) => view.nodeById.get(d)?.label).join(" / ")} (${f.transferType}, ${f.automation})`,
-      ),
+      "### 入出力・転記",
+      ...impact.flows.filter(f => f.workflowIds.some(id => ids.has(id))).map(flowDescription),
       "",
-      "## 間接影響の業務",
-      ...impact.indirect.map((r) => `- ${r.workflow.name}`),
+      "### 基盤の依存を通じて影響する業務",
+      ...indirect.map((r) => `- ${r.workflow.name}`),
       "",
-    );
+    ];
+    context.push({ id: assetId, title: `${subject}が支える仕事と依存`, body });
   }
   const comparisonRows = comparisonRowsFor(graph);
   for (const row of rows) {
     const comparisons = compareWorkflow(graph, row.workflow.id, comparisonRows);
-    lines.push(
-      `## ${row.workflow.name}`,
+    const body = [
       row.workflow.description ?? "",
       `活動: ${row.capabilities.map((c) => `${c.activity.name} → ${c.capability.name}`).join(" / ") || "未分類"}`,
-      `部署: ${row.departments.join(" / ")}`,
-      `System: ${row.assets
+      `部署: ${row.departments.join(" / ") || "未確認"}`,
+      `担当: ${[...new Set(row.processes.map(p => p.actor).filter(Boolean))].join(" / ") || "未確認"}。部署とは分けて記録する。`,
+      `始まるきっかけ: ${row.workflow.trigger || "未確認"}`,
+      `完了する状態: ${row.workflow.outcome || "未確認"}`,
+      `システム・道具: ${row.assets
         .filter((n) => n.kind === "system")
         .map((n) => n.label)
-        .join(" / ")}`,
-      `Data: ${row.assets
+        .join(" / ") || "手順・受渡しの利用は未登録"}`,
+      `情報: ${row.assets
         .filter((n) => n.kind === "data")
         .map((n) => n.label)
-        .join(" / ")}`,
+        .join(" / ") || "未登録"}`,
       `重要性: ${graph.knowledge?.criticalWorkflows.find((w) => w.workflowId === row.workflow.id)?.reason ?? "未評価"}`,
       "",
-      ...row.systemDeclarations.map(d => `- 道具の依存: ${view.nodeById.get(d.systemId)?.label} → ${view.nodeById.get(d.prerequisiteId)?.label} / ${d.reason} / 確度: ${d.certainty} / 原文: ${d.evidence}`),
-      ...row.processes.map(
-        (p) =>
-          `- ${p.stepOrder}. ${p.label} (${p.executionMode ?? "unknown"})${p.executionContext ? ` / 起点: ${p.executionContext.trigger} / 判断: ${p.executionContext.rule} / 例外: ${p.executionContext.exception}` : ""}${p.meaning ? ` / 理由: ${p.meaning.purpose || "未確認"} / 根拠: ${p.meaning.basis || "未確認"} / 結果: ${p.meaning.result || "未確認"} / 次の仕事: ${p.meaning.next || "未確認"} / ${p.meaning.halt ? "停止・保留" : ""} / 確度: ${p.meaning.certainty} / 原文: ${p.meaning.evidence}` : " / 処理結果は未確認"}`,
-      ),
+      ...row.systemDeclarations.map(d => `- 道具の依存: ${view.nodeById.get(d.systemId)?.label} → ${view.nodeById.get(d.prerequisiteId)?.label} / ${d.reason} / 確かさ: ${confidenceLabels[d.certainty]} / 原文: ${d.evidence}`),
+      ...row.processes.flatMap((p, i) => [
+        `### ${p.stepOrder ?? i + 1}. ${p.label}`, "",
+        `- 担当・実行主体: ${executor(p)} / ${executionLabels[getProcessExecutionMode(graph, p)]}`,
+        `- 部署: ${p.department || "未確認"}${p.responsiblePerson ? ` / 担当者: ${p.responsiblePerson}` : ""}`,
+        `- 行うこと: ${p.action || p.description || "未確認"}`,
+        `- 道具: ${resources(p).tools} / 受け取る情報: ${resources(p).input} / 残す情報: ${resources(p).output}`,
+        `- 仕事の理由: ${p.meaning?.purpose || "未確認"}`,
+        `- 判断の根拠: ${p.meaning?.basis || "未確認"}`,
+        `- 結果: ${p.meaning?.result || "未確認"} / 次の仕事: ${p.meaning?.next || "未確認"}`,
+        `- 条件: ${p.meaning?.condition || "未確認"}${p.meaning?.halt ? " / 停止・保留する" : ""}`,
+        ...(p.executionContext ? [`- 実行のきっかけ: ${p.executionContext.trigger || "未確認"} / 判断・ルール: ${p.executionContext.rule || "未確認"} / 失敗・例外: ${p.executionContext.exception || "未確認"}`] : []),
+        `- 手順の確かさ: ${confidenceLabels[p.status]} / 処理結果の確かさ: ${confidenceLabels[p.meaning?.certainty ?? "unknown"]}`,
+        "原文:", ...reportQuote(p.evidence),
+        ...(p.meaning?.evidence && p.meaning.evidence !== p.evidence ? ["結果の根拠:", ...reportQuote(p.meaning.evidence)] : []),
+        ...(p.humanEdits ?? []).flatMap(edit => describeHumanEdit(edit).map(description => `- 人の訂正: ${description} / 根拠: ${edit.evidence || "未登録"}`)), "",
+      ]),
       "",
-      "受渡し:",
+      "### 条件と受渡し", "",
       ...graph.edges
         .filter(
           (e) =>
@@ -542,17 +604,14 @@ export function knowledgeReport(
         )
         .map(
           (e) =>
-            `- 接続: ${view.nodeById.get(e.source)?.label} → ${view.nodeById.get(e.target)?.label} / 条件: ${e.label || "順次"} / 確度: ${e.status ?? "未確認"} / 根拠: ${e.evidence || "未登録"}`,
+            `- 接続: ${view.nodeById.get(e.source)?.label} → ${view.nodeById.get(e.target)?.label} / 条件: ${e.label || "順次"} / 確かさ: ${confidenceLabels[e.status ?? "unknown"]} / 根拠: ${e.evidence || "未登録"}`,
         ),
-      ...row.flows.map(
-        (f) =>
-          `- ${view.nodeById.get(f.sourceSystemId)?.label} → ${view.nodeById.get(f.targetSystemId)?.label}: ${f.dataIds.map((d) => view.nodeById.get(d)?.label).join(" / ")} (${f.transferType}, ${f.automation})`,
-      ),
+      ...row.flows.map(flowDescription),
       ...(graph.knowledge?.handoffs ?? [])
         .filter((h) => h.sourceWorkflowId === row.workflow.id)
         .map(
           (h) =>
-            `次の業務: ${graph.workflows.find((w) => w.id === h.targetWorkflowId)?.name} / ${h.description} / ${h.kind}`,
+            `次の業務: ${graph.workflows.find((w) => w.id === h.targetWorkflowId)?.name} / ${h.description} / ${h.kind === "information" ? "情報の受渡し・参照" : "物の受渡し"} / 確かさ: ${confidenceLabels[h.status ?? "unknown"]} / 原文: ${h.evidence || "未登録"}`,
         ),
       "",
       ...comparisons.map(
@@ -574,8 +633,18 @@ export function knowledgeReport(
         ),
       ]),
       "",
-      ...(comparisons.length ? ["比較は同じ業務の家族と保存済み手順の識別子を対応づける。名前や順番だけでは同じ作業と決めない。手動の受渡し件数は登録されたSystem間の線を数え、人の操作全体や未登録の受渡しを含まない。", ""] : []),
-    );
+      ...(comparisons.length ? ["比較は同じ業務から引き継いだ保存済み手順を対応づける。手動の受渡し件数は登録された道具間の線を数え、人の操作全体や未登録の受渡しを含まない。", ""] : []),
+    ];
+    workflows.push({ id: row.workflow.id, title: row.workflow.name, body });
   }
-  return lines.join("\n");
+  return { title: `${graph.knowledge?.name ?? "BusinessFlowLens"} — ${subject}`, introduction, counts, context, workflows };
+}
+
+export function knowledgeReportText(document: KnowledgeReportDocument) {
+  return [`# ${document.title}`, "", ...document.introduction,
+    ...[...document.context, ...document.workflows].flatMap(section => [`## ${section.title}`, "", ...section.body, ""])].join("\n");
+}
+
+export function knowledgeReport(...args: Parameters<typeof knowledgeReportDocument>) {
+  return knowledgeReportText(knowledgeReportDocument(...args));
 }

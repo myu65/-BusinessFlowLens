@@ -10,7 +10,9 @@ import {
   executionLabels,
   confidenceLabels,
   knowledgeIndex,
-  knowledgeReport,
+  knowledgeReportDocument,
+  knowledgeReportText,
+  type KnowledgeReportDocument,
   type KnowledgeScope,
 } from "@/lib/knowledge";
 import { ProcessContextEditor } from "./ProcessContextEditor";
@@ -23,6 +25,7 @@ import { createChemicalCompany } from "@/lib/chemical-company";
 import { inputSystemRoles } from "@/lib/input-knowledge";
 import { SystemLandscapeCards } from "./SystemLandscapeCards";
 import { SystemRelationshipMap } from "./SystemRelationshipMap";
+import { KnowledgeReportPreview } from "./KnowledgeReportPreview";
 import type { ExplorationFocus as Focus, ExplorationPosition, KnowledgeExploration } from "@/lib/exploration";
 export type { KnowledgeExploration } from "@/lib/exploration";
 
@@ -54,7 +57,7 @@ export function KnowledgeExplorer({
   exploration?: KnowledgeExploration;
   onExplorationChange?: (value: KnowledgeExploration) => void;
 }) {
-  const [report, setReport] = useState<{ text: string; url: string } | null>(
+  const [report, setReport] = useState<{ document: KnowledgeReportDocument; text: string; url: string } | null>(
     null,
   );
   const [focus, setFocus] = useState<Focus>(exploration?.focus ?? { kind: "company" });
@@ -156,7 +159,7 @@ export function KnowledgeExplorer({
     {f.workflowIds.filter(id => view.rows.some(r => r.workflow.id === id)).length > 3 && <p>ほかの関連業務は下の一覧・レポートで確認できます。</p>}
   </article>;
   const download = () => {
-    const content = knowledgeReport(
+    const document = knowledgeReportDocument(
       graph,
       scope,
       query,
@@ -172,7 +175,7 @@ export function KnowledgeExplorer({
       workflows: selectedRows.map((r) => r.workflow.id).join(","),
     });
     if (focus.kind === "asset") params.set("assetId", focus.id);
-    setReport({ text: content, url: `/api/report?${params.toString()}` });
+    setReport({ document, text: knowledgeReportText(document), url: `/api/report?${params.toString()}` });
   };
   const loadExample = async () => {
     setError("");
@@ -368,26 +371,7 @@ export function KnowledgeExplorer({
         </div>
       )}
       {error && <p role="alert">{error}</p>}
-      {report && (
-        <section aria-label="レポートプレビュー">
-          <h2>レポートプレビュー</h2>
-          <p>
-            出力時点の条件・業務・依存関係を確認できます。ファイルは保存済みプロジェクトから生成します。
-          </p>
-          <div className="kg-toolbar">
-            <a href={report.url} download>
-              Markdownファイルをダウンロード
-            </a>
-            <button onClick={() => setReport(null)}>プレビューを閉じる</button>
-          </div>
-          <textarea
-            aria-label="レポート本文"
-            readOnly
-            value={report.text}
-            style={{ width: "100%", height: 300 }}
-          />
-        </section>
-      )}
+      {report && <KnowledgeReportPreview key={report.url} {...report} onClose={() => setReport(null)} />}
 
       <div className="kg-toolbar company-filters">
         <label>
@@ -764,7 +748,7 @@ export function KnowledgeExplorer({
                     追加する手順の候補:{" "}
                     {c.added.map((n) => n.label).join(" / ") || "なし"}
                   </p>
-                  <p>同じ手順の識別子で対応づけています。名前や順番だけでは同じ作業と決めません。件数は登録されたSystem間の線を数え、人の操作全体や未登録の受渡しを含みません。</p>
+                  <p>同じ業務から引き継いだ手順を並べています。手動の受渡し件数は、登録された道具間の線を数え、人の操作全体や未登録の受渡しを含みません。</p>
                   <p>
                     道具: {c.beforeSystems.map((n) => n.label).join(" / ")} →{" "}
                     {c.afterSystems.map((n) => n.label).join(" / ")}
