@@ -123,6 +123,13 @@ export type FlowJourney = {
 export type WorkflowHandoff = NonNullable<
   NonNullable<LensGraph["knowledge"]>["handoffs"]
 >[number];
+export type FlowReadingPosition = {
+  stepId: string;
+  dataId: string;
+  depth: "summary" | "step" | "detail";
+  lens: "work" | "data";
+  journey?: FlowJourney;
+};
 export function handoffEntry(
   graph: LensGraph,
   handoff: WorkflowHandoff,

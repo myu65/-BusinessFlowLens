@@ -582,5 +582,5 @@ test("comparison and reports describe changes in business results, evidence and 
   const report = knowledgeReport(graph, "current", "", "", [workflow.id]);
   assert.ok(report.includes("受注価格を自動反映"));
   assert.ok(report.includes("将来案として入力"));
-  assert.ok(report.includes("結果の比較"));
+  assert.ok(report.includes("同じ手順の変更"));
 });

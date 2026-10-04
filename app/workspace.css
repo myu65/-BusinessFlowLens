@@ -213,6 +213,9 @@
 .relationship-evidence article button small { font-size: 11px; color: #65776c; }
 .relationship-evidence blockquote { margin: 12px 0; padding: 10px 14px; border-left: 3px solid #bdd4c6; background: #f4f8f5; }
 .relationship-system-detail > .kg-primary { margin-top: 18px; }
+.kg-comparison-change { border: 1px solid #d7e4dc; border-radius: 10px; padding: 14px 18px; margin: 12px 0; background: #fff; }
+.kg-comparison-change h4 { margin: 0 0 10px; font-size: 14px; }
+.kg-comparison-change p { font-size: 13px; margin: 6px 0; line-height: 1.7; }
 .company-map-body.company-map-body--relations { grid-template-columns: 1fr; }
 @media(max-width: 1000px) {
   .kg-view[data-focus="systems"] { grid-template-columns: 1fr; padding: 16px; }

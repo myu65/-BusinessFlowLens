@@ -1589,8 +1589,10 @@ export function branchWorkflowScenario(
 
   const processIdMap = new Map<string, string>();
   const clonedProcesses = sourceProcesses.map((node) => {
-    const stepSlug =
-      node.canonicalKey.split(":").at(-1) ?? node.id.replace(/^process:/, "");
+    const prefix = `process:${sourceWorkflowId}:`;
+    const stepSlug = node.canonicalKey.startsWith(prefix)
+      ? node.canonicalKey.slice(prefix.length)
+      : node.id.replace(/^process:/, "");
     const canonicalKey = `process:${nextWorkflow.id}:${stepSlug}`;
     const id = nodeId(canonicalKey);
     processIdMap.set(node.id, id);

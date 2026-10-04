@@ -13,6 +13,7 @@ import {
   stepContext,
   traceData,
   type FlowJourney,
+  type FlowReadingPosition,
 } from "@/lib/flow-context";
 import { FlowNoteInput } from "./FlowNoteInput";
 import { describeHumanEdit } from "@/lib/review-workbench";
@@ -41,6 +42,7 @@ export function WorkflowReading({
   initialLens = "work",
   onGraphApply,
   onStepChange,
+  onReadingChange,
   onNavigateWorkflow,
   journey: initialJourney,
 }: {
@@ -54,6 +56,7 @@ export function WorkflowReading({
   initialLens?: "work" | "data";
   onGraphApply?: (graph: LensGraph) => void;
   onStepChange?: (id: string) => void;
+  onReadingChange?: (position: FlowReadingPosition) => void;
   onNavigateWorkflow?: (id: string, journey: FlowJourney) => void;
   journey?: FlowJourney;
 }) {
@@ -74,12 +77,9 @@ export function WorkflowReading({
     const related = initialDataId
       ? traceData(graph, workflowId, initialDataId)
       : [];
-    return (
-      initialJourney?.stepId ??
-      (related.length && !related.some((t) => t.step.id === initialStepId)
-        ? related[0].step.id
-        : (initialStepId ?? ""))
-    );
+    const requested = initialJourney?.stepId ?? initialStepId;
+    return graph.nodes.some(n => n.id === requested && n.kind === "process" && n.workflowId === workflowId)
+      ? requested! : related[0]?.step.id ?? "";
   });
   const [depth, setDepth] = useState<Depth>(initialJourney?.depth ?? initialDepth);
   const [lens, setLens] = useState<"work" | "data">(initialLens);
@@ -102,6 +102,11 @@ export function WorkflowReading({
   const steps = getWorkflowProcesses(graph, workflowId);
   const selected = steps.find((s) => s.id === stepId) ?? steps[0];
   const chapters = workflowChapters(graph, workflowId);
+  useEffect(() => {
+    const currentStep = selected?.id ?? "";
+    onReadingChange?.({ stepId: currentStep, dataId, depth, lens,
+      journey: journey ? { ...journey, stepId: currentStep, dataId, depth } : undefined });
+  }, [selected?.id, dataId, depth, lens, journey, onReadingChange]);
   if (!selected) return <p>この業務の手順はまだ登録されていません。</p>;
   const context = stepContext(graph, workflowId, selected.id);
   const workflow = graph.workflows.find((w) => w.id === workflowId);

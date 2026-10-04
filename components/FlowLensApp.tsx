@@ -3,6 +3,7 @@
 import { scopedDataFlows, aggregateDataFlows, scenarioGraph } from "@/lib/knowledge";
 import { DataFlowExplorer } from "./DataFlowExplorer";
 import { KnowledgeExplorer, type KnowledgeExploration } from "./KnowledgeExplorer";
+import { exploreSavedStory } from "@/lib/exploration";
 import { InputWorkbench } from "./InputWorkbench";
 import { AssetExplorer, CrossBusinessOverview, type AssetExploration } from "./ScopedExplorers";
 import { NEW_MEMO_ID, hasUnreflectedNotes, inputKeyForWorkflow, previewReviewGraph, recordReviewEdits, type InputDraft } from "@/lib/review-workbench";
@@ -2372,7 +2373,7 @@ function Workspace() {
 
       {section === "interviews" && hydrated && draftHydrated ? (
         <InputWorkbench
-          onExplore={() => navigateSection("company")}
+          onExplore={(id, stepId) => { setKnowledgeExploration(exploreSavedStory(graph, id, stepId)); navigateSection("company"); }}
           focusedStepId={focusedSteps[visibleWorkflowId]} onFocusStep={(id,step)=>setFocusedSteps(s=>({...s,[id]:step}))}
           projectId={projectId}
           graph={graph}
