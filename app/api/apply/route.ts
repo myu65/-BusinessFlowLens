@@ -85,6 +85,7 @@ export async function POST(request: Request) {
         protectedDetails: result.review.protectedDetails,
         organization: result.review.organization,
         systemProfiles: result.review.systemProfiles,
+        systemDependencies: result.review.systemDependencies,
       },
     };
     const connected = applyReviewConnections(

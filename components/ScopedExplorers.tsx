@@ -64,6 +64,8 @@ export function AssetExplorer({
   );
   const assets = useMemo(() => {
     const ids = new Set(view.rows.flatMap((r) => r.assets.map((n) => n.id)));
+    view.systemDeclarations.forEach(d => { ids.add(d.systemId); ids.add(d.prerequisiteId); });
+    graph.nodes.filter(n => n.kind === "system" && view.systemProfile(n.id).indirect.length).forEach(n => ids.add(n.id));
     return graph.nodes
       .filter(
         (n) =>
@@ -329,6 +331,9 @@ export function AssetExplorer({
                 {impact.indirect.slice(0, 8).map((r) => (
                   <p key={r.workflow.id}>基盤依存：{r.workflow.name}</p>
                 ))}
+                {(impact.profile?.dependsOn ?? []).map(d => <p key={d.systemId}>必要な仕組み：{view.nodeById.get(d.systemId)?.label} · {d.reason}{d.evidence ? ` · 根拠：${d.evidence}` : ""}{d.sourceWorkflowId && <button onClick={() => onEdit(d.sourceWorkflowId!)}>この話で依存を確認・訂正する</button>}</p>)}
+                {impact.dependents.length > 0 && <p>この仕組みを必要とする道具：{impact.dependents.map(n => n.label).join("、")}</p>}
+                {impact.declarations.slice(0, 8).map(d => <p key={`${d.sourceWorkflowId}:${d.systemId}:${d.prerequisiteId}`}>依存を説明した話：<button onClick={() => onEdit(d.sourceWorkflowId)}>{d.sourceWorkflowName}</button> · 根拠：{d.evidence}</p>)}
               </details>
             </>
           ) : (

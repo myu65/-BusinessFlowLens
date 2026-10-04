@@ -1,5 +1,6 @@
 import type { LensGraph, LensNode, Workflow } from "../graph";
 import { normalizeAssetName } from "../refinement";
+import { inputSystemDependencies } from "../system-dependencies";
 
 export type AssetMention = {
   candidateId: string;
@@ -47,6 +48,10 @@ export function scopedAssetNodes(graph: LensGraph, workflow: Workflow) {
   graph.knowledge?.handoffs?.forEach(h =>
     h.dataIds.forEach(id => use(id, [h.sourceWorkflowId, h.targetWorkflowId])),
   );
+  inputSystemDependencies(graph, graph.workflows.map(w => w.id)).forEach(d => {
+    use(d.systemId, [d.sourceWorkflowId]);
+    use(d.prerequisiteId, [d.sourceWorkflowId]);
+  });
   return graph.nodes.filter(n =>
     n.kind !== "process" &&
     (!usage.get(n.id)?.size || [...usage.get(n.id)!].some(id => scope.has(id))),

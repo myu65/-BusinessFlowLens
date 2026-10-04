@@ -5,6 +5,7 @@ import type { ExtractionReview, LensGraph, LensNode, Workflow } from "../graph";
 export function buildPreviousReviewContext(review: ExtractionReview) {
   return {
     organization: review.organization,
+    systemDependencies: review.systemDependencies?.filter(d => d.origin === "human"),
     steps: review.steps.map(step => ({
       stepKey: step.stepKey,
       order: step.order,

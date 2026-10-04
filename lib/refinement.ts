@@ -1,26 +1,7 @@
 import type { ExtractionReview, LensGraph, LensNode } from "./graph";
+import { preserveSystemDependencies } from "./system-dependencies";
 
-export function normalizeAssetName(value: string) {
-  return value
-    .normalize("NFKC")
-    .toLowerCase()
-    .replace(/[\s_-]+/g, "");
-}
-
-export function findConfirmedAsset(
-  graph: LensGraph,
-  kind: "system" | "data",
-  name: string,
-) {
-  const matches = graph.nodes.filter(
-    (node) =>
-      node.kind === kind &&
-      [node.label, ...(node.aliases ?? [])].some(
-        (label) => normalizeAssetName(label) === normalizeAssetName(name),
-      ),
-  );
-  return matches.length === 1 ? matches[0] : undefined;
-}
+export { normalizeAssetName, findConfirmedAsset } from "./asset-identity";
 
 export function mergeAssets(
   graph: LensGraph,
@@ -375,6 +356,7 @@ export function preserveRefinements(
   return {
     ...review,
     organization,
+    systemDependencies: preserveSystemDependencies(review, previous),
     incomingHandoffs: incomingHandoffs.filter((h) => keys.has(h.toStepKey)),
     steps: [...steps]
       .sort((a, b) => a.order - b.order)

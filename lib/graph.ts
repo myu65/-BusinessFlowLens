@@ -58,7 +58,7 @@ export type Workflow = {
   landscape?: WorkflowLandscape;
   reviewContext?: Pick<
     ExtractionReview,
-    "summary" | "trigger" | "outcome" | "questions" | "warnings" | "excludedSteps" | "extraction" | "protectedDetails" | "organization" | "systemProfiles"
+    "summary" | "trigger" | "outcome" | "questions" | "warnings" | "excludedSteps" | "extraction" | "protectedDetails" | "organization" | "systemProfiles" | "systemDependencies"
   > & {
     followUpAnswers?: FollowUpAnswer[];
   };
@@ -131,6 +131,16 @@ export type ReviewSystemProfile = {
   purpose: string;
   certainty: Confidence;
   evidence: string;
+};
+export type ReviewSystemDependency = {
+  system: string;
+  prerequisite: string;
+  reason: string;
+  certainty: Confidence;
+  evidence: string;
+  origin?: "ai" | "human";
+  rejected?: boolean;
+  humanEdits?: HumanEdit[];
 };
 
 export type LensNode = {
@@ -206,7 +216,7 @@ export type CompanyKnowledge = {
   categories: Array<{ id: string; name: string; description: string }>;
   systems: Array<{ systemId: string; categoryId: string; owner: string; purpose: string;
     certainty?: Confidence; evidence?: string; sourceWorkflowId?: string;
-    dependsOn: Array<{ systemId: string; reason: string }> }>;
+    dependsOn: Array<{ systemId: string; reason: string; evidence?: string; certainty?: Confidence; sourceWorkflowId?: string; origin?: "ai" | "human" }> }>;
   criticalWorkflows: Array<{ workflowId: string; reason: string }>;
   handoffs?: Array<{ id: string; sourceWorkflowId: string; targetWorkflowId: string; sourceProcessId?: string; targetProcessId?: string; dataIds: string[]; description: string; kind: 'information' | 'material'; evidence: string; status?: Confidence; reviewedWorkflowId?: string; origin?: "ai" | "human"; via?: "handoff" | "reference" }>;
 };
@@ -326,6 +336,7 @@ export type ExtractionTransition = {
 export type ExtractionReview = {
   organization?: ReviewOrganization | null;
   systemProfiles?: ReviewSystemProfile[];
+  systemDependencies?: ReviewSystemDependency[];
   incomingHandoffs?: ReviewIncomingHandoff[];
   protectedDetails?: Array<{ stepKey: string; fields: Array<"technicalDetails" | "detailSteps" | "executionContext"> }>;
   extraction?: { method: "ai" | "local"; provider: string; model?: string; completedAt: string };
@@ -638,6 +649,8 @@ export function replaceWorkflowGraph(
     ]),
   );
   const materialDataIds = new Set([...workflows.flatMap(w => w.landscape?.materialHandoffs.flatMap(h => h.dataIds) ?? []), ...(graph.knowledge?.handoffs ?? []).flatMap(h => h.dataIds)]);
+  const dependencyName = (name: string) => name.normalize("NFKC").toLowerCase().replace(/[\s_-]+/g, "");
+  const dependencyNames = new Set(workflows.flatMap(w => (w.reviewContext?.systemDependencies ?? []).filter(d => !d.rejected && d.certainty !== "unknown").flatMap(d => [d.system, d.prerequisite].map(dependencyName))));
 
   return {
     workflows,
@@ -647,6 +660,7 @@ export function replaceWorkflowGraph(
         node.kind === "process" ||
         Boolean(node.aliases?.length) ||
         Boolean(graph.knowledge?.systems.some(s => s.systemId === node.id || s.dependsOn.some(d => d.systemId === node.id))) ||
+        (node.kind === "system" && [node.label, ...(node.aliases ?? [])].some(name => dependencyNames.has(dependencyName(name)))) ||
         usedNodeIds.has(node.id) ||
         materialDataIds.has(node.id) ||
         dataFlowNodeIds.has(node.id),
@@ -1510,6 +1524,7 @@ export function buildWorkflowReviewFromGraph(
     protectedDetails: workflow?.reviewContext?.protectedDetails,
     organization: workflow?.reviewContext?.organization,
     systemProfiles: workflow?.reviewContext?.systemProfiles,
+    systemDependencies: workflow?.reviewContext?.systemDependencies,
     incomingHandoffs: (graph.knowledge?.handoffs ?? []).filter(h => h.targetWorkflowId === workflowId && h.reviewedWorkflowId === workflowId && h.targetProcessId).map(h => ({
       sourceWorkflowId: h.sourceWorkflowId,
       sourceStepKey: byId.get(h.sourceProcessId ?? "")?.canonicalKey.split(":").at(-1),

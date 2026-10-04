@@ -190,6 +190,11 @@ export function previewReviewGraph(
       status: f.certainty === "explicit" ? "confirmed" : "inferred",
       relatedStepKeys: f.relatedStepKeys,
     });
+  for (const d of review.systemDependencies ?? []) {
+    if (d.rejected || d.certainty === "unknown") continue;
+    asset("system", d.system, d.evidence);
+    asset("system", d.prerequisite, d.evidence);
+  }
   const projected = replaceWorkflowGraph(
     graph,
     {
@@ -209,6 +214,7 @@ export function previewReviewGraph(
         protectedDetails: review.protectedDetails,
         organization: review.organization,
         systemProfiles: review.systemProfiles,
+        systemDependencies: review.systemDependencies,
       },
     },
     patch,
@@ -455,6 +461,10 @@ export function diffReviews(
         label: `${f.sourceSystem} → ${f.targetSystem} · 「${f.data.join("・")}」 · ${{ api: "API", file: "ファイル", database: "データベース", message: "メッセージ", email: "メール", manual: "手で転記", unknown: "方法は未確認" }[f.transferType]} · ${{ automatic: "自動", manual: "人の操作", mixed: "人の操作と自動処理", unknown: "実行方法は未確認" }[f.automation]} · ${{ push: "送り側から渡す", pull: "受取側が取り込む", bidirectional: "双方向", unknown: "方向は未確認" }[f.direction]} · ${f.frequency ?? "頻度は未確認"}`,
       }),
     ),
+    ...(r?.systemDependencies ?? []).map(d => ({
+      key: `依存:${d.system}→${d.prerequisite}/${d.reason}/${d.certainty}/${d.rejected ?? false}`,
+      label: `${d.system} → 必要な仕組み：${d.prerequisite} · ${d.rejected ? "この関係を除外" : certainty(d.certainty)} · ${d.reason}`,
+    })),
   ]; };
   const a = relations(before),
     b = relations(after);
@@ -597,6 +607,10 @@ export function describeHumanEdit(edit: import("./graph").HumanEdit): string[] {
     next: "次に動く仕事",
     condition: "実行条件",
     halt: "停止・保留",
+    system: "依存する道具",
+    prerequisite: "必要な仕組み",
+    reason: "必要な理由",
+    rejected: "依存関係の除外",
   };
   const value = (v: unknown): string =>
     v == null || v === ""
