@@ -2,6 +2,7 @@ import { findConfirmedAsset, preserveRefinements } from "../refinement";
 import { existsSync, readFileSync } from "node:fs";
 import { buildExtractionContext, buildPreviousReviewContext } from "./context";
 import { preApprovalRepair, approvalDenialRepair, retainSplitCheckKeys } from "./draft-quality";
+import { groundStepEvidence } from "./source-grounding";
 import { buildAssetResolutionContext, scopedAssetNodes } from "./asset-context";
 import type { AIConfigurationStatus } from "./status";
 import { AIProviderError } from "./errors";
@@ -730,7 +731,7 @@ Rules:
 4c. Entering/registering a machine number or a user does not create that number or person. Distinguish the existing values used as input from the registration record or assignment that changes. For "機器番号と利用者を登録", describe the recorded assignment/registration, not "機器番号を作る" or "利用者を作る". Do not invent number generation or new people. A record name strongly implied by registration remains inferred; preserve the actual result and leave unspecified fields empty.
 4d. A decision is a business result, not evidence of writing its record. "証明書を承認する" establishes an approval result but does not by itself update the certificate or create an approval record. "発注を保留する", "在庫調整を保留する" or "配信を止める" supports a held/stopped result (meaning.halt=true), but does NOT by itself create/update an order, inventory adjustment or a record named "配信停止". Include a data write only when recording or changing that record/status is actually described. "QMSに保留状態を記録する" or "SAPの発注状態を保留へ変更する" does support that stated record/status write. Keep explicitly described reads, notifications and consultation sends on the held path, and leave unstated write locations and release/resume unknown.
 5. Do not invent integrations, APIs, databases, owners, approval rules, automation, or master-data sources.
-6. Evidence must be a short phrase grounded in the interview. Do not paraphrase invented detail into evidence.
+6. Evidence must quote one contiguous literal phrase from the interview or an effective answer, copied exactly. Do not summarize, reword, join separated phrases, remove intervening words, or change a condition or negation. Use a short literal clause rather than an invented quotation. A correct quotation alone does not prove every field is explicit.
 7. Separate actor, department/team, responsible person, and system. "営業部の田中さんがERPに入力" => department=営業部; responsiblePerson=田中さん; actor may be 営業担当; system=ERP. Do not infer department/person when not stated.
 8. Capture branches and conditions as transitions. Do not force a single linear flow when the interview describes alternatives. Stops, holds, returns and release/resume points must have explicit evidence. A direct answer to a question about a hold can describe adjustment or investigation while the result remains held; distinguish that response from a later release/resume. Use the question only to identify what the answer addresses, not as a fact or a fabricated prefix in an evidence quotation. If a destination is missing, ask a handoff/exception question and leave it unconnected.
 8b. A condition for a later action must not become a prerequisite of the preceding check. 'Compare the quantity; if it matches, record receipt' => the comparison runs without that condition, and only recording receipt is conditional. A judgment's possible result is not its execution condition.
@@ -1479,7 +1480,7 @@ Keep the check's stable key, add a key for the stated approval, and keep every u
   const evidenceSource = [args.interview, ...additionalEvidence].join("\n");
   const sourceSemantics = distinguishRegistrationInputs(separateDependencyDescriptions(
     supplementSourceDependencies(validateSystemDependencies(
-      separateMissingFacts(normalizeDraft(rawDraft), evidenceSource), evidenceSource, false), evidenceSource,
+      separateMissingFacts(groundStepEvidence(normalizeDraft(rawDraft), evidenceSource), evidenceSource), evidenceSource, false), evidenceSource,
       scopedAssetNodes(args.graph, args.workflow).filter(n => n.kind === "system").flatMap(n => [n.label, ...(n.aliases ?? [])])),
     evidenceSource), evidenceSource);
   const sourceDraft = validateAITransitions(
