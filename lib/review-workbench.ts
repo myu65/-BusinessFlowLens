@@ -454,7 +454,7 @@ export function diffReviews(
     return [
     ...(r?.transitions ?? []).map(
       (t) => ({
-        key: `${t.fromStepKey} → ${t.toStepKey}${t.condition ? `（${t.condition}）` : ""} / ${t.certainty ?? "unknown"} / ${t.holdEffect ?? ""}`,
+        key: `${t.fromStepKey} → ${t.toStepKey}${t.condition ? `（${t.condition}）` : ""}`,
         label: `${name(t.fromStepKey)} → ${name(t.toStepKey)}${t.condition ? `（${t.condition}）` : ""} · ${certainty(t.certainty)}${t.holdEffect === "response" ? " · 停止中の対応" : t.holdEffect === "resume" ? " · 再開" : ""}`,
       }),
     ),

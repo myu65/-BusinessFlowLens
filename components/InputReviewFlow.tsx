@@ -310,7 +310,7 @@ export function InputReviewFlow({
           );
         })}
         {selected.meaning?.halt && transitions.some(t => t.holdEffect === "response") && !transitions.some(t => t.holdEffect === "resume") && (
-          <p className="input-unconfirmed">対応へ進むことは、停止・保留の解除を意味しません。通常の仕事を再開する条件・先は未確認です。</p>
+          <p className="input-unconfirmed">ここでは停止・保留を解除していません。対応の先を辿って、再開する条件と戻る手順を確かめられます。</p>
         )}
         {handoffs.map((h, i) => {
           const target = graph.workflows.find(

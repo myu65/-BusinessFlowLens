@@ -730,7 +730,7 @@ Rules:
 5. Do not invent integrations, APIs, databases, owners, approval rules, automation, or master-data sources.
 6. Evidence must be a short phrase grounded in the interview. Do not paraphrase invented detail into evidence.
 7. Separate actor, department/team, responsible person, and system. "営業部の田中さんがERPに入力" => department=営業部; responsiblePerson=田中さん; actor may be 営業担当; system=ERP. Do not infer department/person when not stated.
-8. Capture branches and conditions as transitions. Do not force a single linear flow when the interview describes alternatives. Stops, holds, returns and release/resume points must have explicit evidence. If a destination is missing, ask a handoff/exception question and leave it unconnected.
+8. Capture branches and conditions as transitions. Do not force a single linear flow when the interview describes alternatives. Stops, holds, returns and release/resume points must have explicit evidence. A direct answer to a question about a hold can describe adjustment or investigation while the result remains held; distinguish that response from a later release/resume. Use the question only to identify what the answer addresses, not as a fact or a fabricated prefix in an evidence quotation. If a destination is missing, ask a handoff/exception question and leave it unconnected.
 8b. A condition for a later action must not become a prerequisite of the preceding check. 'Compare the quantity; if it matches, record receipt' => the comparison runs without that condition, and only recording receipt is conditional. A judgment's possible result is not its execution condition.
 8b1. When a common check has different result actions (approve versus hold, continue versus return), create an unconditional check step and separate conditional result steps, even when the same person performs them. Do not put the approval/write in the check step: 'check the date; if it matches approve; otherwise hold' means check -> approval if matched, and check -> hold if not matched. The approval step must not also contain the not-matched branch or act as the prerequisite for the hold. Keep only actions and alternatives actually stated; if the outcome or restart is unstated, retain a question rather than inventing one.
 8c. Keep distinct exceptions distinct. An unusable raw-material lot causes a request to confirm that lot; a process-temperature deviation causes a product-inspection request. A shared recipient or the word 'hold' does not connect those different exceptions. Emit a separate exception step when the source states a separate action. Never route a branch to a step whose stated triggering condition is incompatible with that branch. Unknown restart points stay unconnected and become questions.
@@ -1453,6 +1453,7 @@ export async function extractWorkflowReviewWithAI(args: {
   const sourceDraft = validateAITransitions(
     scopeReferenceDataFlows(sourceSemantics, args.graph, args.workflow.id, args.interview, args.followUpAnswers ?? []),
     evidenceSource,
+    followUpAnswers,
   );
 
   if (!rawDraft.steps.length && !sourceDraft.systemDependencies?.some(d => d.certainty !== "unknown" && !d.rejected)

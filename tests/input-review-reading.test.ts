@@ -110,7 +110,8 @@ test("a response while held is readable without claiming that normal work resume
   assert.ok(html.includes("停止・保留中に進む対応"));
   assert.ok(html.includes("停止中の対応 · "));
   assert.ok(html.includes("担当が原因を直す"));
-  assert.ok(html.includes("通常の仕事を再開する条件・先は未確認です。"));
+  assert.ok(html.includes("ここでは停止・保留を解除していません。"));
+  assert.ok(!html.includes("通常の仕事を再開する条件・先は未確認です。"));
   assert.ok(!html.includes("再開 · "));
 });
 
