@@ -32,6 +32,7 @@ import { reviewStripConnection } from "@/lib/review-paths";
 import { aiStatusLabel, type AIConfigurationStatus } from "@/lib/ai/status";
 import { reviewedWorkflowName } from "@/lib/input-knowledge";
 import { InputOrganization } from "./InputOrganization";
+import { InputSystemDependencies } from "./InputSystemDependencies";
 import { createQuestionReferenceFinder, referenceAnswer } from "@/lib/question-evidence";
 
 const REVIEW_PAGE_SIZE = 3;
@@ -846,6 +847,7 @@ export function InputWorkbench({
                 : "簡易整理"}
               {review.steps.some((s) => s.humanEdits?.length) ||
               review.organization?.origin === "human" ||
+              review.systemDependencies?.some(d => d.origin === "human") ||
               review.handoffs?.some((h) => h.origin === "human") ||
               review.incomingHandoffs?.some((h) => h.origin === "human")
                 ? " · 人の訂正を含む"
@@ -853,7 +855,8 @@ export function InputWorkbench({
             </p>
           )}
           {review && (
-            <InputOrganization review={review} busy={busy} onChange={update} />
+            <><InputOrganization review={review} busy={busy} onChange={update} />
+            <InputSystemDependencies key={key} review={review} busy={busy} onChange={update} /></>
           )}
           {error && (
             <p role="alert" className="error-message input-mobile-error">
@@ -1625,7 +1628,7 @@ export function InputWorkbench({
             </details>
           )}
           {review && !selected && (
-            <p>手順がありません。本文を補足して読み直してください。</p>
+            <p>{review.systemDependencies?.some(d => !d.rejected) ? "この話は道具どうしの関係として整理されています。作業の話を足すと、ここから流れを育てられます。" : "手順がありません。本文を補足して読み直してください。"}</p>
           )}
         </section>
       </div>

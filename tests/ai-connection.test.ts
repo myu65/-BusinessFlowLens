@@ -10,9 +10,44 @@ import { aiStatusLabel } from "../lib/ai/status";
 import { AIProviderError, safeAIError } from "../lib/ai/errors";
 import { extractGroundedLocal } from "../lib/local-review";
 import type { LensGraph } from "../lib/graph";
+import { previewReviewGraph } from "../lib/review-workbench";
+import { knowledgeIndex } from "../lib/knowledge";
 
 const empty: LensGraph = { workflows: [], nodes: [], edges: [], dataFlows: [] };
 const workflow = { id: "new", name: "入力した話" };
+
+test("an AI dependency-only explanation becomes platform structure, while an ungrounded zero-task result is rejected", async () => {
+  const source = "TeamsはEntra IDのSSOを使います。";
+  const draft = { summary: source, trigger: null, outcome: null, steps: [], transitions: [], dataFlows: [], questions: [], warnings: [], systemDependencies: [{ system: "Teams", prerequisite: "Entra ID", reason: "SSO認証", evidence: source, certainty: "confirmed" }] };
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+    const output = body.response_format.json_schema.name === "workflow_draft" ? draft : {
+      resolutions: JSON.parse(body.messages.at(-1).content.split("\n")[1]).candidates.map((c: { candidateId: string; name: string }) => ({ candidateId: c.candidateId, decision: "create", existingCanonicalKey: null, canonicalLabel: c.name, reason: "new named tool" })),
+    };
+    response.setHeader("Content-Type", "application/json");
+    response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(output) } }] }));
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as { port: number };
+  try {
+    await withConfig({ AI_MODEL: "mock", AI_API_KEY: "test-only", AI_BASE_URL: `http://127.0.0.1:${address.port}` }, async () => {
+      const extracted = await extractWorkflowReviewWithAI({ interview: source, workflow, graph: empty });
+      assert.equal(extracted.review.steps.length, 0);
+      const resolved = await resolveWorkflowReviewWithAI({ review: extracted.review, workflow, graph: empty });
+      assert.deepEqual(resolved.patch.nodes.map(n => n.label).sort(), ["Entra ID", "Teams"]);
+      assert.equal(resolved.patch.edges.length, 0);
+      const graph = previewReviewGraph(empty, workflow, resolved.review);
+      const teams = graph.nodes.find(n => n.label === "Teams")!;
+      assert.equal(knowledgeIndex(graph, "current").systemProfile(teams.id).profile!.dependsOn.length, 1);
+      await assert.rejects(extractWorkflowReviewWithAI({ interview: "Teamsだけを使います。", workflow, graph: empty }), (error: unknown) => error instanceof AIProviderError && error.code === "invalid_response");
+    });
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
 
 async function withConfig(
   values: Record<string, string | undefined>,

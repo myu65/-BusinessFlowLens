@@ -120,6 +120,7 @@ export function KnowledgeExplorer({
       : undefined;
   const impact =
     focus.kind === "asset" ? view.systemProfile(focus.id) : undefined;
+  const registeredProfile = graph.knowledge?.systems.find(s => s.systemId === asset?.id);
   const label = (id: string) => view.nodeById.get(id)?.label ?? id;
   const assetButton = (n: LensNode) => (
     <button
@@ -1038,7 +1039,7 @@ export function KnowledgeExplorer({
                           categoryId: e.target.value,
                           owner: impact.profile?.owner ?? "",
                           purpose: impact.profile?.purpose ?? asset.description,
-                          dependsOn: impact.profile?.dependsOn ?? [],
+                          dependsOn: registeredProfile?.dependsOn ?? [],
                         },
                       ],
                     },
@@ -1186,6 +1187,7 @@ export function KnowledgeExplorer({
                   {label(d.systemId)}
                 </button>{" "}
                 · {d.reason}
+                {d.sourceWorkflowId && <><br /><small>{d.certainty === "confirmed" ? "入力・訂正の根拠あり" : "推定・要確認"} · 根拠：{d.evidence}</small> <button onClick={() => onInput?.(d.sourceWorkflowId)}>この話で依存を確認・訂正する</button></>}
               </p>
             ))
           ) : (
@@ -1214,7 +1216,7 @@ export function KnowledgeExplorer({
                               owner: impact.profile?.owner ?? "",
                               purpose:
                                 impact.profile?.purpose ?? asset.description,
-                              dependsOn: impact.profile?.dependsOn ?? [],
+                              dependsOn: registeredProfile?.dependsOn ?? [],
                               [key]: e.target.value,
                             },
                           ],
@@ -1264,7 +1266,7 @@ export function KnowledgeExplorer({
                           owner: impact.profile?.owner ?? "",
                           purpose: impact.profile?.purpose ?? asset.description,
                           dependsOn: [
-                            ...(impact.profile?.dependsOn ?? []).filter(
+                            ...(registeredProfile?.dependsOn ?? []).filter(
                               (d) => d.systemId !== dependencyId,
                             ),
                             {
@@ -1282,7 +1284,7 @@ export function KnowledgeExplorer({
               >
                 依存関係を登録
               </button>
-              {(impact.profile?.dependsOn ?? []).map((d) => (
+              {(registeredProfile?.dependsOn ?? []).map((d) => (
                 <p key={d.systemId}>
                   {label(d.systemId)}: {d.reason}{" "}
                   <button

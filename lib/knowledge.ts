@@ -5,6 +5,7 @@ import {
   type LensNode,
   type WorkflowScenario,
 } from "./graph";
+import { inputSystemDependencies } from "./system-dependencies";
 
 export type KnowledgeScope = WorkflowScenario;
 export function scenarioGraph(
@@ -167,6 +168,16 @@ export function knowledgeIndex(
   const profiles = new Map(
     (graph.knowledge?.systems ?? []).map((s) => [s.systemId, s]),
   );
+  const declarations = inputSystemDependencies(graph, allWorkflows.map(w => w.id));
+  const declarationsByWorkflow = new Map<string, typeof declarations>();
+  for (const d of declarations) {
+    const list = declarationsByWorkflow.get(d.sourceWorkflowId) ?? [];
+    list.push(d);
+    declarationsByWorkflow.set(d.sourceWorkflowId, list);
+    const existing = profiles.get(d.systemId) ?? { systemId: d.systemId, categoryId: "", purpose: "", owner: "", dependsOn: [] };
+    if (existing.dependsOn.some(p => p.systemId === d.prerequisiteId)) continue;
+    profiles.set(d.systemId, { ...existing, dependsOn: [...existing.dependsOn, { systemId: d.prerequisiteId, reason: d.reason, evidence: d.evidence, certainty: d.certainty, sourceWorkflowId: d.sourceWorkflowId, origin: d.origin }] });
+  }
   const dependencyNames = new Map<string, string>();
   for (const system of graph.nodes.filter((n) => n.kind === "system")) {
     const seen = new Set<string>([system.id]);
@@ -224,7 +235,8 @@ export function knowledgeIndex(
           processes.map((n) => n.department).filter((d): d is string => !!d),
         ),
       ];
-      return { workflow, processes, assets, flows, capabilities, departments };
+      const systemDeclarations = declarationsByWorkflow.get(workflow.id) ?? [];
+      return { workflow, processes, assets, flows, capabilities, departments, systemDeclarations };
     })
     .filter(
       (row) =>
@@ -240,6 +252,7 @@ export function knowledgeIndex(
             ...row.assets.map(
               (n) => `${n.label} ${(n.aliases ?? []).join(" ")}`,
             ),
+            ...row.systemDeclarations.map(d => `${nodeById.get(d.systemId)?.label} ${nodeById.get(d.prerequisiteId)?.label} ${d.reason}`),
             ...row.assets
               .filter((n) => n.kind === "system")
               .map((n) => dependencyNames.get(n.id)),
@@ -280,7 +293,7 @@ export function knowledgeIndex(
     let frontier = [id];
     while (frontier.length) {
       const next: string[] = [];
-      for (const s of graph.knowledge?.systems ?? [])
+      for (const s of profiles.values())
         if (
           s.systemId !== id &&
           !dependentIds.has(s.systemId) &&
@@ -327,7 +340,8 @@ export function knowledgeIndex(
       dependents: [...dependentIds]
         .map((s) => nodeById.get(s)!)
         .filter(Boolean),
-      profile: graph.knowledge?.systems.find((s) => s.systemId === id),
+      profile: profiles.get(id),
+      declarations: declarations.filter(d => activeIds.has(d.sourceWorkflowId) && (d.systemId === id || d.prerequisiteId === id)),
     };
   };
   const profileCache = new Map<string, ReturnType<typeof calculateProfile>>();
@@ -342,6 +356,7 @@ export function knowledgeIndex(
   return {
     rows,
     activities,
+    systemDeclarations: declarations.filter(d => activeIds.has(d.sourceWorkflowId)),
     assetsFor,
     nodeById,
     systemProfile,
@@ -452,6 +467,9 @@ export function knowledgeReport(
         (d) => `- ${view.nodeById.get(d.systemId)?.label}: ${d.reason}`,
       ),
       "",
+      "## 依存を説明した入力",
+      ...impact.declarations.map(d => `- ${view.nodeById.get(d.systemId)?.label} → ${view.nodeById.get(d.prerequisiteId)?.label}: ${d.reason} / 確度: ${d.certainty} / 話: ${d.sourceWorkflowName} / 原文: ${d.evidence}`),
+      "",
       "## 入出力・転記",
       ...impact.flows.map(
         (f) =>
@@ -481,6 +499,7 @@ export function knowledgeReport(
         .join(" / ")}`,
       `重要性: ${graph.knowledge?.criticalWorkflows.find((w) => w.workflowId === row.workflow.id)?.reason ?? "未評価"}`,
       "",
+      ...row.systemDeclarations.map(d => `- 道具の依存: ${view.nodeById.get(d.systemId)?.label} → ${view.nodeById.get(d.prerequisiteId)?.label} / ${d.reason} / 確度: ${d.certainty} / 原文: ${d.evidence}`),
       ...row.processes.map(
         (p) =>
           `- ${p.stepOrder}. ${p.label} (${p.executionMode ?? "unknown"})${p.executionContext ? ` / 起点: ${p.executionContext.trigger} / 判断: ${p.executionContext.rule} / 例外: ${p.executionContext.exception}` : ""}${p.meaning ? ` / 理由: ${p.meaning.purpose || "未確認"} / 根拠: ${p.meaning.basis || "未確認"} / 結果: ${p.meaning.result || "未確認"} / 次の仕事: ${p.meaning.next || "未確認"} / ${p.meaning.halt ? "停止・保留" : ""} / 確度: ${p.meaning.certainty} / 原文: ${p.meaning.evidence}` : " / 処理結果は未確認"}`,

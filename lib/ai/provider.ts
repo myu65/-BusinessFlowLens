@@ -5,6 +5,7 @@ import { buildAssetResolutionContext, scopedAssetNodes } from "./asset-context";
 import type { AIConfigurationStatus } from "./status";
 import { AIProviderError } from "./errors";
 import { separateMissingFacts } from "../review-facts";
+import { validateSystemDependencies } from "../system-dependencies";
 import { callCodexModel } from "./codex";
 import {
   validateReviewConnections,
@@ -98,11 +99,23 @@ const WORKFLOW_DRAFT_SCHEMA = {
       },
     },
     summary: { type: "string" },
+    systemDependencies: {
+      type: "array", maxItems: 12,
+      items: {
+        type: "object", additionalProperties: false,
+        properties: {
+          system: { type: "string" }, prerequisite: { type: "string" },
+          reason: { type: "string" }, evidence: { type: "string" },
+          certainty: { type: "string", enum: ["confirmed", "inferred", "unknown"] },
+        },
+        required: ["system", "prerequisite", "reason", "evidence", "certainty"],
+      },
+    },
     trigger: { type: ["string", "null"] },
     outcome: { type: ["string", "null"] },
     steps: {
       type: "array",
-      minItems: 1,
+      minItems: 0,
       items: {
         type: "object",
         additionalProperties: false,
@@ -433,6 +446,7 @@ const WORKFLOW_DRAFT_SCHEMA = {
   required: [
     "organization",
     "systemProfiles",
+    "systemDependencies",
     "incomingHandoffs",
     "summary",
     "trigger",
@@ -710,6 +724,7 @@ Rules:
 2. A step is an activity with an actor/action/outcome. Do not create a step for a noun.
 2a. A missing fact is a question, not a performed business task. For example, 'the waste-handling owner is still unknown' does not say that someone checks the owner: keep a question about the owner and the stated exception in executionContext, without inventing an 'identify/check the owner' step or a transition to it. Unknown actors, tools or outcomes do not erase an otherwise stated action. Create a confirmation task only when the source actually describes someone asking or checking.
 3. Only list a system when the transcript names a system, application, spreadsheet, email, portal, screen, tool, or clearly says a system is used. "Check inventory" does NOT imply an inventory system.
+3a. The tool and actor must be stated for THIS action, not merely mentioned in another action. Do not carry Forms, SharePoint or a transaction system onto a human judgment unless its use is stated there. An approval does not identify who sends the later notice. Use null/empty lists for unstated fields; an actual action remains even when its actor or tool is unknown.
 4. Data may be explicit ("order data", "customer master", "Excel row") or strongly implied by an explicit read/write operation. Mark the containing step inferred when the business object itself is inferred.
 4a. Receiving or reading an existing decision/quantity is receive/read, not create. A person entering it into a system may also update a record, but must not appear to originate the upstream decision. Include the named incoming information on the receiving step.
 4b. Saving an already received document in SharePoint does not create its original contents. Represent receipt and storage/update, or distinctly name a newly created archive record only if the source states one. Do not describe the received signed receipt as newly authored by the receiving person.
@@ -753,7 +768,9 @@ Rules:
 24. organization is a concise title for this story, an understandable company activity (what the company accomplishes), and a capability (a type of work under it). Use plain Japanese rather than Activity/Capability jargon. Reuse suitable names from the organization catalog rather than adding synonyms. This is an organizing proposal, not a new business fact: certainty=inferred unless the interview explicitly states the classification. Evidence must quote the supporting interview. Use null, or empty activity/capability, when there is insufficient context. Keep the title specific and short; omit '入力した話'. Do not invent a company name, hierarchy of departments, or enterprise-wide value chain.
 24a. activity is broader than the individual workflow and should group several types of work. For example a production-planning story might have activity '製品をつくる' and capability '製造計画'; this is a grouping proposal only. Do not copy this story's detailed actions or quantities into the activity label. Prefer short, familiar words. Do not put a planning story into a sales activity merely because sales is its upstream source.
 25. systemProfiles describe each named tool's category and purpose in THIS interview. Categories are editable organization labels; reuse suitable catalog category names. Include groupware, infrastructure and local tools as named tools, not miscellaneous. Mark classifications inferred unless explicit; explain only the stated role, and never assume dependencies, owners or integrations from product knowledge. Use empty strings for unknown role/category. System names must match the draft mentions.
-25a. A category groups the stated role, not an assumed vendor architecture. When the role is clear, propose a short editable category with certainty=inferred. For example, notices and collaboration can be '連絡・共同作業', transaction records '取引・業務処理', spreadsheet adjustments '部門の作業道具', and laboratory judgments '検査・品質管理'. These are examples, not a fixed taxonomy. Keep category empty only when there is no basis to organize the stated role. An unknown category must never erase a known purpose.
+25a. systemDependencies capture ONLY dependencies explicitly described by this source: the system needs the named prerequisite to operate, log in or connect. For example "TeamsとSharePointはEntra IDのSSOを使う" has Teams → Entra ID and SharePoint → Entra ID. Quote the complete clause naming both ends and the direction. These facts are not tasks, transfers or simultaneous use. Do not infer a dependency from vendor knowledge, common technology, another interview, a future plan, negation or unknown authentication. Use an empty array when none is stated. Human corrections and rejected relationships remain authoritative.
+25b. When the source only explains system dependencies and does not describe business actions, use steps=[] with the grounded systemDependencies. Do not invent a login/check/registration task to fill a workflow.
+25c. A category groups the stated role, not an assumed vendor architecture. When the role is clear, propose a short editable category with certainty=inferred. For example, notices and collaboration can be '連絡・共同作業', transaction records '取引・業務処理', spreadsheet adjustments '部門の作業道具', and laboratory judgments '検査・品質管理'. These are examples, not a fixed taxonomy. Keep category empty only when there is no basis to organize the stated role. An unknown category must never erase a known purpose.
 26. Keep the draft concise. Use short phrases for meaning (usually 10-35 Japanese characters), summaries under 120 Japanese characters, and minimal verbatim evidence phrases. Do not repeat the whole action in purpose, basis, result and next; leave absent facts empty. A single business check can have several ordered child operations instead of turning every small interaction into a separate top-level step, but preserve separate human judgments, automatic system decisions and exception branches. System/Data mention evidence should be just the relevant short source phrase. Never shorten by dropping a stated condition or changing its meaning.
 27. Describe connections in plain business terms: what information is used or received and what job it enables. Do not add implementation commentary or explain absent APIs/transfers in the description; use via to distinguish a reference from a handoff. Put any missing transfer method in questions only if it materially affects understanding.
 
@@ -880,6 +897,11 @@ function collectCandidates(draft: WorkflowDraft): AssetCandidate[] {
     for (const dataName of flow.data) {
       add("data", dataName, flow.evidence, flow.certainty);
     }
+  }
+  for (const d of draft.systemDependencies ?? []) {
+    if (d.rejected || d.certainty === "unknown") continue;
+    add("system", d.system, d.evidence, "explicit");
+    add("system", d.prerequisite, d.evidence, "explicit");
   }
 
   return [...map.values()];
@@ -1300,6 +1322,7 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
     systemProfiles: raw.systemProfiles?.filter(
       (p) => p.name?.trim() && p.evidence?.trim(),
     ),
+    systemDependencies: raw.systemDependencies?.filter(d => d.system?.trim() && d.prerequisite?.trim() && d.evidence?.trim()),
     incomingHandoffs: raw.incomingHandoffs
       ?.filter(
         (h) =>
@@ -1399,7 +1422,7 @@ export async function extractWorkflowReviewWithAI(args: {
   });
   // Reject malformed AI output before applying protections for human changes.
   // A human may deliberately exclude every step afterward; that stays valid.
-  if (!rawDraft || !Array.isArray(rawDraft.steps) || !rawDraft.steps.length) {
+  if (!rawDraft || !Array.isArray(rawDraft.steps)) {
     throw new AIProviderError(
       "invalid_response",
       "AIの候補に手順がありませんでした。メモと前の候補は残っています。再試行してください。",
@@ -1409,9 +1432,13 @@ export async function extractWorkflowReviewWithAI(args: {
     a.referenceReading ? groundedReferenceReading(a, a.referenceReading).facts.flatMap(f => f.evidence) : [a.answer]);
   const evidenceSource = [args.interview, ...additionalEvidence].join("\n");
   const sourceDraft = validateAITransitions(
-    scopeReferenceDataFlows(separateMissingFacts(normalizeDraft(rawDraft), evidenceSource), args.graph, args.workflow.id, args.interview, args.followUpAnswers ?? []),
+    scopeReferenceDataFlows(validateSystemDependencies(separateMissingFacts(normalizeDraft(rawDraft), evidenceSource), evidenceSource, false), args.graph, args.workflow.id, args.interview, args.followUpAnswers ?? []),
     evidenceSource,
   );
+
+  if (!rawDraft.steps.length && !sourceDraft.systemDependencies?.some(d => d.certainty !== "unknown" && !d.rejected)) {
+    throw new AIProviderError("invalid_response", "AIの候補に作業や根拠のある道具の関係がありませんでした。メモと前の候補は残っています。再試行してください。");
+  }
 
   const draft = normalizeDraft(
     retainRegisteredGrouping(
@@ -1437,6 +1464,7 @@ export async function extractWorkflowReviewWithAI(args: {
         ? { ...draft.organization, origin: draft.organization.origin ?? "ai" }
         : draft.organization,
       systemProfiles: draft.systemProfiles,
+      systemDependencies: draft.systemDependencies,
       incomingHandoffs: draft.incomingHandoffs?.map((h) => ({
         ...h,
         origin: h.origin ?? "ai",
