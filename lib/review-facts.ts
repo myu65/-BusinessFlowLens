@@ -8,9 +8,10 @@ function missingFactOnly(source: string, evidence: string): string | null {
   if (!grounded) return null;
   const clauses = grounded.split(/[。！？\n]/).map(s => s.trim()).filter(Boolean);
   if (!clauses.length || !clauses.every(clause => {
-    const fact = clause.normalize("NFKC").replace(/[\s「」『』]/g, "")
+    const fact = clause.normalize("NFKC").replace(/[\s「」『』、,]/g, "")
       .replace(/^.*(?:場合|とき)(?:の|には|に|は|、)*/, "");
     // A stated confirmation, inquiry or other action must remain a task.
+    if (/(?:いつ.{1,60}か|時期|期限|日時|日程|タイミング)(?:は|が)(?:まだ|現時点では|今は)?(?:決まっていません|決まっていない|分かりません|分からない|不明|未確認|未定)(?:です|でした)?$/.test(fact)) return true;
     if (/する|した|して|します|され|しました|尋ね|聞い|問い合|照会し/.test(fact)) return false;
     return /(?:担当者?|責任者|引継ぎ先|引き継ぎ先|受渡し先|受け渡し先|再開先|接続先|基準|条件|方法|手順|時期|期限)(?:は|が)(?:まだ|現時点では|今は)?(?:分かりません|分からない|わかりません|わからない|不明|未確認|未定)(?:です|でした)?$/.test(fact);
   })) return null;
