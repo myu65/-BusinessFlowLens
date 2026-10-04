@@ -313,7 +313,7 @@ export function WorkflowReading({
                   ? "双方向"
                   : f.direction === "push"
                     ? "送り側から受渡し"
-                    : "方向未確認"}
+                    : "取得・送信を始める側は未確認"}
             </p>
             <p>
               {f.evidence ?? "根拠未登録"} ·{" "}
