@@ -110,8 +110,10 @@ test("overview remains bounded on dense cyclic graphs and keeps activity identit
       source: "同名の活動",
       target: "同名の活動",
       workflowId: "example",
+      targetWorkflowId: "example-target",
       description: "登録された接続",
       count: 1,
+      relationKind: "handoff" as const,
       status: "confirmed" as const,
     })),
   ).flat();
@@ -133,4 +135,48 @@ test("overview remains bounded on dense cyclic graphs and keeps activity identit
       (c) => c.sourceId === "activity:1" && c.targetId === "activity:3",
     ),
   );
+});
+
+test("activity connections retain reference, handoff and mixed meaning, counts and the actual source example", () => {
+  const g = structuredClone(graph), original = g.knowledge!.handoffs!.find(h => h.description.includes("販売予測を需給計画へ渡す"))!;
+  const sourceStep = getWorkflowProcesses(g, original.sourceWorkflowId).at(-1)!;
+  const targetStep = getWorkflowProcesses(g, original.targetWorkflowId).at(-1)!;
+  g.knowledge!.handoffs = [{ ...original, id: "ref1", via: "reference", sourceProcessId: sourceStep.id, targetProcessId: targetStep.id, status: "confirmed" },
+    { ...original, id: "ref2", via: "reference", sourceProcessId: undefined, status: "inferred" }];
+  const ids = [original.sourceWorkflowId, original.targetWorkflowId], before = JSON.stringify(g);
+  const [reference] = companyConnections(g, ids);
+  assert.equal(reference.relationKind, "reference");
+  assert.equal(reference.count, 2);
+  assert.equal(reference.status, "inferred");
+  assert.equal(reference.workflowId, sourceStep.workflowId);
+  assert.equal(reference.processId, sourceStep.id);
+  assert.equal(reference.targetWorkflowId, original.targetWorkflowId);
+  assert.equal(reference.targetProcessId, targetStep.id);
+  assert.equal(JSON.stringify(g), before);
+  g.knowledge!.handoffs.push({ ...original, id: "handoff1", status: "confirmed", via: "handoff" });
+  assert.equal(companyConnections(g, ids)[0].relationKind, "mixed");
+  assert.equal(companyConnections(g, ids)[0].count, 3);
+  g.knowledge!.handoffs = [{ ...original, via: undefined }];
+  assert.equal(companyConnections(g, ids)[0].relationKind, "mixed");
+  g.knowledge!.handoffs = [{ ...original, via: "handoff" }];
+  assert.equal(companyConnections(g, ids)[0].relationKind, "handoff");
+  assert.deepEqual(companyConnections(g, [original.sourceWorkflowId]), []);
+});
+
+test("a grouped example never substitutes another workflow's step or borrows one from a later connection", () => {
+  const g = structuredClone(graph), original = g.knowledge!.handoffs!.find(h => h.description.includes("販売予測を需給計画へ渡す"))!;
+  const otherStep = getWorkflowProcesses(g, original.targetWorkflowId)[0];
+  const sourceStep = getWorkflowProcesses(g, original.sourceWorkflowId).at(-1)!;
+  const ids = [original.sourceWorkflowId, original.targetWorkflowId];
+  for (const sourceProcessId of [undefined, "missing-step", otherStep.id]) {
+    g.knowledge!.handoffs = [{ ...original, id: "first", via: "reference", sourceProcessId, targetProcessId: sourceStep.id },
+      { ...original, id: "second", sourceProcessId: sourceStep.id }];
+    const [example] = companyConnections(g, ids);
+    assert.equal(example.processId, undefined);
+    assert.equal(example.targetProcessId, undefined);
+    assert.equal(example.targetWorkflowId, original.targetWorkflowId);
+    assert.equal(example.workflowId, original.sourceWorkflowId);
+    assert.equal(example.description, original.description);
+    assert.equal(example.count, 2);
+  }
 });

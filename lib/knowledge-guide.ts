@@ -92,6 +92,7 @@ export function connectionRoleLabel(connection: ConnectionKind, incoming = false
 // Only show registered cross-activity handoffs. A business story must not invent sequence.
 export function companyConnections(graph: LensGraph, workflowIds: string[]) {
   const visible = new Set(workflowIds);
+  const processes = new Map(graph.nodes.filter(n => n.kind === "process").map(n => [n.id, n]));
   const activityFor = new Map<
     string,
     NonNullable<LensGraph["knowledge"]>["activities"][number]
@@ -108,6 +109,10 @@ export function companyConnections(graph: LensGraph, workflowIds: string[]) {
       targetId: string;
       description: string;
       workflowId: string;
+      processId?: string;
+      targetWorkflowId: string;
+      targetProcessId?: string;
+      relationKind: "handoff" | "reference" | "mixed";
       count: number;
       status: import("./graph").Confidence;
     }
@@ -123,12 +128,16 @@ export function companyConnections(graph: LensGraph, workflowIds: string[]) {
     if (!source || !target || source.id === target.id) continue;
     const key = `${source.id}:${target.id}`;
     const prior = grouped.get(key);
+    const relationKind = handoff.via === "reference" ? "reference" : handoff.via === "handoff" ? "handoff" : "mixed";
+    const process = processes.get(handoff.sourceProcessId ?? "");
+    const targetProcess = processes.get(handoff.targetProcessId ?? "");
     grouped.set(
       key,
       prior
         ? {
             ...prior,
             count: prior.count + 1,
+            relationKind: prior.relationKind === relationKind ? relationKind : "mixed",
             status:
               prior.status === "unknown" ||
               !handoff.status ||
@@ -145,6 +154,10 @@ export function companyConnections(graph: LensGraph, workflowIds: string[]) {
             targetId: target.id,
             description: handoff.description,
             workflowId: handoff.sourceWorkflowId,
+            processId: process?.workflowId === handoff.sourceWorkflowId ? process.id : undefined,
+            targetWorkflowId: handoff.targetWorkflowId,
+            targetProcessId: targetProcess?.workflowId === handoff.targetWorkflowId ? targetProcess.id : undefined,
+            relationKind,
             count: 1,
             status: handoff.status ?? "unknown",
           },

@@ -81,22 +81,27 @@ export function CompanyMap({
             >
               {c[direction]} {direction === "target" ? "→" : "←"}
             </button>
-            <p>{c.description}</p>
-            {c.status !== "confirmed" && <small>受渡しの根拠は要確認</small>}
+            <small>{c.relationKind === "reference" ? "情報の参照" : c.relationKind === "handoff" ? "仕事の受渡し" : "受渡し・参照"} · {c.count}件</small>
+            <p>{c.count > 1 ? "例：" : ""}{c.description}</p>
+            {c.status !== "confirmed" && <small>接続の根拠は要確認</small>}
             <button
               className="company-example-link"
-              onClick={() => onWorkflow(c.workflowId)}
+              onClick={() => onWorkflow(direction === "source" ? c.workflowId : c.targetWorkflowId,
+                direction === "source" ? c.processId : c.targetProcessId)}
             >
-              受渡しの実例を見る →
+              {c.relationKind === "reference" ? direction === "source" ? "参照元の業務を見る" : "この情報を使う業務を見る"
+                : c.relationKind === "handoff" ? direction === "source" ? "送り出す業務の例を見る" : "受け取る業務の例を見る"
+                  : "つながる業務の例を見る"} →
             </button>
+            {!(direction === "source" ? c.processId : c.targetProcessId) && <small>該当する手順は未登録です。業務全体を開きます。</small>}
           </article>
         ))}
         {!edges.length && (
-          <p className="input-unconfirmed">この範囲では受渡しが未登録です。</p>
+          <p className="input-unconfirmed">この範囲では受渡し・参照が未登録です。</p>
         )}
         {edges.length > 3 && (
           <details>
-            <summary>ほか{edges.length - 3}件の受渡し</summary>
+            <summary>ほか{edges.length - 3}件のつながり</summary>
             {edges.slice(3).map((c) => (
               <p key={`${c.sourceId}:${c.targetId}`}>
                 <button
@@ -106,7 +111,7 @@ export function CompanyMap({
                 >
                   {c[direction]}
                 </button>{" "}
-                · {c.description}
+                · {c.relationKind === "reference" ? "情報の参照" : c.relationKind === "handoff" ? "仕事の受渡し" : "受渡し・参照"} · {c.count}件 · {c.description}
               </p>
             ))}
           </details>
@@ -157,7 +162,7 @@ export function CompanyMap({
           </div>
           <div className="company-detail-flow">
             <section>
-              <h4>前の活動から受け取る</h4>
+              <h4>受け取る・参照する元の活動</h4>
               {related("source")}
             </section>
             <section className="company-detail-center">
@@ -221,7 +226,7 @@ export function CompanyMap({
                 ))}
             </section>
             <section>
-              <h4>次の活動へ渡す</h4>
+              <h4>渡す・参照される先の活動</h4>
               {related("target")}
             </section>
           </div>
