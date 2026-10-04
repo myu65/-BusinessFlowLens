@@ -1,5 +1,5 @@
 "use client";
-import {
+import React, {
   Fragment,
   useEffect,
   useMemo,
@@ -108,7 +108,7 @@ export function InputWorkbench({
   const [error, setError] = useState("");
   const [aiConfig, setAIConfig] = useState<AIConfigurationStatus | null>(null);
   const [aiResponse, setAIResponse] = useState<
-    "unchecked" | "success" | "failure"
+    "unchecked" | "success" | "failure" | "unusable"
   >("unchecked");
   const [aiConfigError, setAIConfigError] = useState(false);
   const [edit, setEdit] = useState<ExtractionReviewStep | null>(null);
@@ -304,6 +304,7 @@ export function InputWorkbench({
     setBusy(true);
     setError("");
     setEdit(null);
+    let responseFailure: "failure" | "unusable" = "failure";
     try {
       const response = await fetch("/api/extract", {
         method: "POST",
@@ -317,8 +318,10 @@ export function InputWorkbench({
         }),
       });
       const payload = await response.json();
-      if (!response.ok)
+      if (!response.ok) {
+        responseFailure = payload.code === "invalid_response" ? "unusable" : "failure";
         throw new Error(payload.error ?? "構造化に失敗しました。");
+      }
       if (payload.provider !== "local-demo-extractor") setAIResponse("success");
       const next: InputDraft = {
         workflow: {
@@ -339,6 +342,7 @@ export function InputWorkbench({
       onDraft(requestKey, next);
       setMobilePane("flow");
       if (requestKey === latest.current.key) {
+        if (!next.review.steps.length) setQuestionsOpen(true);
         const changes = diffReviews(before, next.review);
         const focus =
           changes.added[0] ??
@@ -352,14 +356,14 @@ export function InputWorkbench({
           );
         }
         requestAnimationFrame(() =>
-          (before ? focusRef.current : stripRef.current)?.scrollIntoView({
+          (!focus ? questionsRef.current : before ? focusRef.current : stripRef.current)?.scrollIntoView({
             behavior: "smooth",
             block: "start",
           }),
         );
       }
     } catch (cause) {
-      if (aiConfig?.configured) setAIResponse("failure");
+      if (aiConfig?.configured) setAIResponse(responseFailure);
       setError(
         cause instanceof Error ? cause.message : "読み取りに失敗しました。",
       );
@@ -520,6 +524,8 @@ export function InputWorkbench({
                 ? "AIが読み取った候補です。原文と照らして、違うところを直してください。"
                 : aiResponse === "failure"
                   ? "メモと前の候補は残っています。接続を確認して、もう一度整理できます。"
+                  : aiResponse === "unusable"
+                    ? "AIから応答はありましたが、候補として表示できませんでした。メモと前の候補を保っています。再試行できます。"
                   : "話を整理するときにAIへ送ります。この画面を開いてからの応答は未確認です。保存した構造の整理方法は、流れの上に表示します。"
               : aiConfigError
                 ? "メモは書けます。整理を実行した結果で、使われた方法を確認してください。"
@@ -814,7 +820,7 @@ export function InputWorkbench({
               </h2>
               <p>
                 {review
-                  ? `${steps.length}手順 · ${draft ? "保存前の候補" : "保存済み"}`
+                  ? `${steps.length ? `${steps.length}手順` : "まだ作業は決めていません"} · ${draft ? "保存前の候補" : "保存済み"}`
                   : "入力すると、人・道具・情報のつながりが見えます。"}
               </p>
             </div>
@@ -835,7 +841,7 @@ export function InputWorkbench({
                   : edit
                     ? "訂正を反映してから保存"
                     : draft
-                      ? "3 この流れを保存"
+                      ? review.steps.length ? "3 この流れを保存" : "3 話と確認事項を保存"
                       : "保存済み"}
               </button>
             )}
@@ -1473,6 +1479,51 @@ export function InputWorkbench({
                   </button>
                 </details>
               )}
+              <details onToggle={(e) => setAdvanced(e.currentTarget.open)}>
+                <summary>システム・情報・接続を詳しく編集する</summary>
+                {advanced &&
+                  renderAdvanced?.({
+                    draft: ensureDraft(review),
+                    onChange: update,
+                    onSave: save,
+                    onDiscard: () => onDraft(key, null),
+                    onRefine: refine,
+                    busy: busy || stale,
+                  })}
+              </details>
+              <div className="input-save-actions">
+                <p>
+                  {stale
+                    ? "メモの変更は、まだ流れへ反映されていません。"
+                    : draft
+                      ? "確認できたところまで保存できます。未確認の内容も、そのまま残ります。"
+                      : "この話と流れは保存されています。続きを書くと、ここにつながります。"}
+                </p>
+                {!draft && onExplore && (
+                  <button onClick={onExplore}>会社の全体像で見る →</button>
+                )}
+                {!draft && relatedQuestions.length > 0 && (
+                  <aside className="input-question-reference">
+                    <strong>この話を、以前の未確認事項の補足にも使えます</strong>
+                    {relatedQuestions.map(({ workflow: w, question: q }, i) => (
+                      <p key={i}><button disabled={busy} onClick={() => {
+                        setQuestionDestination(w.id);
+                        onSelect(w.id);
+                      }}>{w.name}の確認事項を開く</button><br />{q.question}</p>
+                    ))}
+                  </aside>
+                )}
+              </div>
+            </>
+          )}
+          {review && !selected && (
+            <aside className="input-empty-structure" aria-label="分かっている話から続きを書く">
+              <strong>{review.systemDependencies?.some(d => !d.rejected) ? "道具どうしの関係が分かりました" : "まだ作業の流れは決めていません"}</strong>
+              <p>{review.summary}</p>
+              <p>全部を説明する必要はありません。知っていることをメモに足すか、下の確認事項に答えると、ここから流れが育ちます。分からないことは未確認のまま残せます。</p>
+            </aside>
+          )}
+          {review && (
               <details className="input-questions" ref={questionsRef} open={questionsOpen}
                 onToggle={e => setQuestionsOpen(e.currentTarget.open)}>
                 <summary>
@@ -1556,42 +1607,6 @@ export function InputWorkbench({
                   </details>
                 )}
               </details>
-              <details onToggle={(e) => setAdvanced(e.currentTarget.open)}>
-                <summary>システム・情報・接続を詳しく編集する</summary>
-                {advanced &&
-                  renderAdvanced?.({
-                    draft: ensureDraft(review),
-                    onChange: update,
-                    onSave: save,
-                    onDiscard: () => onDraft(key, null),
-                    onRefine: refine,
-                    busy: busy || stale,
-                  })}
-              </details>
-              <div className="input-save-actions">
-                <p>
-                  {stale
-                    ? "メモの変更は、まだ流れへ反映されていません。"
-                    : draft
-                      ? "確認できたところまで保存できます。未確認の内容も、そのまま残ります。"
-                      : "この話と流れは保存されています。続きを書くと、ここにつながります。"}
-                </p>
-                {!draft && onExplore && (
-                  <button onClick={onExplore}>会社の全体像で見る →</button>
-                )}
-                {!draft && relatedQuestions.length > 0 && (
-                  <aside className="input-question-reference">
-                    <strong>この話を、以前の未確認事項の補足にも使えます</strong>
-                    {relatedQuestions.map(({ workflow: w, question: q }, i) => (
-                      <p key={i}><button disabled={busy} onClick={() => {
-                        setQuestionDestination(w.id);
-                        onSelect(w.id);
-                      }}>{w.name}の確認事項を開く</button><br />{q.question}</p>
-                    ))}
-                  </aside>
-                )}
-              </div>
-            </>
           )}
           {!!review?.excludedSteps?.length && (
             <details>
@@ -1634,9 +1649,7 @@ export function InputWorkbench({
               ))}
             </details>
           )}
-          {review && !selected && (
-            <p>{review.systemDependencies?.some(d => !d.rejected) ? "この話は道具どうしの関係として整理されています。作業の話を足すと、ここから流れを育てられます。" : "手順がありません。本文を補足して読み直してください。"}</p>
-          )}
+
         </section>
       </div>
     </section>

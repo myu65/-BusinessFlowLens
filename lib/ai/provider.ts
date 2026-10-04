@@ -724,6 +724,7 @@ Rules:
 1. Preserve business meaning. Prefer 3-10 meaningful business steps, not sentence fragments.
 2. A step is an activity with an actor/action/outcome. Do not create a step for a noun.
 2a. A missing fact is a question, not a performed business task. For example, 'the waste-handling owner is still unknown' does not say that someone checks the owner: keep a question about the owner and the stated exception in executionContext, without inventing an 'identify/check the owner' step or a transition to it. Unknown actors, tools or outcomes do not erase an otherwise stated action. Create a confirmation task only when the source actually describes someone asking or checking.
+2b. A person can start with a topic or an intent to understand work without describing any performed action. A draft with zero steps and a few material clarification questions is valid. Summarize only what the person actually knows; do not fill in a standard purchasing/sales process, owner, tool, trigger or outcome. Ask up to three approachable questions to help them tell the next part, and do not require a workflow name or classification before they can continue.
 3. Only list a system when the transcript names a system, application, spreadsheet, email, portal, screen, tool, or clearly says a system is used. "Check inventory" does NOT imply an inventory system.
 3a. The tool and actor must be stated for THIS action, not merely mentioned in another action. Do not carry Forms, SharePoint or a transaction system onto a human judgment unless its use is stated there. An approval does not identify who sends the later notice. Use null/empty lists for unstated fields; an actual action remains even when its actor or tool is unknown.
 4. Data may be explicit ("order data", "customer master", "Excel row") or strongly implied by an explicit read/write operation. Mark the containing step inferred when the business object itself is inferred.
@@ -1248,6 +1249,14 @@ function buildGraphPatch(
   };
 }
 
+function isValidQuestion(item: unknown): item is ExtractionQuestion {
+  if (!item || typeof item !== "object") return false;
+  const question = item as Partial<ExtractionQuestion>;
+  return typeof question.question === "string" && !!question.question.trim()
+    && typeof question.reason === "string" && !!question.reason.trim()
+    && ["system", "data", "handoff", "rule", "owner", "exception", "scope"].includes(question.target ?? "");
+}
+
 function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
   if (
     !raw ||
@@ -1361,10 +1370,7 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
           .map((key) => normalizeName(key))
           .filter((key) => validKeys.has(key)),
       })),
-    questions: (raw.questions ?? []).filter(
-      (item): item is ExtractionQuestion =>
-        Boolean(item?.question && item?.reason && item?.target),
-    ),
+    questions: (raw.questions ?? []).filter(isValidQuestion),
     warnings: (raw.warnings ?? []).filter(Boolean),
     handoffs: raw.handoffs
       ?.filter(
@@ -1444,8 +1450,9 @@ export async function extractWorkflowReviewWithAI(args: {
     evidenceSource,
   );
 
-  if (!rawDraft.steps.length && !sourceDraft.systemDependencies?.some(d => d.certainty !== "unknown" && !d.rejected)) {
-    throw new AIProviderError("invalid_response", "AIの候補に作業や根拠のある道具の関係がありませんでした。メモと前の候補は残っています。再試行してください。");
+  if (!rawDraft.steps.length && !sourceDraft.systemDependencies?.some(d => d.certainty !== "unknown" && !d.rejected)
+    && !rawDraft.questions?.some(isValidQuestion)) {
+    throw new AIProviderError("invalid_response", "AIの応答から作業・道具の関係・確認事項を読み取れませんでした。メモと前の候補は残っています。再試行してください。");
   }
 
   const draft = normalizeDraft(
