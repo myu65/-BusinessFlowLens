@@ -8,6 +8,7 @@ import {
   type Workflow,
 } from "./graph";
 import { findConfirmedAsset } from "./refinement";
+import { resolveHandoffInformation } from "./handoff-information";
 import { REVIEW_FIELD_LABELS, reviewFieldLabel } from "./review-copy";
 import {
   applyInputOrganization,
@@ -280,10 +281,9 @@ export function applyReviewConnections(
         sourceProcessId: source.id,
         targetWorkflowId: target.id,
         targetProcessId: targetProcess?.id,
-        dataIds: h.data.flatMap((name) => {
-          const n = findConfirmedAsset(graph, "data", name);
-          return n ? [n.id] : [];
-        }),
+        dataIds: resolveHandoffInformation(graph, workflow.id, h.fromStepKey, h.data, h.dataBindings).dataIds,
+        dataNames: h.data,
+        ...(h.dataBindings?.length ? { dataBindings: h.dataBindings } : {}),
         description: h.description,
         kind: "information" as const,
         evidence: h.evidence,
@@ -321,10 +321,9 @@ export function applyReviewConnections(
         sourceProcessId: sourceProcess?.id,
         targetWorkflowId: workflow.id,
         targetProcessId: targetProcess.id,
-        dataIds: h.data.flatMap((name) => {
-          const n = findConfirmedAsset(graph, "data", name);
-          return n ? [n.id] : [];
-        }),
+        dataIds: resolveHandoffInformation(graph, source.id, h.sourceStepKey, h.data, h.dataBindings).dataIds,
+        dataNames: h.data,
+        ...(h.dataBindings?.length ? { dataBindings: h.dataBindings } : {}),
         description: h.description,
         kind: "information" as const,
         evidence: h.evidence,
@@ -354,6 +353,8 @@ export function applyReviewConnections(
       h.sourceProcessId,
       h.targetProcessId,
       [...h.dataIds].sort(),
+      [...(h.dataNames ?? [])].sort(),
+      h.dataBindings,
       h.description,
     ]);
   const seen = new Set(preserved.map(connectionKey));
@@ -461,13 +462,13 @@ export function diffReviews(
     ...(r?.handoffs ?? []).map(
       (h) => ({
         key: `${h.fromStepKey} → 業務:${h.targetWorkflowId} / ${h.via === "reference" ? "参照" : "受渡し"} / 受取:${h.targetStepKey ?? "未確認"} / ${h.data.join("、")} / ${h.description} / ${h.certainty}`,
-        label: `${name(h.fromStepKey)} → ${workflowName(h.targetWorkflowId)}：${peerStep(h.targetWorkflowId, h.targetStepKey)} · ${h.via === "reference" ? "情報を参照" : "情報を渡す"}「${h.data.join("・")}」 · ${certainty(h.certainty)} · ${h.description}`,
+        label: `${name(h.fromStepKey)} → ${workflowName(h.targetWorkflowId)}：${peerStep(h.targetWorkflowId, h.targetStepKey)} · ${h.via === "reference" ? "情報を参照" : "情報を渡す"}「${h.data.join("・")}」 · ${certainty(h.certainty)} · ${h.description}${h.dataBindings?.map(b => ` · 情報の対応：${b.name} → ${graph?.nodes.find(n => n.id === b.dataId)?.label ?? "情報は未確認"}（利用者が確認）`).join("") ?? ""}`,
       }),
     ),
     ...(r?.incomingHandoffs ?? []).map(
       (h) => ({
         key: `業務:${h.sourceWorkflowId} / ${h.via === "reference" ? "参照" : "受渡し"} / 送元:${h.sourceStepKey ?? "未確認"} → ${h.toStepKey} / ${h.data.join("、")} / ${h.description} / ${h.certainty}`,
-        label: `${workflowName(h.sourceWorkflowId)}：${peerStep(h.sourceWorkflowId, h.sourceStepKey)} → ${name(h.toStepKey)} · ${h.via === "reference" ? "情報を参照" : "情報を受け取る"}「${h.data.join("・")}」 · ${certainty(h.certainty)} · ${h.description}`,
+        label: `${workflowName(h.sourceWorkflowId)}：${peerStep(h.sourceWorkflowId, h.sourceStepKey)} → ${name(h.toStepKey)} · ${h.via === "reference" ? "情報を参照" : "情報を受け取る"}「${h.data.join("・")}」 · ${certainty(h.certainty)} · ${h.description}${h.dataBindings?.map(b => ` · 情報の対応：${b.name} → ${graph?.nodes.find(n => n.id === b.dataId)?.label ?? "情報は未確認"}（利用者が確認）`).join("") ?? ""}`,
       }),
     ),
     ...(r?.dataFlows ?? []).map(
@@ -639,7 +640,7 @@ export function describeHumanEdit(edit: import("./graph").HumanEdit): string[] {
       const actions: Record<string, string> = edit.field === "data"
         ? { read: "参照する", receive: "受け取る", create: "情報を新たに作る", update: "更新する", send: "渡す" }
         : { view: "見る", search: "探す", input: "入力する", approve: "承認する", send: "送る", receive: "受け取る", other: "使う" };
-      return v.map(item => `${item.name} · ${actions[item.operation ?? item.interaction] ?? "使い方は未確認"}`).join("、") || "未確認";
+      return v.map(item => `${item.name} · ${actions[item.operation ?? item.interaction] ?? "使い方は未確認"}`).join("、") || (edit.field === "data" ? "この手順で使う情報の登録なし" : "この手順で使う道具の登録なし");
     }
     return edit.field === "executionMode"
       ? ({

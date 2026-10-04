@@ -359,8 +359,8 @@ export function preserveRefinements(
   const handoffs = [...(review.handoffs ?? [])];
   for (const confirmed of previous.handoffs ?? []) {
     if (
-      confirmed.certainty !== "confirmed" ||
-      (previous.extraction && confirmed.origin !== "human") ||
+      (!confirmed.dataBindings?.length && confirmed.certainty !== "confirmed") ||
+      (previous.extraction && confirmed.origin !== "human" && !confirmed.dataBindings?.length) ||
       !keys.has(confirmed.fromStepKey)
     )
       continue;
@@ -384,12 +384,14 @@ export function preserveRefinements(
   }
   const incomingHandoffs = [...(review.incomingHandoffs ?? [])];
   for (const handoff of previous.incomingHandoffs ?? []) {
-    if (handoff.origin !== "human" || !keys.has(handoff.toStepKey)) continue;
+    if ((handoff.origin !== "human" && !handoff.dataBindings?.length) || !keys.has(handoff.toStepKey)) continue;
     const index = incomingHandoffs.findIndex(
       (h) =>
         h.sourceWorkflowId === handoff.sourceWorkflowId &&
         h.toStepKey === handoff.toStepKey,
     );
+    if (handoff.dataBindings?.length && (index < 0 || JSON.stringify(incomingHandoffs[index]) !== JSON.stringify(handoff)))
+      warnings.push("人が確認した情報の対応を保持しました。原文を変更した場合は、この業務の接続も確認してください。");
     if (index >= 0) incomingHandoffs[index] = handoff;
     else incomingHandoffs.push(handoff);
   }

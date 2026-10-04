@@ -1,4 +1,5 @@
 "use client";
+import { handoffInformationText } from "@/lib/handoff-information";
 import React, { useEffect, useRef, useState } from "react";
 import {
   getProcessExecutionMode,
@@ -187,8 +188,8 @@ export function WorkflowReading({
       <article key={h.id}>
         <p>{h.description}</p>
         <p>
-          {h.dataIds.map(label).join(" / ") || "情報は未確認"} ·{" "}
-          {h.status === "confirmed" ? "原文に明示" : "接続は要確認"}
+          {handoffInformationText(graph, h)} ·{" "}
+          {h.status === "confirmed" ? "業務の接続は原文・訂正の根拠あり" : "業務の接続は要確認"}
         </p>
         <button onClick={() => followHandoff(h)}>
           {incoming
@@ -932,7 +933,7 @@ export function WorkflowReading({
               <article key={h.id}>
                 <p>{h.description}</p>
                 <p>
-                  受渡す情報：{h.dataIds.map(label).join("、") || "未確認"} ·{" "}
+                  参照・受渡す情報：{handoffInformationText(graph, h)} ·{" "}
                   {h.status === "confirmed"
                     ? "確認済み"
                     : h.status === "inferred"

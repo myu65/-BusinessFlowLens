@@ -5,7 +5,10 @@ import type {
   ExtractionReview,
   ExtractionReviewStep,
   LensGraph,
+  ReviewHandoff,
+  ReviewIncomingHandoff,
 } from "@/lib/graph";
+import { HandoffInformation } from "./HandoffInformation";
 import { describeHumanEdit } from "@/lib/review-workbench";
 import { termExplanation } from "@/lib/knowledge-guide";
 import { inputStepName } from "@/lib/input-canvas";
@@ -28,6 +31,8 @@ export function InputReviewFlow({
   onEdit,
   onExclude,
   onWorkflow,
+  onConfirmIncomingData,
+  onConfirmOutgoingData,
   unsavedWorkflowIds = [],
 }: {
   review: ExtractionReview;
@@ -40,6 +45,8 @@ export function InputReviewFlow({
   onEdit: () => void;
   onExclude: () => void;
   onWorkflow: (id: string, stepKey?: string) => void;
+  onConfirmIncomingData?: (handoff: ReviewIncomingHandoff, name: string, dataId: string) => void;
+  onConfirmOutgoingData?: (handoff: ReviewHandoff, name: string, dataId: string) => void;
   unsavedWorkflowIds?: string[];
 }) {
   const inputs = selected.data.filter(
@@ -77,12 +84,14 @@ export function InputReviewFlow({
           .find((n) => n.id === h.targetProcessId)
           ?.canonicalKey.split(":")
           .at(-1),
-        data: h.dataIds.map(
+        dataBindings: h.dataBindings,
+        data: h.dataNames ?? h.dataIds.map(
           (id) => graph.nodes.find((n) => n.id === id)?.label ?? id,
         ),
         description: h.description,
         evidence: h.evidence,
         certainty: h.status ?? "unknown",
+        origin: h.origin,
         via: h.via,
       })),
   ].filter((h) => h.fromStepKey === selected.stepKey);
@@ -104,12 +113,14 @@ export function InputReviewFlow({
           ?.canonicalKey.split(":")
           .at(-1),
         toStepKey: selected.stepKey,
-        data: h.dataIds.map(
+        dataBindings: h.dataBindings,
+        data: h.dataNames ?? h.dataIds.map(
           (id) => graph.nodes.find((n) => n.id === id)?.label ?? id,
         ),
         description: h.description,
         evidence: h.evidence,
         certainty: h.status ?? "unknown",
+        origin: h.origin,
         via: h.via,
       })),
   ].filter((h) => h.toStepKey === selected.stepKey);
@@ -215,9 +226,13 @@ export function InputReviewFlow({
               <div key={i}>
                 <p>
                   {h.description} ·{" "}
-                  {h.certainty === "confirmed" ? "原文に明示" : "接続は要確認"}
+                  {h.origin === "human" ? "利用者が補足" : h.certainty === "confirmed" ? "業務の接続は原文に明示" : "業務の接続は要確認"}
                 </p>
-                <span>{h.data.join(" / ")}</span>
+                <HandoffInformation key={`${h.sourceWorkflowId}:${h.sourceStepKey}:${h.toStepKey}`}
+                  graph={graph} sourceWorkflowId={h.sourceWorkflowId} sourceStepKey={h.sourceStepKey}
+                  names={h.data} bindings={h.dataBindings} busy={busy}
+                  onConfirm={review.incomingHandoffs?.includes(h) && onConfirmIncomingData
+                    ? (name, dataId) => onConfirmIncomingData(h, name, dataId) : undefined} />
                 {(unsavedWorkflowIds.includes(workflowId ?? "") || unsavedWorkflowIds.includes(h.sourceWorkflowId)) && <small>保存前の候補を含む接続</small>}
                 {source && (
                   <button
@@ -320,9 +335,13 @@ export function InputReviewFlow({
             <div className="input-handoff" key={i}>
               <p>{h.description}</p>
               <small>
-                {h.certainty === "confirmed" ? "原文に明示" : "接続は要確認"}
+                {h.origin === "human" ? "利用者が補足" : h.certainty === "confirmed" ? "業務の接続は原文に明示" : "業務の接続は要確認"}
               </small>
-              <span>{h.data.join(" / ")}</span>
+              <HandoffInformation key={`${workflowId}:${h.fromStepKey}:${h.targetWorkflowId}`}
+                graph={graph} sourceWorkflowId={workflowId ?? ""} sourceStepKey={h.fromStepKey}
+                names={h.data} bindings={h.dataBindings} busy={busy}
+                onConfirm={review.handoffs?.includes(h) && onConfirmOutgoingData
+                  ? (name, dataId) => onConfirmOutgoingData(h, name, dataId) : undefined} />
               {(unsavedWorkflowIds.includes(workflowId ?? "") || unsavedWorkflowIds.includes(h.targetWorkflowId)) && <small>保存前の候補を含む接続</small>}
               {target && (
                 <button onClick={() => onWorkflow(target.id, h.targetStepKey)}>

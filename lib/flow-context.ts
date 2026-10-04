@@ -4,6 +4,7 @@ import {
   type LensGraph,
   type LensNode,
 } from "./graph";
+import { normalizeAssetName } from "./asset-identity";
 
 export function stepContext(
   graph: LensGraph,
@@ -62,6 +63,17 @@ export function stepContext(
   const receivedData = graph.nodes.filter(
     (n) => n.kind === "data" && receivedIds.has(n.id),
   );
+  // A confirmed correspondence changes this reading surface, not the global
+  // identity of either record. Ambiguous local inputs remain visible.
+  const inputCorrespondences = incomingHandoffs.flatMap(h => (h.dataBindings ?? []).flatMap(binding => {
+    if (!h.dataIds.includes(binding.dataId)) return [];
+    const matches = links.filter(link => link.asset.kind === "data" && link.relation === "reads" &&
+      [link.asset.label, ...(link.asset.aliases ?? [])].some(name => normalizeAssetName(name) === normalizeAssetName(binding.name)));
+    return matches.length === 1 ? [{ localId: matches[0].asset.id, sourceId: binding.dataId }] : [];
+  }));
+  const matchedLocalIds = new Set(inputCorrespondences.filter(item =>
+    new Set(inputCorrespondences.filter(other => other.localId === item.localId).map(other => other.sourceId)).size === 1)
+    .map(item => item.localId));
   const unique = (nodes: LensNode[]) => [
     ...new Map(nodes.map((n) => [n.id, n])).values(),
   ];
@@ -77,6 +89,7 @@ export function stepContext(
     outgoing,
     incoming,
     incomingHandoffs,
+    inputCorrespondences,
     outgoingHandoffs,
     systems: unique(
       links.filter((l) => l.asset.kind === "system").map((l) => l.asset),
@@ -84,7 +97,7 @@ export function stepContext(
     inputs: unique([
       ...receivedData,
       ...links
-        .filter((l) => l.asset.kind === "data" && l.relation === "reads")
+        .filter((l) => l.asset.kind === "data" && l.relation === "reads" && !matchedLocalIds.has(l.asset.id))
         .map((l) => l.asset),
     ]),
     outputs: unique(
@@ -215,6 +228,7 @@ export function traceData(
       f.dataIds.includes(dataId),
     );
     const handoffOperations = [
+      ...(context.inputCorrespondences.some(item => item.sourceId === dataId) ? ["reads"] : []),
       ...context.incomingHandoffs
         .filter((h) => h.kind === "information" && h.dataIds.includes(dataId))
         .map((h) => (h.via === "reference" ? "業務間の参照" : "業務間の受取")),
