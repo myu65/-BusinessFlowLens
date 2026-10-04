@@ -8,11 +8,12 @@ export type AIConfigurationStatus = {
 
 export function aiStatusLabel(
   config: AIConfigurationStatus | null,
-  response: "unchecked" | "success" | "failure",
+  response: "unchecked" | "success" | "failure" | "unusable",
 ) {
   if (!config) return "AI設定を確認中";
   if (!config.configured) return "AI未接続 · 簡易整理";
   if (response === "success") return "AIの応答を確認しました";
+  if (response === "unusable") return "AIの応答を整理できませんでした";
   if (response === "failure") return "AIから応答を得られませんでした";
   return "AI設定あり · 応答は未確認";
 }

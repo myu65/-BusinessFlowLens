@@ -40,6 +40,21 @@ const workflow = {
 const notes =
   "営業部の佐藤さんがメールで「注文書」を受け取る。\n佐藤さんがExcelで「受注確認リスト」を作成する。\n佐藤さんがExcelから「受注確認リスト」をSAPへ手動で転記する。\nSAPが自動で在庫を確認する。\n在庫が不足する場合、佐藤さんはTeamsで生産管理部に納期の調整を依頼する。\n在庫がある場合、SAPから「出荷指示」をWMSへAPIで自動送信する。";
 
+test("a question-only memo survives storage and reconstruction without fabricated work", async () => {
+  const source = "購買の仕事を整理したいが、作業内容はまだ分からない。";
+  const question = { question: "最初に届く情報はありますか？", reason: "まだ具体的な作業が説明されていません。", target: "scope" as const };
+  const review = { summary: source, trigger: null, outcome: null, steps: [], transitions: [], dataFlows: [], questions: [question], warnings: [] };
+  const repository = new SqliteBusinessFlowRepository(join(mkdtempSync(join(tmpdir(), "lens-unknown-")), "test.sqlite"));
+  await repository.saveProject({ projectId: "test", projectName: "Test", graph: previewReviewGraph(empty, workflow, review),
+    transcripts: { [workflow.id]: source }, updatedAt: new Date().toISOString() });
+  const loaded = (await repository.loadProject("test"))!;
+  const restored = buildWorkflowReviewFromGraph(loaded.graph, workflow.id);
+  assert.deepEqual(restored.questions, [question]);
+  assert.deepEqual(restored.steps, []);
+  assert.deepEqual(loaded.graph.nodes, []);
+  assert.equal(loaded.transcripts[workflow.id], source);
+});
+
 test("first memo previews people, groupware, data and branches without saving or inventing outcomes", () => {
   const review = extractGroundedLocal(notes);
   const graph = previewReviewGraph(empty, workflow, review);

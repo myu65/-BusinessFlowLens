@@ -9,7 +9,7 @@ import {
 import { aiStatusLabel } from "../lib/ai/status";
 import { AIProviderError, safeAIError } from "../lib/ai/errors";
 import { extractGroundedLocal } from "../lib/local-review";
-import type { LensGraph } from "../lib/graph";
+import type { ExtractionReview, LensGraph } from "../lib/graph";
 import { previewReviewGraph } from "../lib/review-workbench";
 import { knowledgeIndex } from "../lib/knowledge";
 
@@ -125,6 +125,7 @@ test("configuration, actual response, and quality review remain separate; no end
         "AI設定あり · 応答は未確認",
       );
       assert.equal(aiStatusLabel(status, "success"), "AIの応答を確認しました");
+      assert.equal(aiStatusLabel(status, "unusable"), "AIの応答を整理できませんでした");
       assert.equal(
         aiStatusLabel(status, "failure"),
         "AIから応答を得られませんでした",
@@ -138,6 +139,44 @@ test("configuration, actual response, and quality review remain separate; no end
     assert.deepEqual(status.missing, ["endpoint", "model", "credential"]);
     assert.equal(aiStatusLabel(status, "unchecked"), "AI未接続 · 簡易整理");
   });
+});
+
+test("an intent-only AI review keeps questions and no invented assets, then accepts a concrete follow-up", async () => {
+  const source = "購買の仕事を整理したいです。順番も担当も道具もまだ分かりません。";
+  const question = { question: "最初にどんな話や情報が届くか、知っていることはありますか？", reason: "具体的な作業がまだ説明されていないため。", target: "scope" as const };
+  const initial: ExtractionReview = { summary: "購買の仕事について整理したいが、作業内容はまだ分からない。", trigger: null, outcome: null,
+    steps: [], transitions: [], dataFlows: [], questions: [question], warnings: [] };
+  const fact = "購買担当がメールで原料の見積依頼を受け取る。";
+  const followUp = { question: question.question, answer: fact };
+  let draft = initial;
+  const server = createServer((_request, response) => {
+    response.setHeader("Content-Type", "application/json");
+    response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(draft) } }] }));
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    await withConfig({ AI_MODEL: "mock", AI_API_KEY: "test-only", AI_BASE_URL: `http://127.0.0.1:${(server.address() as { port: number }).port}` }, async () => {
+      const extracted = await extractWorkflowReviewWithAI({ interview: source, workflow, graph: empty });
+      assert.deepEqual(extracted.review.questions, [question]);
+      assert.deepEqual(extracted.review.steps, []);
+      const resolved = await resolveWorkflowReviewWithAI({ review: extracted.review, workflow, graph: empty });
+      assert.deepEqual(resolved.patch, { nodes: [], edges: [], dataFlows: [], questions: [question.question] });
+      const preview = previewReviewGraph(empty, workflow, extracted.review);
+      assert.equal(preview.workflows.length, 1);
+      assert.equal(preview.nodes.length, 0);
+      assert.deepEqual(preview.workflows[0].reviewContext!.questions, [question]);
+      draft = { ...initial, steps: extractGroundedLocal(fact).steps, questions: [] };
+      const continued = await extractWorkflowReviewWithAI({ interview: source, workflow, graph: empty, previousReview: extracted.review, followUpAnswers: [followUp] });
+      assert.equal(continued.review.steps.length, 1);
+      assert.equal(continued.review.steps[0].evidence, fact.replace(/。$/, ""));
+      assert.equal(continued.review.questions.length, 0);
+      assert.deepEqual(continued.followUpAnswers, [followUp]);
+      assert.equal(extracted.review.steps.length, 0);
+    });
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
 });
 
 test("provider failure, timeout and malformed output do not become a local extraction or expose provider details", async () => {

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { InputReviewFlow } from "../components/InputReviewFlow";
+import { InputWorkbench } from "../components/InputWorkbench";
 import type {
   ExtractionReview,
   ExtractionReviewStep,
@@ -60,6 +61,24 @@ const review: ExtractionReview = {
   questions: [],
   warnings: [],
 };
+
+test("a zero-step input review offers clarification and saving without a workflow setup or fake flow", () => {
+  const memo = "購買の仕事を整理したいが、作業はまだ分からない。";
+  const initial: ExtractionReview = { ...review, steps: [], summary: memo,
+    questions: [{ question: "どんな情報が届きますか？", reason: "具体的な作業が未確認です。", target: "scope" }] };
+  const html = renderToStaticMarkup(createElement(InputWorkbench, {
+    projectId: "test", graph, selectedId: "note", transcripts: { note: memo },
+    drafts: { note: { workflow: { id: "note", name: "入力した話" }, review: initial,
+      sourceNotes: memo, provider: "test-ai", baseline: null, answers: {}, answerHistory: [] } },
+    onSelect: () => {}, onTranscripts: () => {}, onDraft: () => {}, onGraphApply: () => {},
+  }));
+  assert.ok(html.includes("まだ作業の流れは決めていません"));
+  assert.ok(html.includes("どんな情報が届きますか？"));
+  assert.ok(html.includes("回答を追加して読み直す"));
+  assert.ok(html.includes("3 話と確認事項を保存"));
+  assert.ok(!html.includes('aria-label="入力が作った手順"'));
+  assert.ok(!html.includes("手順がありません。本文を補足して読み直してください。"));
+});
 
 test("unsaved memo status includes clearing a saved memo, while an untouched empty entry is clean", () => {
   assert.equal(hasUnreflectedNotes({ new: "" }, {}), false);
