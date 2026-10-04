@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildExtractionContext } from "../lib/ai/context";
+import { buildExtractionContext, buildPreviousReviewContext } from "../lib/ai/context";
 import type { LensGraph } from "../lib/graph";
+import { extractGroundedLocal } from "../lib/local-review";
+import { preserveRefinements } from "../lib/refinement";
 
 function accumulated(): LensGraph {
   const graph: LensGraph = {
@@ -172,4 +174,28 @@ test("reference certainty and bounded steps survive retrieval without confirming
   assert.equal(context.workflows[0].steps.length, 6);
   assert.equal(context.workflows[0].steps[0].stepKey, "receive-shortage");
   assert.equal(graph.edges.length, 301);
+});
+
+test("a selected insertion position does not freeze an AI's combined check and approval, while an actor correction stays protected", () => {
+  const previous = extractGroundedLocal("担当が大型案件の確度を確認し、承認します。");
+  previous.steps = [{ ...previous.steps[0], stepKey: "check", name: "確度を確認し承認する", action: "確度を確認し承認する",
+    evidence: "確度を確認し、承認します", humanEdits: [
+      { field: "placement", before: null, after: { afterStepKey: "record", addedStepKeys: ["check"] }, evidence: "確度を確認し、承認します" },
+      { field: "actor", before: "担当", after: "営業部長", evidence: "営業部長が行います" },
+    ] }];
+  previous.transitions = [];
+  const context = buildPreviousReviewContext(previous);
+  assert.equal(context.steps[0].evidence, previous.steps[0].evidence);
+  assert(!("name" in context.steps[0]));
+  assert(!("result" in context.steps[0]));
+  assert.deepEqual(context.steps[0].humanEdits?.map(edit => edit.field), ["actor"]);
+  assert.equal(context.steps[0].humanPlacements?.[0].position.afterStepKey, "record");
+  const result = preserveRefinements({ ...previous, steps: [
+    { ...previous.steps[0], humanEdits: undefined, name: "確度を確認する", action: "確度を確認する", actor: "担当" },
+    { ...previous.steps[0], humanEdits: undefined, stepKey: "approve", order: 2, name: "承認する", action: "承認する", evidence: "承認します" },
+  ] }, previous);
+  assert.equal(result.steps.length, 2);
+  assert.equal(result.steps[0].action, "確度を確認する");
+  assert.equal(result.steps[0].actor, "営業部長");
+  assert.equal(result.steps[1].action, "承認する");
 });

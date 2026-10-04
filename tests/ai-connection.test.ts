@@ -16,6 +16,54 @@ import { knowledgeIndex } from "../lib/knowledge";
 const empty: LensGraph = { workflows: [], nodes: [], edges: [], dataFlows: [] };
 const workflow = { id: "new", name: "入力した話" };
 
+test("a source-backed pre-approval contradiction gets at most one AI repair, with human corrections preserved", async () => {
+  const approval = "営業部長が大型案件の確度を確認し、承認します。";
+  const before = "確認した後、迷った場合は承認する前にTeamsで営業部長へ判断を頼みます。";
+  const draft = extractGroundedLocal(approval + before);
+  draft.steps[0] = { ...draft.steps[0], stepKey: "check", action: "大型案件の確度を確認し、承認する", evidence: approval };
+  draft.steps[1] = { ...draft.steps[1], stepKey: "request", evidence: before };
+  const revised = { ...draft, steps: [
+    { ...draft.steps[0], action: "大型案件の確度を確認する" },
+    { ...draft.steps[0], stepKey: "approve", order: 2, action: "承認する", evidence: "承認します" },
+    { ...draft.steps[1], order: 3 },
+  ], transitions: [{ fromStepKey: "check", toStepKey: "request", condition: "迷った場合", evidence: before, certainty: "confirmed" }] };
+  const previous = structuredClone(draft);
+  previous.steps[0].humanEdits = [{ field: "actor", before: "営業部長", after: "部長代理", evidence: "部長代理が担当します" }];
+  for (const mode of ["corrected", "unchanged", "failure"]) {
+    const calls: string[] = [];
+    const server = createServer(async (request, response) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      const body = JSON.parse(Buffer.concat(chunks).toString());
+      const task = body.response_format.json_schema.name;
+      calls.push(task);
+      if (task === "workflow_draft_repair" && mode === "failure") {
+        response.statusCode = 503;
+        response.end('{}');
+        return;
+      }
+      response.setHeader("Content-Type", "application/json");
+      response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify(
+        task === "workflow_draft_repair" && mode === "corrected" ? revised : draft,
+      ) } }] }));
+    });
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    try {
+      await withConfig({ AI_MODEL: "mock", AI_API_KEY: "test-only", AI_BASE_URL: `http://127.0.0.1:${(server.address() as { port: number }).port}` }, async () => {
+        const result = await extractWorkflowReviewWithAI({ interview: approval + before, workflow, graph: empty, previousReview: previous });
+        assert.deepEqual(calls, ["workflow_draft", "workflow_draft_repair"]);
+        assert.equal(result.review.steps[0].actor, "部長代理");
+        assert.equal(result.review.steps.length, mode === "corrected" ? 3 : 2);
+        if (mode === "corrected") assert.equal(result.review.steps[0].action, "大型案件の確度を確認する");
+        else assert(result.review.warnings.some(w => w.includes("確認と承認")));
+      });
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>(resolve => server.close(() => resolve()));
+    }
+  }
+});
+
 test("a short addition sends neighboring work as context without treating it as evidence for new facts", async () => {
   const source = '営業企画担当がExcelで「価格案」を保存する。';
   const existingFact = 'TeamsはEntra IDのSSOを使います。';

@@ -24,7 +24,7 @@ export async function callCodexModel<T>(args: {
 }): Promise<T> {
   const started = Date.now(),
     callId = randomUUID();
-  const task = ["asset_resolution", "workflow_draft", "reference_question_reading"].includes(args.task ?? "")
+  const task = ["asset_resolution", "workflow_draft", "workflow_draft_repair", "reference_question_reading"].includes(args.task ?? "")
     ? args.task : "structured_inference";
   const record = (phase: string, value?: number) => {
     if (process.env.AI_DIAGNOSTICS !== "1") return;

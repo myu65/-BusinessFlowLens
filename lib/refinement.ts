@@ -190,10 +190,20 @@ export function preserveRefinements(
         const matches = previous.steps.filter(match);
         return matches.length === 1 ? matches[0] : undefined;
       };
+      const literal = (value: string) => value.normalize("NFKC").replace(/[\s「」『』]/g, "");
+      // A split check keeps the protected combined step's identity. An older
+      // unedited check with the new name must not steal its human corrections.
+      const protectedSplit = previous.steps.find(item => item.stepKey === step.stepKey && item.humanEdits?.length &&
+        /確認(?:し|して|した後|したら).{0,24}承認(?:する|します|し(?=[、。]))/.test(item.action) &&
+        /確認/.test(step.action) && !/承認(?:する|します|し(?=[、。]))/.test(step.action) &&
+        literal(item.evidence) && (literal(item.evidence).includes(literal(step.evidence)) ||
+          literal(step.evidence).includes(literal(item.evidence))));
       const prior =
+        protectedSplit ??
         uniquePrevious(item => item.name === step.name) ??
         uniquePrevious(item => item.action === step.action) ??
-        (step.evidence.trim() ? uniquePrevious(item => item.evidence === step.evidence) : undefined) ??
+        (step.evidence.trim() && review.steps.filter(item => item.evidence === step.evidence).length === 1
+          ? uniquePrevious(item => item.evidence === step.evidence) : undefined) ??
         previous.steps.find((item) => item.stepKey === step.stepKey);
       if (!prior) return step;
       if (prior.stepKey !== step.stepKey && protectedDetails.has(prior.stepKey))

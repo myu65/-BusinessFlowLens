@@ -191,6 +191,17 @@ export function validateAITransitions<T extends ExtractionReview>(
     const handover = evidence && original.includes(evidence) &&
       isHandoff(evidence) && isHandoff(target?.action ?? "");
     const targetEvidence = target && sourceEvidence(source, target.evidence);
+    const preApprovalEvidence = sourceEvidence(source, t.evidence) ?? targetEvidence;
+    const approves = !step?.meaning?.halt &&
+      !/承認(?:しない|しません|しなかった|していない|していません)/.test(step?.action ?? "") &&
+      /承認(?:する|します)[。]?\s*$|確認(?:し|して|した後|したら).{0,24}承認(?:し|する)/.test(step?.action ?? "");
+    if (approves && preApprovalEvidence && /承認(?:する|の)?前/.test(preApprovalEvidence) &&
+      !/前(?:ではない|ではなく|ではありません)|不明|分から|未確認/.test(preApprovalEvidence)) {
+      warnings.push(`${step!.name}：承認前の作業が承認の後につながるため、この線を保留しました。確認と承認を分けて確かめられます。`);
+      questions.push({ question: `${step!.name}の確認と承認を分け、承認前の作業をどこから始めますか？`,
+        reason: `原文で承認前と説明されています。接続候補の根拠：${preApprovalEvidence}`, target: "rule" });
+      return false;
+    }
     // A direct answer may omit the question's "after approval is held" prefix.
     // Use that scope only for the sole grounded hold and the answer's first
     // stated response. The question is not a fact; retain an inferred edge
