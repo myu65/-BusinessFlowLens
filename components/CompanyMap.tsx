@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useRef, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import type { LensGraph } from "@/lib/graph";
 import { knowledgeIndex, type KnowledgeScope } from "@/lib/knowledge";
 import { companyConnections, overviewPath } from "@/lib/knowledge-guide";
@@ -24,7 +24,7 @@ export function CompanyMap({
   const activities = index.activities.filter((a) =>
     a.rows.some((r) => visible.has(r.workflow.id)),
   );
-  const [selectedId, setSelected] = useState("");
+  const [chosenId, setSelected] = useState<string | null>(null);
   const detail = useRef<HTMLDivElement>(null);
   const connections = useMemo(
     () => companyConnections(graph, workflowIds),
@@ -42,6 +42,7 @@ export function CompanyMap({
     ? [path[0].sourceId, ...path.map((e) => e.targetId)]
     : [];
   const others = activities.filter((a) => !pathIds.includes(a.id));
+  const selectedId = chosenId === null ? pathIds[0] ?? activities[0]?.id ?? "" : chosenId;
   const selected = activities.find((a) => a.id === selectedId);
   const rows = selected?.rows.filter((r) => visible.has(r.workflow.id)) ?? [];
   const systems = [
@@ -53,10 +54,12 @@ export function CompanyMap({
       ),
     ).values(),
   ];
+  const data = [...new Map(rows.flatMap(r => r.assets.filter(n => n.kind === "data").map(n => [n.id, n] as const))).values()];
+  const departments = [...new Set(rows.flatMap(r => r.departments))];
   const choose = (id: string) => {
     setSelected(id);
     requestAnimationFrame(() =>
-      detail.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }),
+      window.matchMedia("(max-width: 900px)").matches && detail.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }),
     );
   };
   const card = (id: string, compact = false) => {
@@ -88,8 +91,7 @@ export function CompanyMap({
           <small>話からの整理案</small>
         )}
         <span>
-          {rows.length}業務 · {departments[0] ?? actors[0] ?? "担当は未確認"}
-          {departments.length > 1 ? ` ほか${departments.length - 1}部署` : ""}
+          {rows.length}業務 · {departments.length ? `${departments.length}部署が分かっています` : actors[0] ?? "担当は未確認"}
         </span>
       </button>
     );
@@ -186,8 +188,10 @@ export function CompanyMap({
           </div>
         </>
       )}
+      <div className="company-map-body">
       {!!others.length && (
         <>
+          <aside className="company-other-pane">
           <h3 className="company-other-heading">
             {path.length ? "会社を構成する、ほかの活動" : "会社の活動"}
           </h3>
@@ -196,6 +200,7 @@ export function CompanyMap({
               <div key={a.id}>{card(a.id, true)}</div>
             ))}
           </div>
+          </aside>
         </>
       )}
       {selected && (
@@ -222,7 +227,10 @@ export function CompanyMap({
             </section>
             <section className="company-detail-center">
               <h4>ここで行う仕事</h4>
-              <p>{selected.description}</p>
+              {selected.description && !selected.description.startsWith("入力された話をまとめる整理案") && <p>{selected.description}</p>}
+              <div className="company-activity-work-examples" aria-label="この活動の仕事の例">
+                {rows.slice(0, 4).map(r => <button key={r.workflow.id} onClick={() => onWorkflow(r.workflow.id)}>{r.workflow.name} →</button>)}
+              </div>
               {selected.evidence && (
                 <details>
                   <summary>活動のまとまりの根拠</summary>
@@ -236,7 +244,7 @@ export function CompanyMap({
               )}
               <p>
                 担当：
-                {[...new Set(rows.flatMap((r) => r.departments))].join(" / ") ||
+                {departments.slice(0, 3).join(" / ") ||
                   [
                     ...new Set(
                       rows.flatMap((r) =>
@@ -248,6 +256,7 @@ export function CompanyMap({
                     ),
                   ].join(" / ") ||
                   "担当は未確認"}
+                {rows.some(r => !r.departments.length) && departments.length > 0 && "（部署は一部未確認）"}
               </p>
               <p>
                 {rows.length}業務 ·{" "}
@@ -258,29 +267,6 @@ export function CompanyMap({
                 }
                 種類の仕事
               </p>
-              <p className="company-tools-label">使うシステム・道具</p>
-              <div
-                className="company-system-chips"
-                aria-label="この活動を支える道具"
-              >
-                {systems.slice(0, 4).map((n) => (
-                  <button key={n.id} onClick={() => onSystem?.(n.id)}>
-                    {n.label}
-                  </button>
-                ))}
-              </div>
-              {systems.length > 4 && (
-                <details>
-                  <summary>ほか{systems.length - 4}道具も見る</summary>
-                  <div className="company-system-chips">
-                    {systems.slice(4).map((n) => (
-                      <button key={n.id} onClick={() => onSystem?.(n.id)}>
-                        {n.label}
-                      </button>
-                    ))}
-                  </div>
-                </details>
-              )}
               {onActivity && (
                 <button
                   className="kg-primary"
@@ -304,8 +290,15 @@ export function CompanyMap({
               {related("target")}
             </section>
           </div>
+          <div className="company-activity-resources">
+            <section><h4>この活動で使う道具・システム</h4><div className="company-system-chips" aria-label="この活動を支える道具">{systems.slice(0, 6).map(n => <button key={n.id} onClick={() => onSystem?.(n.id)}>{n.label}</button>)}{!systems.length && <span>道具は未確認</span>}</div>
+              {systems.length > 6 && <small>ほか{systems.length - 6}道具は「この活動の仕事」で確認できます。</small>}
+            </section>
+            <section><h4>この活動で扱う情報</h4><div className="company-info-chips">{data.slice(0, 6).map(n => <span key={n.id}>{n.label}</span>)}{!data.length && <span>情報は未確認</span>}</div>{data.length > 6 && <small>ほか{data.length - 6}情報は各仕事の中で確認できます。</small>}</section>
+          </div>
         </div>
       )}
+      </div>
     </section>
   );
 }

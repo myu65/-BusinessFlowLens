@@ -1,6 +1,5 @@
 "use client";
 import React, {
-  Fragment,
   useEffect,
   useMemo,
   useRef,
@@ -29,15 +28,16 @@ import {
   transcriptsForSave,
 } from "@/lib/review-workbench";
 import { InputReviewFlow } from "./InputReviewFlow";
-import { InputStripConnection } from "./InputStripConnection";
-import { reviewStripConnection } from "@/lib/review-paths";
+import { InputFlowCanvas } from "./InputFlowCanvas";
+import { InputRelations } from "./InputRelations";
+import { INPUT_CANVAS_PAGE_SIZE } from "@/lib/input-canvas";
 import { aiStatusLabel, type AIConfigurationStatus } from "@/lib/ai/status";
 import { reviewedWorkflowName } from "@/lib/input-knowledge";
 import { InputOrganization } from "./InputOrganization";
 import { InputSystemDependencies } from "./InputSystemDependencies";
 import { createQuestionReferenceFinder, referenceAnswer } from "@/lib/question-evidence";
 
-const REVIEW_PAGE_SIZE = 3;
+const REVIEW_PAGE_SIZE = INPUT_CANVAS_PAGE_SIZE;
 
 type AdvancedActions = {
   draft: InputDraft;
@@ -123,7 +123,11 @@ export function InputWorkbench({
   const [questionsOpen, setQuestionsOpen] = useState(false);
   const [questionDestination, setQuestionDestination] = useState("");
   const questionsRef = useRef<HTMLDetailsElement>(null);
-  const [mobilePane, setMobilePane] = useState<"note" | "flow">("note");
+  const [mobilePane, setMobilePane] = useState<"note" | "flow" | "details">("note");
+  const [workbenchTab, setWorkbenchTab] = useState<"flow" | "information" | "systems" | "history">("flow");
+  const [memoFilter, setMemoFilter] = useState<"all" | "drafts" | "questions">("all");
+  const [memoPage, setMemoPage] = useState(0);
+  const detailPaneRef = useRef<HTMLElement>(null);
   const [noteQuery, setNoteQuery] = useState("");
   const [addition, setAddition] = useState("");
   const [target, setTarget] = useState("");
@@ -180,6 +184,7 @@ export function InputWorkbench({
     setEdit(null);
     setError("");
     setAdvanced(false);
+    setWorkbenchTab("flow");
     setQuestionsOpen(false);
     setTarget("");
     setAddition("");
@@ -188,6 +193,7 @@ export function InputWorkbench({
   useEffect(() => {
     if (!questionDestination || questionDestination !== key) return;
     setQuestionsOpen(true);
+    setMobilePane("flow");
     setQuestionDestination("");
     requestAnimationFrame(() => questionsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }, [key, questionDestination]);
@@ -281,9 +287,8 @@ export function InputWorkbench({
       (n) => n.canonicalKey.split(":").at(-1) === s.stepKey,
     );
     if (p) onFocusStep?.(workflow!.id, p.id);
-    requestAnimationFrame(() =>
-      focusRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
-    );
+    if (window.matchMedia("(max-width: 900px)").matches) setMobilePane("details");
+    requestAnimationFrame(() => detailPaneRef.current?.scrollTo({ top: 0 }));
   };
   async function organize(
     answers = draft?.answerHistory ??
@@ -344,6 +349,7 @@ export function InputWorkbench({
       };
       onDraft(requestKey, next);
       setMobilePane("flow");
+      setWorkbenchTab("flow");
       if (requestKey === latest.current.key) {
         if (!next.review.steps.length) setQuestionsOpen(true);
         const changes = diffReviews(before, next.review);
@@ -496,171 +502,7 @@ export function InputWorkbench({
       .filter((a) => a.answer.trim());
     await organize([...draft.answerHistory, ...answers]);
   }
-  return (
-    <section
-      className="input-workbench"
-      aria-label="話を入力して構造を育てる"
-      data-pane={mobilePane}
-    >
-      <header className="page-header">
-        <div>
-          <h1>仕事の話を、流れにする</h1>
-          <p>
-            まずは知っていることをそのまま書いてください。流れを見ながら、足したり直したりできます。
-          </p>
-        </div>
-      </header>
-      <aside
-        className="input-ai-status"
-        data-mode={aiConfig?.configured ? aiResponse : "local"}
-        aria-label="話を整理する方法"
-      >
-        <div>
-          <strong>
-            {aiConfigError
-              ? "AI設定を確認できません"
-              : aiStatusLabel(aiConfig, aiResponse)}
-          </strong>
-          <p>
-            {aiConfig?.configured
-              ? aiResponse === "success"
-                ? "AIが読み取った候補です。原文と照らして、違うところを直してください。"
-                : aiResponse === "failure"
-                  ? "メモと前の候補は残っています。接続を確認して、もう一度整理できます。"
-                  : aiResponse === "unusable"
-                    ? "AIから応答はありましたが、候補として表示できませんでした。メモと前の候補を保っています。再試行できます。"
-                  : "話を整理するときにAIへ送ります。この画面を開いてからの応答は未確認です。保存した構造の整理方法は、流れの上に表示します。"
-              : aiConfigError
-                ? "メモは書けます。整理を実行した結果で、使われた方法を確認してください。"
-                : aiConfig
-                  ? "今は書かれた文を簡易的に並べます。曖昧な話の意味や自由な補足の理解は、AI接続後に確かめます。"
-                  : "メモを書きながら、整理方法の確認を待てます。"}
-          </p>
-        </div>
-        <details>
-          <summary>整理方法と設定</summary>
-          {aiConfig?.configured ? (
-            <p>
-              設定したモデル：{aiConfig.model}
-              {aiConfig.runtime === "codex"
-                ? "（このPCのCodexログインを利用）"
-                : ""}
-              。AIの応答成功と、内容が正しいかの確認は別です。
-            </p>
-          ) : (
-            <p>
-              管理者がAIの接続先・モデル・認証を設定すると、話の意味をAIで整理できます。
-            </p>
-          )}
-          <p>
-            接続に失敗した場合、簡易整理へ自動で切り替えません。元のメモを保ってエラーを表示します。
-          </p>
-        </details>
-      </aside>
-      {busy && (
-        <aside className="input-processing" role="status">
-          <strong>
-            {operation === "save"
-              ? "道具・情報を既存の構造と照合して保存しています"
-              : "話を読み取り、人・道具・情報の流れを整理しています"}
-          </strong>
-          <span aria-hidden="true"> · {waitingSeconds}秒</span>
-          <p>メモと前の候補を保ったまま、結果を待っています。</p>
-          {waitingSeconds >= 20 && operation === "organize" && aiConfig?.configured && (
-            <p>AIの応答を待っています。結果が届いたら、保存前に内容を確かめられます。</p>
-          )}
-        </aside>
-      )}
-      <nav className="input-mobile-tabs" aria-label="メモと流れの表示切替">
-        <button
-          aria-pressed={mobilePane === "note"}
-          onClick={() => setMobilePane("note")}
-        >
-          1 話を書く
-        </button>
-        <button
-          aria-pressed={mobilePane === "flow"}
-          onClick={() => setMobilePane("flow")}
-        >
-          2 流れを確かめる{draft ? " · 保存前" : ""}
-        </button>
-      </nav>
-      <div className="input-workbench-grid">
-        <section className="input-note-pane">
-          <div className="input-note-heading">
-            <h2>
-              <span className="input-section-number">1</span> 話を書く
-            </h2>
-            {key !== NEW_MEMO_ID && (
-              <button
-                className="button-secondary"
-                disabled={busy}
-                onClick={() => {
-                  onSelect(NEW_MEMO_ID);
-                  setMobilePane("note");
-                }}
-              >
-                新しい話を書く
-              </button>
-            )}
-          </div>
-          <p className="input-note-context">
-            {key === NEW_MEMO_ID
-              ? "名前や業務の範囲は、後から決められます。"
-              : workflow?.name}
-          </p>
-          {(graph.workflows.length > 0 ||
-            Object.keys(drafts).some((id) => id !== key)) && (
-            <details className="input-switch-note">
-              <summary>保存した話・下書きに戻る</summary>
-              <label className="kg-edit-field">
-                話を探す
-                <input
-                  value={noteQuery}
-                  onChange={(e) => setNoteQuery(e.target.value)}
-                  placeholder="仕事の名前で検索"
-                />
-              </label>
-              <label className="kg-edit-field">
-                話を追加する場所
-                <select
-                  value={key}
-                  onChange={(e) => onSelect(e.target.value)}
-                  disabled={busy}
-                >
-                  <option value={NEW_MEMO_ID}>
-                    新しい話から始める（業務名は後から）
-                  </option>
-                  {draft && !saved && key !== NEW_MEMO_ID && (
-                    <option value={key}>{draft.workflow.name} · 保存前</option>
-                  )}
-                  {saved && <option value={saved.id}>{saved.name}</option>}
-                  {graph.workflows
-                    .filter(
-                      (w) => w.id !== saved?.id && w.name.includes(noteQuery),
-                    )
-                    .slice(0, 20)
-                    .map((w) => (
-                      <option key={w.id} value={w.id}>
-                        {w.name}
-                      </option>
-                    ))}
-                </select>
-              </label>
-              <small>検索に合う話を20件まで表示します。</small>
-              {Object.entries(drafts)
-                .filter(([id]) => id !== key)
-                .map(([id, d]) => (
-                  <button
-                    key={id}
-                    className="button-secondary"
-                    onClick={() => onSelect(id)}
-                  >
-                    保存前の候補へ戻る：{d.workflow.name}
-                  </button>
-                ))}
-            </details>
-          )}
+  const memoComposer = (<>
           <label className="kg-edit-field input-main-note">
             仕事についてのメモ
             <textarea
@@ -698,370 +540,10 @@ export function InputWorkbench({
               例文を入れて試す
             </button>
           )}
-          {workflow && (
-            <details>
-              <summary>業務名・表示する状態を整える（任意）</summary>
-              <label className="kg-edit-field">
-                業務名
-                <input
-                  value={workflow.name}
-                  onChange={(e) =>
-                    onDraft(key, {
-                      ...ensureDraft(review!),
-                      workflow: { ...workflow, name: e.target.value },
-                    })
-                  }
-                />
-              </label>
-              <label className="kg-edit-field">
-                表示する状態
-                <select
-                  value={workflow.scenario ?? "current"}
-                  onChange={(e) =>
-                    onDraft(key, {
-                      ...ensureDraft(review!),
-                      workflow: {
-                        ...workflow,
-                        scenario: e.target.value as Workflow["scenario"],
-                      },
-                    })
-                  }
-                >
-                  <option value="current">現在の仕事</option>
-                  <option value="future">改善後の案</option>
-                  <option value="alternative">別の案</option>
-                </select>
-              </label>
-              {saved && (
-                <button
-                  onClick={() => {
-                    const w = {
-                      ...saved,
-                      id: `note-${crypto.randomUUID()}`,
-                      name: `${saved.name}（将来案）`,
-                      familyId: saved.familyId ?? saved.id,
-                      basedOnWorkflowId: saved.id,
-                      scenario: "future" as const,
-                    };
-                    onDraft(w.id, {
-                      ...ensureDraft(review!),
-                      workflow: w,
-                      baseline: review,
-                    });
-                    onTranscripts({ ...transcripts, [w.id]: memo });
-                    onSelect(w.id);
-                  }}
-                >
-                  この構造から将来案を作る
-                </button>
-              )}
-            </details>
-          )}
-          {error && (
-            <p role="alert" className="error-message">
-              {error}
-            </p>
-          )}
-          {revisions.length > 0 && (
-            <details>
-              <summary>保存した原文と構造の履歴 · {revisions.length}回</summary>
-              {revisions.slice(0, 5).map((r) => (
-                <button
-                  key={r.revisionNumber}
-                  onClick={async () => {
-                    try {
-                      const requestKey = key;
-                      const response = await fetch(
-                        `/api/workflow-revisions?projectId=${encodeURIComponent(projectId)}&revisionId=${r.id}`,
-                      );
-                      const p = await response.json();
-                      if (!response.ok || !p.revision)
-                        throw new Error(p.error ?? "履歴が見つかりません");
-                      if (requestKey === latest.current.key)
-                        setRevisionDetail(p.revision);
-                    } catch (e) {
-                      setError(
-                        e instanceof Error ? e.message : "履歴を読み込めません",
-                      );
-                    }
-                  }}
-                >
-                  v{r.revisionNumber} · {r.createdAt} · {r.summary} を確認する
-                </button>
-              ))}
-              {revisionDetail && (
-                <article aria-label="保存時点の原文と構造">
-                  <h3>保存時点 v{revisionDetail.revisionNumber} の原文</h3>
-                  <pre className="input-source-history">
-                    {revisionDetail.sourceNotes}
-                  </pre>
-                  <p>当時の構造：{revisionDetail.review.steps.length}手順</p>
-                  {revisionDetail.review.steps.slice(0, 7).map((s) => (
-                    <p key={s.stepKey}>
-                      {s.order}. {s.name} →{" "}
-                      {s.meaning?.result || "結果は未確認"}
-                    </p>
-                  ))}
-                  {revisionDetail.followUpAnswers.map((a, i) => (
-                    <p key={i}>
-                      補足：{a.question} / {a.answer}
-                    </p>
-                  ))}
-                  <button onClick={() => setRevisionDetail(null)}>
-                    履歴を閉じる
-                  </button>
-                </article>
-              )}
-            </details>
-          )}
-        </section>
-        <section className="input-structure-pane">
-          <div className="input-structure-header">
-            <div>
-              <h2>
-                <span className="input-section-number">2</span> 流れを確かめる
-              </h2>
-              <p>
-                {review
-                  ? `${steps.length ? `${steps.length}手順` : "まだ作業は決めていません"} · ${draft ? "保存前の候補" : "保存済み"}`
-                  : "入力すると、人・道具・情報のつながりが見えます。"}
-              </p>
-            </div>
-            {review && (
-              <button
-                className="button-primary"
-                disabled={
-                  !draft ||
-                  busy ||
-                  stale ||
-                  !!edit ||
-                  !draft.workflow.name.trim()
-                }
-                onClick={save}
-              >
-                {busy
-                  ? operation === "save" ? "道具・情報を照合して保存中…" : "話を整理中…"
-                  : edit
-                    ? "訂正を反映してから保存"
-                    : draft
-                      ? review.steps.length ? "3 この流れを保存" : "3 話と確認事項を保存"
-                      : "保存済み"}
-              </button>
-            )}
-          </div>
-          {review?.extraction && (
-            <p className="input-extraction-origin">
-              この構造の整理：
-              {review.extraction.method === "ai"
-                ? `${review.extraction.model ?? review.extraction.provider}（AI）`
-                : "簡易整理"}
-              {review.steps.some((s) => s.humanEdits?.length) ||
-              review.organization?.origin === "human" ||
-              review.systemDependencies?.some(d => d.origin === "human") ||
-              review.handoffs?.some((h) => h.origin === "human") ||
-              review.incomingHandoffs?.some((h) => h.origin === "human")
-                ? " · 人の訂正を含む"
-                : ""}
-            </p>
-          )}
-          {review && (
-            <><InputOrganization review={review} busy={busy} onChange={update} />
-            <InputSystemDependencies key={key} review={review} busy={busy} onChange={update} /></>
-          )}
-          {error && (
-            <p role="alert" className="error-message input-mobile-error">
-              {error}
-            </p>
-          )}
-          {!draft && !stale && lastSavedId === workflow?.id && (
-            <p role="status" className="input-saved-notice">
-              保存しました。原文と流れが、会社の全体像にも加わっています。
-            </p>
-          )}
-          {stale && (
-            <p role="status" className="input-stale">
-              メモに変更があります。「変更を流れに反映」で、表示中の流れを更新してください。
-            </p>
-          )}
-          {!review && (
-            <div
-              className="input-empty-structure"
-              aria-label="入力後の見え方の例"
-            >
-              <span className="input-example-label">
-                例えば、こんな流れが見えます
-              </span>
-              <ol className="input-example-flow">
-                <li>
-                  <small>メール</small>
-                  <strong>注文が届く</strong>
-                  <span>注文の内容</span>
-                </li>
-                <li>
-                  <small>担当者 · Excel</small>
-                  <strong>内容を確認する</strong>
-                  <span>確認した内容</span>
-                </li>
-                <li>
-                  <small>担当者 · SAP</small>
-                  <strong>受注を入力する</strong>
-                  <span>次の仕事へ</span>
-                </li>
-              </ol>
-              <p>
-                「誰が」「何を使って」「何を決めるか」を、手順ごとに確かめられます。
-              </p>
-              <div className="input-example-hint">
-                <strong>すべてを知っていなくても大丈夫</strong>
-                <p>
-                  書かれていない担当や判断は「未確認」に。流れを見てから補足できます。
-                </p>
-              </div>
-            </div>
-          )}
-          {review && selected && (
-            <>
-              {draft && diff && (
-                <details className="input-diff">
-                  <summary>
-                    今回の反映：追加 {diff.added.length}件 · 訂正{" "}
-                    {diff.changed.length}件 · 除外 {diff.removed.length}件
-                  </summary>
-                  <div className="input-diff-items">
-                    {(diff.removedQuestions.length > 0 || diff.addedQuestions.length > 0) && (
-                      <p>確認事項：{(draft.baseline ?? currentReview)?.questions.length ?? 0}件 → {review.questions.length}件</p>
-                    )}
-                    {diff.added.slice(0, 5).map((s) => (
-                      <button key={s.stepKey} onClick={() => choose(s)}>
-                        ＋ {s.name}
-                      </button>
-                    ))}
-                    {diff.changed.slice(0, 5).map((c) => (
-                      <button
-                        key={c.after.stepKey}
-                        onClick={() => choose(c.after)}
-                      >
-                        変更：{c.after.name}
-                        <small>{c.details.slice(0, 3).join(" / ")}</small>
-                      </button>
-                    ))}
-                    {diff.removed.slice(0, 5).map((s) => (
-                      <p key={s.stepKey}>除外：{s.name}</p>
-                    ))}
-                  </div>
-                  <details>
-                    <summary>接続の変化と全変更件数</summary>
-                    {diff.addedConnections.map((s, i) => (
-                      <p key={`a${i}`}>＋ {s}</p>
-                    ))}
-                    {diff.removedConnections.map((s, i) => (
-                      <p key={`r${i}`}>− {s}</p>
-                    ))}
-                    {diff.removedQuestions.map((q, i) => <p key={`rq${i}`}>候補から外れた確認事項：{q.question}</p>)}
-                    {diff.addedQuestions.map((q, i) => <p key={`aq${i}`}>新しい確認事項：{q.question}</p>)}
-                    <p>
-                      {diff.added.length +
-                        diff.changed.length +
-                        diff.removed.length}
-                      手順に変化。最初の5件ずつを表示しています。
-                    </p>
-                  </details>
-                </details>
-              )}
-              <nav
-                ref={stripRef}
-                className="input-step-strip"
-                aria-label="入力が作った手順"
-              >
-                {steps
-                  .slice(
-                    stepPage * REVIEW_PAGE_SIZE,
-                    (stepPage + 1) * REVIEW_PAGE_SIZE,
-                  )
-                  .map((s, i, visible) => (
-                    <Fragment key={s.stepKey}>
-                      <button
-                        key={s.stepKey}
-                        className={
-                          draft &&
-                          diff?.added.some((n) => n.stepKey === s.stepKey)
-                            ? "input-step--added"
-                            : draft &&
-                                diff?.changed.some(
-                                  (n) => n.after.stepKey === s.stepKey,
-                                )
-                              ? "input-step--changed"
-                              : ""
-                        }
-                        aria-pressed={selected.stepKey === s.stepKey}
-                        onClick={() => choose(s)}
-                      >
-                        <small>
-                          {s.order} ·{" "}
-                          {draft &&
-                          diff?.added.some((n) => n.stepKey === s.stepKey)
-                            ? "追加 · "
-                            : draft &&
-                                diff?.changed.some(
-                                  (n) => n.after.stepKey === s.stepKey,
-                                )
-                              ? "訂正 · "
-                              : ""}
-                          {s.meaning?.halt
-                            ? "停止・保留"
-                            : s.actor || s.executingSystem || "担当は未確認"}
-                        </small>
-                        <strong>{s.name}</strong>
-                        {s.meaning?.condition && (
-                          <span>条件：{s.meaning.condition}</span>
-                        )}
-                      </button>
-                      {i < visible.length - 1 && (
-                        <InputStripConnection
-                          connection={reviewStripConnection(review, s.stepKey, visible[i + 1].stepKey)}
-                          choose={choose}
-                        />
-                      )}
-                    </Fragment>
-                  ))}
-              </nav>
-              {draft && (
-                <p className="input-generation-note">
-                  {draft.provider.startsWith("local")
-                    ? "簡易抽出による候補です。"
-                    : draft.provider === "human-edit"
-                      ? "人が補足・訂正した候補です。"
-                      : "AIが整理した候補です。"}
-                  手順を選んで、話と合っているか確かめてください。
-                </p>
-              )}
-              {steps.length > REVIEW_PAGE_SIZE && (
-                <div className="kg-pagination">
-                  <button
-                    disabled={stepPage === 0}
-                    onClick={() =>
-                      choose(steps[(stepPage - 1) * REVIEW_PAGE_SIZE])
-                    }
-                  >
-                    前の3手順
-                  </button>
-                  <span>
-                    {stepPage * REVIEW_PAGE_SIZE + 1}–
-                    {Math.min(steps.length, (stepPage + 1) * REVIEW_PAGE_SIZE)}{" "}
-                    / {steps.length}
-                  </span>
-                  <button
-                    disabled={(stepPage + 1) * REVIEW_PAGE_SIZE >= steps.length}
-                    onClick={() =>
-                      choose(steps[(stepPage + 1) * REVIEW_PAGE_SIZE])
-                    }
-                  >
-                    次の3手順
-                  </button>
-                </div>
-              )}
+  </>);
+  const stepDetail = review && selected ? (<>
               <div ref={focusRef} className="input-focus-anchor">
-                <InputReviewFlow
+                {!edit && <InputReviewFlow
                   review={review}
                   selected={selected}
                   graph={preview}
@@ -1069,12 +551,14 @@ export function InputWorkbench({
                   workflowId={workflow!.id}
                   busy={busy}
                   choose={choose}
-                  onOverview={() =>
-                    stripRef.current?.scrollIntoView({
+                  onOverview={() => {
+                    setMobilePane("flow");
+                    setWorkbenchTab("flow");
+                    requestAnimationFrame(() => stripRef.current?.scrollIntoView({
                       behavior: "smooth",
                       block: "start",
-                    })
-                  }
+                    }));
+                  }}
                   onEdit={() => {
                     setEdit(structuredClone(selected));
                     setToolText(null);
@@ -1087,7 +571,7 @@ export function InputWorkbench({
                     if (step) onFocusStep?.(id, step.id);
                     onSelect(inputKeyForWorkflow(drafts, id));
                   }}
-                />
+                />}
                 {selectedChange && selectedChange.details.length > 0 && (
                   <details className="input-review-changes" key={selectedChange.after.stepKey}>
                     <summary>この手順はどう変わったか · {selectedChange.details.length}項目</summary>
@@ -1485,6 +969,476 @@ export function InputWorkbench({
                   </button>
                 </details>
               )}
+
+  </>) : (<p className="input-detail-empty">手順を選ぶと、誰が何をし、何が決まるかをここで確認できます。</p>);
+  const savedHistory = (<>
+          {revisions.length > 0 && (
+            <details>
+              <summary>保存した原文と構造の履歴 · {revisions.length}回</summary>
+              {revisions.slice(0, 5).map((r) => (
+                <button
+                  key={r.revisionNumber}
+                  onClick={async () => {
+                    try {
+                      const requestKey = key;
+                      const response = await fetch(
+                        `/api/workflow-revisions?projectId=${encodeURIComponent(projectId)}&revisionId=${r.id}`,
+                      );
+                      const p = await response.json();
+                      if (!response.ok || !p.revision)
+                        throw new Error(p.error ?? "履歴が見つかりません");
+                      if (requestKey === latest.current.key)
+                        setRevisionDetail(p.revision);
+                    } catch (e) {
+                      setError(
+                        e instanceof Error ? e.message : "履歴を読み込めません",
+                      );
+                    }
+                  }}
+                >
+                  v{r.revisionNumber} · {r.createdAt} · {r.summary} を確認する
+                </button>
+              ))}
+              {revisionDetail && (
+                <article aria-label="保存時点の原文と構造">
+                  <h3>保存時点 v{revisionDetail.revisionNumber} の原文</h3>
+                  <pre className="input-source-history">
+                    {revisionDetail.sourceNotes}
+                  </pre>
+                  <p>当時の構造：{revisionDetail.review.steps.length}手順</p>
+                  {revisionDetail.review.steps.slice(0, 7).map((s) => (
+                    <p key={s.stepKey}>
+                      {s.order}. {s.name} →{" "}
+                      {s.meaning?.result || "結果は未確認"}
+                    </p>
+                  ))}
+                  {revisionDetail.followUpAnswers.map((a, i) => (
+                    <p key={i}>
+                      補足：{a.question} / {a.answer}
+                    </p>
+                  ))}
+                  <button onClick={() => setRevisionDetail(null)}>
+                    履歴を閉じる
+                  </button>
+                </article>
+              )}
+            </details>
+          )}
+    {!revisions.length && <p className="input-unconfirmed">保存すると、原文と構造の履歴がここに残ります。</p>}
+  </>);
+  const noteEntries = [
+    ...Object.entries(drafts).filter(([id]) => !graph.workflows.some(w => w.id === id)).map(([id, d]) => ({ id, name: d.workflow.name, pending: true, questions: d.review.questions.length, text: transcripts[id] ?? d.sourceNotes })),
+    ...[...graph.workflows].reverse().map(w => ({ id: w.id, name: drafts[w.id]?.workflow.name ?? w.name, pending: !!drafts[w.id], questions: (drafts[w.id]?.review ?? w.reviewContext)?.questions?.length ?? 0, text: transcripts[w.id] ?? "" })),
+  ].filter(n => (memoFilter !== "drafts" || n.pending) && (memoFilter !== "questions" || n.questions > 0) && `${n.name} ${n.text}`.includes(noteQuery));
+  const notePage = Math.max(0, Math.min(memoPage, Math.ceil(noteEntries.length / 6) - 1));
+  return (
+    <section
+      className="input-workbench"
+      aria-label="話を入力して構造を育てる"
+      data-pane={mobilePane}
+    >
+      <div className="input-workbench-heading">
+      <header className="page-header">
+        <div>
+          <h1>仕事の話を、流れにする</h1>
+          <p>
+            まずは知っていることをそのまま書いてください。流れを見ながら、足したり直したりできます。
+          </p>
+        </div>
+      </header>
+      <aside
+        className="input-ai-status"
+        data-mode={aiConfig?.configured ? aiResponse : "local"}
+        aria-label="話を整理する方法"
+      >
+        <div>
+          <strong>
+            {aiConfigError
+              ? "AI設定を確認できません"
+              : aiStatusLabel(aiConfig, aiResponse)}
+          </strong>
+          <p>
+            {aiConfig?.configured
+              ? aiResponse === "success"
+                ? "AIが読み取った候補です。原文と照らして、違うところを直してください。"
+                : aiResponse === "failure"
+                  ? "メモと前の候補は残っています。接続を確認して、もう一度整理できます。"
+                  : aiResponse === "unusable"
+                    ? "AIから応答はありましたが、候補として表示できませんでした。メモと前の候補を保っています。再試行できます。"
+                  : "話を整理するときにAIへ送ります。この画面を開いてからの応答は未確認です。保存した構造の整理方法は、流れの上に表示します。"
+              : aiConfigError
+                ? "メモは書けます。整理を実行した結果で、使われた方法を確認してください。"
+                : aiConfig
+                  ? "今は書かれた文を簡易的に並べます。曖昧な話の意味や自由な補足の理解は、AI接続後に確かめます。"
+                  : "メモを書きながら、整理方法の確認を待てます。"}
+          </p>
+        </div>
+        <details>
+          <summary>整理方法と設定</summary>
+          {aiConfig?.configured ? (
+            <p>
+              設定したモデル：{aiConfig.model}
+              {aiConfig.runtime === "codex"
+                ? "（このPCのCodexログインを利用）"
+                : ""}
+              。AIの応答成功と、内容が正しいかの確認は別です。
+            </p>
+          ) : (
+            <p>
+              管理者がAIの接続先・モデル・認証を設定すると、話の意味をAIで整理できます。
+            </p>
+          )}
+          <p>
+            接続に失敗した場合、簡易整理へ自動で切り替えません。元のメモを保ってエラーを表示します。
+          </p>
+        </details>
+      </aside>
+      </div>
+      {busy && (
+        <aside className="input-processing" role="status">
+          <strong>
+            {operation === "save"
+              ? "道具・情報を既存の構造と照合して保存しています"
+              : "話を読み取り、人・道具・情報の流れを整理しています"}
+          </strong>
+          <span aria-hidden="true"> · {waitingSeconds}秒</span>
+          <p>メモと前の候補を保ったまま、結果を待っています。</p>
+          {waitingSeconds >= 20 && operation === "organize" && aiConfig?.configured && (
+            <p>AIの応答を待っています。結果が届いたら、保存前に内容を確かめられます。</p>
+          )}
+        </aside>
+      )}
+      <nav className="input-mobile-tabs" aria-label="メモと流れの表示切替">
+        <button
+          aria-pressed={mobilePane === "note"}
+          onClick={() => setMobilePane("note")}
+        >
+          1 話を書く
+        </button>
+        <button
+          aria-pressed={mobilePane === "flow"}
+          onClick={() => setMobilePane("flow")}
+        >
+          2 流れを確かめる{draft ? " · 保存前" : ""}
+        </button>
+        <button aria-pressed={mobilePane === "details"} disabled={!selected} onClick={() => setMobilePane("details")}>3 手順の詳細</button>
+      </nav>
+      <div className="input-workbench-grid">
+        <section className="input-note-pane">
+          <div className="input-note-heading">
+            <h2>
+              話とメモ
+            </h2>
+            {key !== NEW_MEMO_ID && (
+              <button
+                className="button-secondary"
+                disabled={busy}
+                onClick={() => {
+                  onSelect(NEW_MEMO_ID);
+                  setMobilePane("note");
+                }}
+              >
+                新しい話を書く
+              </button>
+            )}
+          </div>
+          {key === NEW_MEMO_ID && memoComposer}
+          <nav className="input-memo-filters" aria-label="メモの絞り込み">
+            {([["all", "すべて"], ["drafts", "保存前"], ["questions", "未確認あり"]] as const).map(([value, label]) => <button key={value} aria-pressed={memoFilter === value} onClick={() => { setMemoFilter(value); setMemoPage(0); }}>{label}</button>)}
+          </nav>
+          <input className="input-memo-search" aria-label="メモ一覧を検索" value={noteQuery} placeholder="話・メモを検索" onChange={e => { setNoteQuery(e.target.value); setMemoPage(0); }} />
+          {!!noteEntries.length && <nav className="input-memo-list" aria-label="蓄積した話と下書き">
+            {noteEntries.slice(notePage * 6, (notePage + 1) * 6).map(n => <button key={n.id} aria-pressed={n.id === key} disabled={busy} onClick={() => { onSelect(n.id); setMobilePane("flow"); }}>
+              <strong>{n.name}</strong><span>{n.text.slice(0, 68) || "原文は未登録"}</span><small>{n.pending ? "保存前" : "保存済み"}{n.questions ? ` · 未確認 ${n.questions}件` : ""}</small>
+            </button>)}
+          </nav>}
+          {noteEntries.length > 6 && <div className="input-memo-pages"><button aria-label="前の6メモ" disabled={!notePage} onClick={() => setMemoPage(notePage - 1)}>←</button><small>{notePage * 6 + 1}–{Math.min(noteEntries.length, (notePage + 1) * 6)} / {noteEntries.length}</small><button aria-label="次の6メモ" disabled={(notePage + 1) * 6 >= noteEntries.length} onClick={() => setMemoPage(notePage + 1)}>→</button></div>}
+          <p className="input-note-context">
+            {key === NEW_MEMO_ID
+              ? "名前や業務の範囲は、後から決められます。"
+              : workflow?.name}
+          </p>
+          {(graph.workflows.length > 0 ||
+            Object.keys(drafts).some((id) => id !== key)) && (
+            <details className="input-switch-note">
+              <summary>保存した話・下書きに戻る</summary>
+              <label className="kg-edit-field">
+                話を探す
+                <input
+                  value={noteQuery}
+                  onChange={(e) => setNoteQuery(e.target.value)}
+                  placeholder="仕事の名前で検索"
+                />
+              </label>
+              <label className="kg-edit-field">
+                話を追加する場所
+                <select
+                  value={key}
+                  onChange={(e) => onSelect(e.target.value)}
+                  disabled={busy}
+                >
+                  <option value={NEW_MEMO_ID}>
+                    新しい話から始める（業務名は後から）
+                  </option>
+                  {draft && !saved && key !== NEW_MEMO_ID && (
+                    <option value={key}>{draft.workflow.name} · 保存前</option>
+                  )}
+                  {saved && <option value={saved.id}>{saved.name}</option>}
+                  {graph.workflows
+                    .filter(
+                      (w) => w.id !== saved?.id && w.name.includes(noteQuery),
+                    )
+                    .slice(0, 20)
+                    .map((w) => (
+                      <option key={w.id} value={w.id}>
+                        {w.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <small>検索に合う話を20件まで表示します。</small>
+              {Object.entries(drafts)
+                .filter(([id]) => id !== key)
+                .map(([id, d]) => (
+                  <button
+                    key={id}
+                    className="button-secondary"
+                    onClick={() => onSelect(id)}
+                  >
+                    保存前の候補へ戻る：{d.workflow.name}
+                  </button>
+                ))}
+            </details>
+          )}
+          {key !== NEW_MEMO_ID && memoComposer}
+          {workflow && (
+            <details>
+              <summary>業務名・表示する状態を整える（任意）</summary>
+              <label className="kg-edit-field">
+                業務名
+                <input
+                  value={workflow.name}
+                  onChange={(e) =>
+                    onDraft(key, {
+                      ...ensureDraft(review!),
+                      workflow: { ...workflow, name: e.target.value },
+                    })
+                  }
+                />
+              </label>
+              <label className="kg-edit-field">
+                表示する状態
+                <select
+                  value={workflow.scenario ?? "current"}
+                  onChange={(e) =>
+                    onDraft(key, {
+                      ...ensureDraft(review!),
+                      workflow: {
+                        ...workflow,
+                        scenario: e.target.value as Workflow["scenario"],
+                      },
+                    })
+                  }
+                >
+                  <option value="current">現在の仕事</option>
+                  <option value="future">改善後の案</option>
+                  <option value="alternative">別の案</option>
+                </select>
+              </label>
+              {saved && (
+                <button
+                  onClick={() => {
+                    const w = {
+                      ...saved,
+                      id: `note-${crypto.randomUUID()}`,
+                      name: `${saved.name}（将来案）`,
+                      familyId: saved.familyId ?? saved.id,
+                      basedOnWorkflowId: saved.id,
+                      scenario: "future" as const,
+                    };
+                    onDraft(w.id, {
+                      ...ensureDraft(review!),
+                      workflow: w,
+                      baseline: review,
+                    });
+                    onTranscripts({ ...transcripts, [w.id]: memo });
+                    onSelect(w.id);
+                  }}
+                >
+                  この構造から将来案を作る
+                </button>
+              )}
+            </details>
+          )}
+          {error && (
+            <p role="alert" className="error-message">
+              {error}
+            </p>
+          )}
+
+        </section>
+        <section className="input-structure-pane">
+          <div className="input-structure-header">
+            <div>
+              <h2>
+                {workflow?.name || "ここに、話の流れが見えます"}
+              </h2>
+              <p>
+                {review
+                  ? `${steps.length ? `${steps.length}手順` : "まだ作業は決めていません"} · ${draft ? "保存前の候補" : "保存済み"}`
+                  : "入力すると、人・道具・情報のつながりが見えます。"}
+              </p>
+            </div>
+            {review && (
+              <button
+                className="button-primary"
+                disabled={
+                  !draft ||
+                  busy ||
+                  stale ||
+                  !!edit ||
+                  !draft.workflow.name.trim()
+                }
+                onClick={save}
+              >
+                {busy
+                  ? operation === "save" ? "道具・情報を照合して保存中…" : "話を整理中…"
+                  : edit
+                    ? "訂正を反映してから保存"
+                    : draft
+                      ? review.steps.length ? "3 この流れを保存" : "3 話と確認事項を保存"
+                      : "保存済み"}
+              </button>
+            )}
+          </div>
+          {review?.extraction && (
+            <p className="input-extraction-origin">
+              この構造の整理：
+              {review.extraction.method === "ai"
+                ? `${review.extraction.model ?? review.extraction.provider}（AI）`
+                : "簡易整理"}
+              {review.steps.some((s) => s.humanEdits?.length) ||
+              review.organization?.origin === "human" ||
+              review.systemDependencies?.some(d => d.origin === "human") ||
+              review.handoffs?.some((h) => h.origin === "human") ||
+              review.incomingHandoffs?.some((h) => h.origin === "human")
+                ? " · 人の訂正を含む"
+                : ""}
+            </p>
+          )}
+          {review && <>
+            <details className="input-grouping"><summary>会社の中での位置 · {review.organization?.activity || "まだ分類していません"}{review.organization?.capability ? ` → ${review.organization.capability}` : ""}</summary><InputOrganization review={review} busy={busy} onChange={update} /></details>
+            <nav className="input-context-tabs" aria-label="同じ話を違う視点で見る">
+              {([["flow", "業務の流れ"], ["information", "関連する情報"], ["systems", "関係するシステム"], ["history", "履歴"]] as const).map(([value, label]) => <button key={value} aria-pressed={workbenchTab === value} onClick={() => setWorkbenchTab(value)}>{label}</button>)}
+            </nav>
+            {workbenchTab === "history" && savedHistory}
+            {(workbenchTab === "information" || workbenchTab === "systems") && <InputRelations key={`${key}:${workbenchTab}`} review={review} kind={workbenchTab} selected={selected} choose={choose} />}
+            {workbenchTab === "systems" && <InputSystemDependencies key={key} review={review} busy={busy} onChange={update} />}
+          </>}
+          {error && (
+            <p role="alert" className="error-message input-mobile-error">
+              {error}
+            </p>
+          )}
+          {!draft && !stale && lastSavedId === workflow?.id && (
+            <p role="status" className="input-saved-notice">
+              保存しました。原文と流れが、会社の全体像にも加わっています。
+            </p>
+          )}
+          {stale && (
+            <p role="status" className="input-stale">
+              メモに変更があります。「変更を流れに反映」で、表示中の流れを更新してください。
+            </p>
+          )}
+          {!review && (
+            <div
+              className="input-empty-structure"
+              aria-label="入力後の見え方の例"
+            >
+              <span className="input-example-label">
+                例えば、こんな流れが見えます
+              </span>
+              <ol className="input-example-flow">
+                <li>
+                  <small>メール</small>
+                  <strong>注文が届く</strong>
+                  <span>注文の内容</span>
+                </li>
+                <li>
+                  <small>担当者 · Excel</small>
+                  <strong>内容を確認する</strong>
+                  <span>確認した内容</span>
+                </li>
+                <li>
+                  <small>担当者 · SAP</small>
+                  <strong>受注を入力する</strong>
+                  <span>次の仕事へ</span>
+                </li>
+              </ol>
+              <p>
+                「誰が」「何を使って」「何を決めるか」を、手順ごとに確かめられます。
+              </p>
+              <div className="input-example-hint">
+                <strong>すべてを知っていなくても大丈夫</strong>
+                <p>
+                  書かれていない担当や判断は「未確認」に。流れを見てから補足できます。
+                </p>
+              </div>
+            </div>
+          )}
+          {review && selected && (
+            <>
+              {draft && diff && (
+                <details className="input-diff">
+                  <summary>
+                    今回の反映：追加 {diff.added.length}件 · 訂正{" "}
+                    {diff.changed.length}件 · 除外 {diff.removed.length}件
+                  </summary>
+                  <div className="input-diff-items">
+                    {(diff.removedQuestions.length > 0 || diff.addedQuestions.length > 0) && (
+                      <p>確認事項：{(draft.baseline ?? currentReview)?.questions.length ?? 0}件 → {review.questions.length}件</p>
+                    )}
+                    {diff.added.slice(0, 5).map((s) => (
+                      <button key={s.stepKey} onClick={() => choose(s)}>
+                        ＋ {s.name}
+                      </button>
+                    ))}
+                    {diff.changed.slice(0, 5).map((c) => (
+                      <button
+                        key={c.after.stepKey}
+                        onClick={() => choose(c.after)}
+                      >
+                        変更：{c.after.name}
+                        <small>{c.details.slice(0, 3).join(" / ")}</small>
+                      </button>
+                    ))}
+                    {diff.removed.slice(0, 5).map((s) => (
+                      <p key={s.stepKey}>除外：{s.name}</p>
+                    ))}
+                  </div>
+                  <details>
+                    <summary>接続の変化と全変更件数</summary>
+                    {diff.addedConnections.map((s, i) => (
+                      <p key={`a${i}`}>＋ {s}</p>
+                    ))}
+                    {diff.removedConnections.map((s, i) => (
+                      <p key={`r${i}`}>− {s}</p>
+                    ))}
+                    {diff.removedQuestions.map((q, i) => <p key={`rq${i}`}>候補から外れた確認事項：{q.question}</p>)}
+                    {diff.addedQuestions.map((q, i) => <p key={`aq${i}`}>新しい確認事項：{q.question}</p>)}
+                    <p>
+                      {diff.added.length +
+                        diff.changed.length +
+                        diff.removed.length}
+                      手順に変化。最初の5件ずつを表示しています。
+                    </p>
+                  </details>
+                </details>
+              )}
+              <div ref={stripRef as React.RefObject<HTMLDivElement>} hidden={workbenchTab !== "flow"} className="input-canvas-anchor">
+                <InputFlowCanvas review={review} selected={selected} page={stepPage} onPage={page => choose(steps[page * REVIEW_PAGE_SIZE])} choose={choose}
+                  added={draft ? diff?.added.map(s => s.stepKey) : []} changed={draft ? diff?.changed.map(c => c.after.stepKey) : []} />
+              </div>
               <details onToggle={(e) => setAdvanced(e.currentTarget.open)}>
                 <summary>システム・情報・接続を詳しく編集する</summary>
                 {advanced &&
@@ -1656,6 +1610,10 @@ export function InputWorkbench({
             </details>
           )}
 
+        </section>
+        <section ref={detailPaneRef} className="input-detail-pane" aria-label="手順の確認と訂正">
+          <header><h2>{edit ? "ステップの編集" : "選んだ手順"}</h2>{selected && <small>{selected.humanEdits?.length ? "人が訂正" : selected.certainty === "explicit" ? "原文に明示" : "推定・要確認"}</small>}</header>
+          {stepDetail}
         </section>
       </div>
     </section>
