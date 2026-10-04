@@ -631,10 +631,25 @@ export function WorkflowReading({
                   <p>{selected.meaning?.result || "処理結果は未確認"}</p>
                 </div>
                 <div>
-                  <h4>次に動く仕事</h4>
-                  <p>
-                    {selected.meaning?.next || "結果によって動く仕事は未確認"}
-                  </p>
+                  <h4>{context.outgoingHandoffs.length ? "結果からつながる仕事" : "次に動く仕事"}</h4>
+                  {context.outgoingHandoffs.length ? (
+                    <section className="flow-result-connections" aria-label="この結果に登録された業務との接続">
+                      {context.outgoingHandoffs.slice(0, 3).map(h => (
+                        <div key={h.id}>
+                          <button onClick={() => followHandoff(h)}>
+                            {h.via === "reference" ? "この情報を使う業務：" : h.kind === "material" ? "物を渡す業務：" : "情報を渡す業務："}
+                            {graph.workflows.find(w => w.id === h.targetWorkflowId)?.name} →
+                          </button>
+                          <p>{handoffInformationText(graph, h)} · {h.status === "confirmed" ? "接続の根拠あり" : h.status === "inferred" ? "接続は推定・要確認" : "接続は未確認"}</p>
+                        </div>
+                      ))}
+                      {context.outgoingHandoffs.length > 3 && <p>ほか{context.outgoingHandoffs.length - 3}件は、上の「条件と次の仕事」で確認できます。</p>}
+                      {selected.meaning?.next && <details>
+                        <summary>入力時の説明を見る</summary>
+                        <p>{selected.meaning.next}</p>
+                      </details>}
+                    </section>
+                  ) : <p>{selected.meaning?.next || "結果によって動く仕事は未確認"}</p>}
                 </div>
               </div>
               {selected.meaning?.purpose && (
