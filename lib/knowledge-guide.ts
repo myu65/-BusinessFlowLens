@@ -21,7 +21,7 @@ export function workflowChapters(graph: LensGraph, workflowId: string) {
   return chapters;
 }
 
-export function termExplanation(name: string): string | undefined {
+export function termExplanations(name: string) {
   const terms: Array<[RegExp, string]> = [
     [
       /\bATP\b/i,
@@ -64,7 +64,29 @@ export function termExplanation(name: string): string | undefined {
     [/\b(?:VBA|Macro)\b/i, "Excel上の繰り返し作業を自動で行うプログラム"],
     [/\bExcel\b/i, "表を作り、集計・調整や手作業の記録に使う道具"],
   ];
-  return terms.find(([pattern]) => pattern.test(name))?.[1];
+  return terms.flatMap(([pattern, explanation]) => {
+    const matched = name.match(pattern);
+    return matched ? [{ term: matched[0], explanation }] : [];
+  });
+}
+
+export function termExplanation(name: string): string | undefined {
+  return termExplanations(name)[0]?.explanation;
+}
+
+type ConnectionKind = { kind: "information" | "material"; via?: "handoff" | "reference" };
+export function connectionKindLabel(connection: ConnectionKind) {
+  if (connection.kind === "material") return "物の受渡し";
+  return connection.via === "reference" ? "情報の参照"
+    : connection.via === "handoff" ? "情報の受渡し" : "情報の受渡し・参照";
+}
+
+export function connectionRoleLabel(connection: ConnectionKind, incoming = false) {
+  if (connection.kind === "information" && connection.via === "reference")
+    return incoming ? "情報をつくる業務" : "この情報を参照する業務";
+  if (connection.kind === "material" || connection.via === "handoff")
+    return incoming ? "渡す業務" : "受け取る業務";
+  return "関係する業務";
 }
 
 // Only show registered cross-activity handoffs. A business story must not invent sequence.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { LensGraph, LensNode } from "@/lib/graph";
 import { handoffJourney, type FlowJourney, type FlowReadingPosition } from "@/lib/flow-context";
 import {
@@ -19,7 +19,7 @@ import { ProcessContextEditor } from "./ProcessContextEditor";
 import { WorkflowReading } from "./WorkflowReading";
 import { USAGE_DEFINITION } from "./ScopedExplorers";
 import { CompanyOrientation } from "./CompanyOrientation";
-import { termExplanation } from "@/lib/knowledge-guide";
+import { termExplanation, connectionKindLabel, connectionRoleLabel } from "@/lib/knowledge-guide";
 import { KnowledgeEditor } from "./KnowledgeEditor";
 import { createChemicalCompany } from "@/lib/chemical-company";
 import { inputSystemRoles } from "@/lib/input-knowledge";
@@ -678,8 +678,7 @@ export function KnowledgeExplorer({
                     : h.sourceWorkflowId;
                 return (
                   <article key={h.id}>
-                    {h.sourceWorkflowId === row.workflow.id ? "次へ" : "前へ"} (
-                    {h.kind === "information" ? "情報受渡し" : "物の受渡し"}):{" "}
+                    {connectionRoleLabel(h, h.targetWorkflowId === row.workflow.id)}（{connectionKindLabel(h)}）：{" "}
                     <button
                       onClick={() => {
                         const journey = handoffJourney(

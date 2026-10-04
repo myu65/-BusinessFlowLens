@@ -6,7 +6,7 @@ import {
   type LensGraph,
   type LensNode,
 } from "@/lib/graph";
-import { termExplanation, workflowChapters } from "@/lib/knowledge-guide";
+import { termExplanation, termExplanations, workflowChapters } from "@/lib/knowledge-guide";
 import {
   handoffJourney,
   type WorkflowHandoff,
@@ -109,6 +109,7 @@ export function WorkflowReading({
   }, [selected?.id, dataId, depth, lens, journey, onReadingChange]);
   if (!selected) return <p>この業務の手順はまだ登録されていません。</p>;
   const context = stepContext(graph, workflowId, selected.id);
+  const terms = termExplanations(selected.label);
   const workflow = graph.workflows.find((w) => w.id === workflowId);
   const chapterIndex = chapters.findIndex((c) =>
     c.steps.some((s) => s.id === selected.id),
@@ -596,9 +597,11 @@ export function WorkflowReading({
             <h3>
               {selected.stepOrder}. {selected.label}
             </h3>
-            {termExplanation(selected.label) && (
-              <p className="kg-term">{termExplanation(selected.label)}</p>
-            )}
+            {!!terms.length && <details className="kg-term">
+              <summary>用語の補足</summary>
+              <p>用語の一般的な説明です。この手順で行うことは、下の結果と原文で確認できます。</p>
+              {terms.map(({ term, explanation }) => <p key={term}><strong>{term}</strong>：{explanation}</p>)}
+            </details>}
             <p>
               {selected.department ?? "部署未確認"} ·{" "}
               {getProcessExecutionMode(graph, selected) === "automatic"
@@ -725,6 +728,7 @@ export function WorkflowReading({
                   「{focusData?.label ?? "情報未登録"}
                   」を、どの作業で受け取り・更新・受渡しするか。作業を選ぶと、担当と道具も一緒に移動します。
                 </p>
+                <p>条件で分かれる作業も含みます。条件と停止・保留を、それぞれの作業で確認できます。</p>
                 <ol className="flow-data-trace">
                   {trace
                     .slice(tracePage * 5, (tracePage + 1) * 5)
@@ -746,6 +750,10 @@ export function WorkflowReading({
                           {item.operations.map(operation).join(" / ") ||
                             "受渡しに関連"}
                         </p>
+                        {(item.step.meaning?.condition || item.step.meaning?.halt) && <p>
+                          {item.step.meaning?.condition && <>条件：{item.step.meaning.condition}</>}
+                          {item.step.meaning?.halt && <> · 停止・保留</>}
+                        </p>}
                         {!item.transfers.length && (
                           <div>
                             使う道具：

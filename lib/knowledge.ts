@@ -8,6 +8,7 @@ import {
 } from "./graph";
 import { inputSystemDependencies } from "./system-dependencies";
 import { describeHumanEdit } from "./review-workbench";
+import { connectionKindLabel, connectionRoleLabel } from "./knowledge-guide";
 
 export type KnowledgeScope = WorkflowScenario;
 export function scenarioGraph(
@@ -611,7 +612,7 @@ export function knowledgeReportDocument(
         .filter((h) => h.sourceWorkflowId === row.workflow.id)
         .map(
           (h) =>
-            `次の業務: ${graph.workflows.find((w) => w.id === h.targetWorkflowId)?.name} / ${h.description} / ${h.kind === "information" ? "情報の受渡し・参照" : "物の受渡し"} / 確かさ: ${confidenceLabels[h.status ?? "unknown"]} / 原文: ${h.evidence || "未登録"}`,
+            `${connectionRoleLabel(h)}: ${graph.workflows.find((w) => w.id === h.targetWorkflowId)?.name} / ${h.description} / ${connectionKindLabel(h)} / 確かさ: ${confidenceLabels[h.status ?? "unknown"]} / 原文: ${h.evidence || "未登録"}`,
         ),
       "",
       ...comparisons.map(
