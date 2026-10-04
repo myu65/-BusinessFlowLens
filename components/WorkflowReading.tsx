@@ -9,6 +9,7 @@ import {
 import { termExplanation, termExplanations, workflowChapters } from "@/lib/knowledge-guide";
 import {
   handoffJourney,
+  journeyEntryExplanation,
   type WorkflowHandoff,
   stepContext,
   traceData,
@@ -393,7 +394,7 @@ export function WorkflowReading({
           </p>
           {!journey.entryKnown && (
             <p>
-              受取手順は未確認です。業務の先頭を参考表示しています。接続先の手順を補足してください。
+              {journeyEntryExplanation(journey, selected, context.index)}
             </p>
           )}
         </aside>

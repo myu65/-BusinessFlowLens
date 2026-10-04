@@ -119,6 +119,7 @@ export type FlowJourney = {
     evidence: string;
   }>;
   entryKnown: boolean;
+  entrySide?: "source" | "target";
 };
 export type WorkflowHandoff = NonNullable<
   NonNullable<LensGraph["knowledge"]>["handoffs"]
@@ -165,21 +166,21 @@ export function handoffJourney(
   preferredDataId?: string,
 ): FlowJourney {
   const forward = handoff.sourceWorkflowId === fromWorkflowId;
+  const sourceStep = getWorkflowProcesses(graph, handoff.sourceWorkflowId).find(s => s.id === handoff.sourceProcessId);
   const entry = forward
     ? handoffEntry(graph, handoff, preferredDataId)
     : {
-        stepId: handoff.sourceProcessId,
+        stepId: sourceStep?.id,
         dataId:
           preferredDataId && handoff.dataIds.includes(preferredDataId)
             ? preferredDataId
             : handoff.dataIds[0],
-        entryKnown:
-          !!handoff.sourceProcessId &&
-          graph.nodes.some((n) => n.id === handoff.sourceProcessId),
+        entryKnown: !!sourceStep,
       };
   return {
     workflowId: forward ? handoff.targetWorkflowId : handoff.sourceWorkflowId,
     depth: previous?.depth,
+    entrySide: forward ? "target" : "source",
     ...entry,
     trail: [
       ...(previous?.workflowId === fromWorkflowId ? previous.trail : []),
@@ -192,6 +193,12 @@ export function handoffJourney(
       },
     ].slice(-10),
   };
+}
+
+export function journeyEntryExplanation(journey: FlowJourney, selected: LensNode, index: number) {
+  if (journey.entryKnown) return null;
+  const missing = journey.entrySide === "source" ? "送り出す手順" : journey.entrySide === "target" ? "受け取る手順" : "接続する手順";
+  return `${missing}は未確認です。手順${index + 1}「${selected.label}」を参考表示しています。この手順が接続先とは確認できていません。`;
 }
 
 export function traceData(
