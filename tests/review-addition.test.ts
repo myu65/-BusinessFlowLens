@@ -123,3 +123,14 @@ test("a platform-only addition and a dependency explanation update are distinct 
   assert.equal(excluded.changedConnections.length, 1);
   assert.ok(excluded.changedConnections[0].after.includes("この関係を除外"));
 });
+
+test("a certainty or restart-label update changes an existing flow relation rather than adding and removing its arrow", () => {
+  const before = { ...base, transitions: [{ ...base.transitions[0], certainty: "inferred" as const }] };
+  const after = { ...before, transitions: [{ ...before.transitions[0], certainty: "confirmed" as const, holdEffect: "resume" as const }] };
+  const difference = diffReviews(before, after);
+  assert.equal(difference.addedConnections.length, 0);
+  assert.equal(difference.removedConnections.length, 0);
+  assert.equal(difference.changedConnections.length, 1);
+  assert.match(difference.changedConnections[0].before, /推定・要確認/);
+  assert.match(difference.changedConnections[0].after, /再開/);
+});

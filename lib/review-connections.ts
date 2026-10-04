@@ -1,4 +1,4 @@
-import type { ExtractionReview, ExtractionTransition, LensGraph, Workflow } from "./graph";
+import type { ExtractionReview, ExtractionTransition, FollowUpAnswer, LensGraph, Workflow } from "./graph";
 import { normalizeAssetName } from "./refinement";
 import { sourceEvidence } from "./source-evidence";
 
@@ -149,6 +149,7 @@ export function suggestMissingSourceConnections<T extends ExtractionReview>(
 export function validateAITransitions<T extends ExtractionReview>(
   review: T,
   source: string,
+  answers: FollowUpAnswer[] = [],
 ): T {
   const compact = (text: string) =>
     text.normalize("NFKC").replace(/[\s「」『』]/g, "");
@@ -166,6 +167,12 @@ export function validateAITransitions<T extends ExtractionReview>(
     return /原因.{0,16}(?:調べ|調査|直|修正)|障害.{0,16}(?:調べ|調査|切り分け)/.test(scoped) &&
       !/(?:調べ|調査|修正)(?:ない|しない|ません|しません|しなかった)|直(?:さない|さず|さなかった|しません)|不明|分から|分かりません|未確認|未定/.test(scoped);
   };
+  const heldSteps = review.steps.filter(s => s.meaning?.halt && s.meaning.condition);
+  const directAnswers = answers.filter((a, i) => !a.reference && !a.referenceReading &&
+    !answers.slice(i + 1).some(later => !later.reference && later.question === a.question));
+  const responseWork = (text: string) => repair(text) ||
+    (/条項.{0,16}調整/.test(text) && !/調整(?:しない|しません|していない|していません|せず|しなかった)|不明|分から|未確認|未定/.test(text));
+  const completion = /確定|承認|完了|公開|納品|出荷|反映|再開|再実行|再試行|解除|配信/;
   const transitions = review.transitions.map<ExtractionTransition>(t => ({ ...t, holdEffect: undefined, evidence: sourceEvidence(source, t.evidence) ?? t.evidence })).filter((t) => {
     const step = review.steps.find((s) => s.stepKey === t.fromStepKey);
     const evidence = compact(t.evidence);
@@ -184,6 +191,21 @@ export function validateAITransitions<T extends ExtractionReview>(
     const handover = evidence && original.includes(evidence) &&
       isHandoff(evidence) && isHandoff(target?.action ?? "");
     const targetEvidence = target && sourceEvidence(source, target.evidence);
+    // A direct answer may omit the question's "after approval is held" prefix.
+    // Use that scope only for the sole grounded hold and the answer's first
+    // stated response. The question is not a fact; retain an inferred edge
+    // with literal endpoint quotes, never a fabricated combined quotation.
+    const scopedResponse = step && target && heldSteps.length === 1 && heldSteps[0] === step &&
+      sourceEvidence(source, step.evidence) && targetEvidence && responseWork(target.action) &&
+      !completion.test(target.action) && directAnswers.some(a => {
+        const question = compact(a.question);
+        const topic = question.match(/([\p{Script=Han}\p{Script=Katakana}A-Za-z0-9ー]{2,})(?:を|が|は)(?:保留|停止|止め)/u)?.[1];
+        const first = a.answer.split(/(?<=[。！？\n])/)[0].trim();
+        return topic && /(?:保留|停止|止め)(?:した後|た後|中|している間)/.test(question) &&
+          ["を保留", "を停止", "を止め", "が停止", "は停止"].some(verb => compact(step.evidence).includes(topic + verb)) &&
+          !!sourceEvidence(first, target.evidence) && responseWork(compact(first)) &&
+          !/別の|他の|不明|分から|未確認|未定|解除|再開|再実行|再試行|承認/.test(first);
+      });
     // Two quoted clauses can support an inferred response after a stop, even
     // when joining those clauses would not be a literal source quotation.
     // Require a quote for each endpoint, in adjacent source sentences.
@@ -209,10 +231,10 @@ export function validateAITransitions<T extends ExtractionReview>(
       (original.slice(original.indexOf(quotes[0]) + quotes[0].length, original.indexOf(quotes[1])).match(/[。！？]/g)?.length ?? 0) <= 1;
     const exceptionResponse = (sameHeldEpisode && ((evidence && original.includes(evidence) && repair(evidence)) || quotedResponse) || explicitWhileHeld) &&
       targetEvidence && repair(compact(targetEvidence)) && repair(target?.action ?? "") &&
-      !/確定|承認|完了|公開|納品|出荷|反映|再開|再実行|再試行|解除|配信/.test(target?.action ?? "");
+      !completion.test(target?.action ?? "");
     // A conditional check may have a normal path and a hold inside it. A step
     // executed only on the hold condition needs an explicit release to proceed.
-    if (step?.meaning?.halt && step.meaning.condition && !restart && !statedContinuation && !continuedHold && !handover && !exceptionResponse) {
+    if (step?.meaning?.halt && step.meaning.condition && !restart && !statedContinuation && !continuedHold && !handover && !exceptionResponse && !scopedResponse) {
       warnings.push(`${step.name}：停止・保留の解除を原文で確認できないため、その先へ進む線を保留しました。`);
       questions.push({
         question: `${step.name}の後は、どの条件・判断で再開し、どの手順へ進みますか？`,
@@ -222,8 +244,13 @@ export function validateAITransitions<T extends ExtractionReview>(
       return false;
     }
     if (step?.meaning?.halt && step.meaning.condition) {
-      t.holdEffect = restart || statedContinuation ? "resume" : continuedHold || handover || exceptionResponse ? "response" : undefined;
-      if ((quotedResponse || explicitWhileHeld) && exceptionResponse) t.certainty = "inferred";
+      t.holdEffect = scopedResponse ? "response" : restart || statedContinuation ? "resume" : continuedHold || handover || exceptionResponse ? "response" : undefined;
+      if (scopedResponse) t.evidence = `「${sourceEvidence(source, step.evidence)}」「${targetEvidence}」`;
+      if (scopedResponse || ((quotedResponse || explicitWhileHeld) && exceptionResponse)) t.certainty = "inferred";
+    } else if (restart && sourceStepEvidence && targetEvidence && /再開|resume|restart/i.test(evidence)) {
+      // The release may occur after response work, rather than directly at
+      // the stopped step. Label an existing, source-grounded restart edge.
+      t.holdEffect = "resume";
     }
     if (t.fromStepKey !== t.toStepKey) return true;
     if (evidence && repeat.test(evidence) && original.includes(evidence))

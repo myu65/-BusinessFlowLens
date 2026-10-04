@@ -5,7 +5,7 @@ import { validateAITransitions } from "../lib/review-connections";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildWorkflowReviewFromGraph, replaceWorkflowGraph, type LensGraph } from "../lib/graph";
+import { buildWorkflowReviewFromGraph, replaceWorkflowGraph, type FollowUpAnswer, type LensGraph } from "../lib/graph";
 import { previewReviewGraph } from "../lib/review-workbench";
 import { resolveWorkflowReviewLocally } from "../lib/ai/provider";
 import { SqliteBusinessFlowRepository } from "../lib/storage/sqlite";
@@ -121,5 +121,81 @@ test("repair wording cannot authorize unknown, negative or normal completion pat
     ["原因を直す", "担当が原因を直す。", "誰がどう直すか分かりません。"],
   ]) {
     assert.equal(validateAITransitions(fixture(action, evidence), source).transitions.length, 0, action + evidence);
+  }
+});
+
+const contractHold = "そろわない条項がある場合は承認を保留します。";
+const contractResponse = "営業担当と法務担当がTeamsで条項を調整します。";
+const contractQuestion = "承認を保留した後、誰がどのように条項を再調整し、承認確認を再開しますか？";
+const contractAnswer: FollowUpAnswer = { question: contractQuestion,
+  answer: contractResponse + "合意したコメントを法務担当がSharePointに記録したら、営業部長の確認から再開します。" };
+function contractFixture() {
+  const review = fixture("営業担当と法務担当がTeamsで条項を調整する", "承認を保留した後、" + contractResponse);
+  review.steps[0] = { ...review.steps[0], name: "承認を保留する", action: "承認を保留する", evidence: contractHold,
+    meaning: { ...review.steps[0].meaning!, result: "承認を保留する", condition: "そろわない条項がある場合", evidence: contractHold } };
+  review.steps[1].evidence = contractResponse;
+  review.transitions[0].certainty = "confirmed";
+  return review;
+}
+
+test("a direct answer to the sole grounded approval hold keeps adjustment reachable as an inferred response, not a release", () => {
+  const source = contractHold + "\n" + contractAnswer.answer;
+  const result = validateAITransitions(contractFixture(), source, [contractAnswer]);
+  assert.equal(result.transitions.length, 1);
+  assert.equal(result.transitions[0].holdEffect, "response");
+  assert.equal(result.transitions[0].certainty, "inferred");
+  assert.equal(result.transitions[0].evidence, `「${contractHold}」「${contractResponse}」`);
+  assert.equal(result.steps[0].meaning!.halt, true);
+  assert.equal(result.steps[1].meaning?.halt, false);
+  assert.equal(validateAITransitions(contractFixture(), source).transitions.length, 0);
+});
+
+test("a literal restart after recording the agreed comment is labeled separately from the held adjustment", () => {
+  const review = contractFixture();
+  const restart = contractAnswer.answer.split("。")[1] + "。";
+  const check = "営業部長が法務コメントを確認します。";
+  review.steps.push({ ...review.steps[1], stepKey: "record", action: "合意したコメントを記録する", evidence: restart },
+    { ...review.steps[1], stepKey: "check", action: "法務コメントを確認する", evidence: check });
+  review.transitions.push({ fromStepKey: "s1", toStepKey: "record", condition: null, evidence: contractResponse },
+    { fromStepKey: "record", toStepKey: "check", condition: "合意したコメントを記録したら", evidence: restart, certainty: "confirmed" });
+  const result = validateAITransitions(review, check + contractHold + "\n" + contractAnswer.answer, [contractAnswer]);
+  assert.equal(result.transitions[0].holdEffect, "response");
+  assert.equal(result.transitions[1].holdEffect, undefined);
+  assert.equal(result.transitions[2].holdEffect, "resume");
+  const unknown = validateAITransitions({ ...review, transitions: review.transitions.map(t => t.fromStepKey === "record"
+    ? { ...t, evidence: "記録した後に再開するかは未確認です。" } : t) },
+    check + contractHold + contractResponse + "記録した後に再開するかは未確認です。", [contractAnswer]);
+  assert.notEqual(unknown.transitions.find(t => t.fromStepKey === "record")?.holdEffect, "resume");
+});
+
+test("answer scope cannot choose another hold, use another story, invent a quote, or turn a completion into held work", () => {
+  const source = contractHold + "\n" + contractAnswer.answer;
+  for (const answer of [
+    { ...contractAnswer, question: "出荷を保留した後、誰が対応しますか？" },
+    { ...contractAnswer, question: "誰が対応しますか？" },
+    { ...contractAnswer, reference: { workflowId: "another", workflowName: "別の契約", usedAt: "2026-10-04" } },
+    { ...contractAnswer, answer: "別の契約では、" + contractAnswer.answer },
+    { ...contractAnswer, answer: "担当者を確認します。" + contractAnswer.answer },
+  ]) assert.equal(validateAITransitions(contractFixture(), contractHold + "\n" + answer.answer, [answer]).transitions.length, 0);
+  const ambiguous = contractFixture();
+  ambiguous.steps.push({ ...ambiguous.steps[0], stepKey: "another-hold", name: "出荷を保留する" });
+  assert.equal(validateAITransitions(ambiguous, source, [contractAnswer]).transitions.length, 0);
+  assert.equal(validateAITransitions(contractFixture(), contractAnswer.answer, [contractAnswer]).transitions.length, 0);
+  const invented = contractFixture();
+  invented.steps[1].evidence = "法務課長がTeamsで条項を調整します。";
+  assert.equal(validateAITransitions(invented, source, [contractAnswer]).transitions.length, 0);
+  const completed = contractFixture();
+  completed.steps[1].action = "条項を調整して契約を承認する";
+  assert.equal(validateAITransitions(completed, source, [contractAnswer]).transitions.length, 0);
+});
+
+test("an unknown or denied adjustment, including a newer answer, does not revive an old response", () => {
+  for (const answer of ["営業担当と法務担当が条項を調整しません。", "営業担当と法務担当が条項を調整するかは未確認です。"]) {
+    const review = contractFixture();
+    review.steps[1].evidence = answer;
+    const followUp = { ...contractAnswer, answer };
+    assert.equal(validateAITransitions(review, contractHold + "\n" + answer, [followUp]).transitions.length, 0);
+    assert.equal(validateAITransitions(contractFixture(), contractHold + "\n" + contractAnswer.answer + "\n" + answer,
+      [contractAnswer, followUp]).transitions.length, 0);
   }
 });
