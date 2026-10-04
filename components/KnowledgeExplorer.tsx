@@ -282,11 +282,11 @@ export function KnowledgeExplorer({
       <header className="company-page-header">
         <div>
           <span className="company-heading-kicker">
-            入力した話から、会社のしくみを知る
+            {focus.kind === "company" ? graph.knowledge?.name || "入力した話から育つ会社の構造" : "入力した話から、会社のしくみを知る"}
           </span>
           <h1>
             {focus.kind === "company"
-              ? (graph.knowledge?.name ?? "会社の全体像")
+              ? "会社の全体像"
               : focus.kind === "systems"
                 ? "システム・道具の全体像"
                 : (row?.workflow.name ??
@@ -297,9 +297,7 @@ export function KnowledgeExplorer({
           </h1>
           {focus.kind === "company" && (
             <p>
-              {graph.knowledge?.description.split("。")[0] ||
-                "保存した仕事の話を、会社のつながりとして見られます"}
-              。
+              活動を選ぶと、仕事の前後と人・道具・情報が見えます。
             </p>
           )}
         </div>
