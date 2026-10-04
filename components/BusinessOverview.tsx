@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { LensGraph, Relation } from "@/lib/graph";
+import { useEffect, useMemo, useState } from "react";
+import type { LensGraph } from "@/lib/graph";
 import { buildOverview, type OverviewScope } from "@/lib/overview";
 import {
   emptyFilters,
@@ -10,15 +10,7 @@ import {
 } from "@/lib/landscape";
 import { LandscapePanel } from "./LandscapePanel";
 import { LandscapeEditor } from "./LandscapeEditor";
-
-const roles: Record<Relation, string> = {
-  next: "順序",
-  executes: "自動実行",
-  uses: "利用",
-  reads: "参照",
-  writes: "登録・更新",
-  sends: "送信",
-};
+import { OverviewDataMatrix } from "./OverviewDataMatrix";
 export function BusinessOverview({
   graph,
   onOpen,
@@ -83,14 +75,8 @@ export function BusinessOverview({
       setPreferencesError(true);
     }
   }, [filters, preferencesReady]);
-  const landscape = landscapeView(graph, scope, filters);
-  const view = buildOverview(
-    { ...graph, workflows: landscape.workflows },
-    scope,
-  );
-  const selected = view.data.find((d) => d.asset.id === selectedId);
-  const label = (id: string) =>
-    graph.nodes.find((n) => n.id === id)?.label ?? "未確認";
+  const landscape = useMemo(() => landscapeView(graph, scope, filters), [graph, scope, filters]);
+  const view = useMemo(() => buildOverview({ ...graph, workflows: landscape.workflows }, scope), [graph, scope, landscape.workflows]);
   return (
     <section className="page-view bird-view">
       <div className="eyebrow">業務とデータの全体像</div>
@@ -130,183 +116,7 @@ export function BusinessOverview({
         initialWorkflowId={filters.anchorId || undefined}
         onApply={onGraphApply}
       />
-      {filters.topic === "data" ? (
-        <>
-          <div className="overview-summary">
-            <span>
-              業務 <b>{view.workflows.length}</b>
-            </span>
-            <span>
-              共通データ{" "}
-              <b>{view.data.filter((d) => d.workflows.length > 1).length}</b>
-            </span>
-            <span>
-              個別データ{" "}
-              <b>{view.data.filter((d) => d.workflows.length === 1).length}</b>
-            </span>
-            <span>
-              記録済み受け渡し <b>{view.flows.length}</b>
-            </span>
-          </div>
-          <section className="overview-map">
-            <h2>データから業務の接点を見る</h2>
-            <p>
-              共通＝この表示対象で複数業務が同じ保存データを参照。データ名を選ぶと根拠を確認できます。
-            </p>
-            {view.data.length ? (
-              <div className="overview-table-scroll">
-                <table className="overview-table">
-                  <caption>業務データと業務の関係</caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">業務データ</th>
-                      {view.workflows.map((w) => (
-                        <th scope="col" key={w.id}>
-                          {w.name}
-                          <small>
-                            {w.scenario === "future"
-                              ? "将来案"
-                              : w.scenario === "alternative"
-                                ? "代替案"
-                                : "現状"}
-                          </small>
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {view.data.map((row) => (
-                      <tr key={row.asset.id}>
-                        <th scope="row">
-                          <button
-                            aria-pressed={selectedId === row.asset.id}
-                            onClick={() => setSelectedId(row.asset.id)}
-                          >
-                            {row.asset.label}
-                          </button>
-                          <small>
-                            {row.workflows.length > 1 ? "共通" : "個別"} ·{" "}
-                            {row.asset.status === "confirmed"
-                              ? "確認済み"
-                              : "要確認"}
-                          </small>
-                        </th>
-                        {view.workflows.map((w) => {
-                          const names = [
-                            ...new Set(
-                              row.usages
-                                .filter((u) => u.process.workflowId === w.id)
-                                .map((u) => roles[u.relation]),
-                            ),
-                          ];
-                          if (
-                            row.transfers.some((f) =>
-                              f.workflowIds.includes(w.id),
-                            )
-                          )
-                            names.push("受け渡し");
-                          if (
-                            row.materialLinks.some(
-                              (h) =>
-                                h.sourceWorkflowId === w.id ||
-                                h.targetWorkflowId === w.id,
-                            )
-                          )
-                            names.push("物との対応");
-                          if (
-                            !names.length &&
-                            row.direct.some((e) => e.workflowIds.includes(w.id))
-                          )
-                            names.push("システム関連");
-                          return (
-                            <td key={w.id}>
-                              {names.length ? names.join(" / ") : "—"}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <p>
-                この対象の業務データは未登録です。メモで「何を参照・登録するか」を補足すると接点が見えてきます。
-              </p>
-            )}
-            {selected ? (
-              <aside
-                className="overview-focus"
-                aria-label="選択したデータの根拠"
-              >
-                <h3>{selected.asset.label}の関係と確認事項</h3>
-                <p>
-                  {selected.asset.description || "意味・対象範囲は未登録です。"}
-                </p>
-                <p>
-                  記録上の関連システム：
-                  {selected.systems.map((s) => s.label).join(" / ") || "未確認"}
-                </p>
-                <p className="uncertainty-note">
-                  正本・管理責任・識別子・対象範囲は、この一覧だけでは確定できません。
-                  {selected.systems.length > 1
-                    ? "複数システムとの関係があります。同じデータの複製か、役割が異なるか確認してください。"
-                    : "担当者にデータの意味と管理先を確認できます。"}
-                </p>
-                <ul>
-                  {selected.usages.map((u, i) => (
-                    <li key={i}>
-                      {u.process.label}：{roles[u.relation]} · 根拠：
-                      {u.process.evidence || "未登録"}
-                      {u.process.status !== "confirmed" ? "（要確認）" : ""}
-                    </li>
-                  ))}
-                  {selected.direct.map((e) => (
-                    <li key={e.id}>
-                      {label(e.source)} → {label(e.target)}：{roles[e.relation]}{" "}
-                      · {e.label || "根拠未登録"}
-                    </li>
-                  ))}
-                  {selected.transfers.map((f) => (
-                    <li key={f.id}>
-                      {label(f.sourceSystemId)}{" "}
-                      {f.direction === "bidirectional"
-                        ? "↔"
-                        : f.direction === "unknown"
-                          ? "—（方向未確認）"
-                          : "→"}{" "}
-                      {label(f.targetSystemId)} · {f.evidence || "根拠未登録"}
-                      {f.status !== "confirmed" ? "（要確認）" : ""}
-                    </li>
-                  ))}
-                  {selected.materialLinks.map((h) => (
-                    <li key={`${h.sourceWorkflowId}/${h.id}`}>
-                      物：{h.material} ·{" "}
-                      {h.dataContinuity === "linked"
-                        ? "対応確認済み"
-                        : h.dataContinuity === "broken"
-                          ? "途切れ確認"
-                          : "対応未確認"}{" "}
-                      · 根拠：{h.evidence || "未登録"}
-                    </li>
-                  ))}
-                </ul>
-                <div className="bird-assets">
-                  {selected.workflows.map((w) => (
-                    <button key={w.id} onClick={() => onOpen(w.id)}>
-                      {w.name}の手順へ →
-                    </button>
-                  ))}
-                </div>
-              </aside>
-            ) : (
-              <p className="uncertainty-note">
-                システムとデータの同時利用だけから、保存先や連携を推定しません。
-              </p>
-            )}
-          </section>
-        </>
-      ) : null}
+      {filters.topic === "data" ? <OverviewDataMatrix graph={graph} view={view} onOpen={onOpen} initialSelectedId={selectedId} /> : null}
       {filters.topic === "business" ? (
         <>
           <h2>業務の目的と範囲をつかむ</h2>
@@ -375,48 +185,6 @@ export function BusinessOverview({
             </div>
           ) : null}
         </>
-      ) : null}
-      {filters.topic === "data" ? (
-        <section className="bird-transfers">
-          <h2>記録済みのシステム間受け渡し</h2>
-          {view.flows.length ? (
-            view.flows.map((f) => (
-              <article key={f.id}>
-                <strong>
-                  {label(f.sourceSystemId)}{" "}
-                  {f.direction === "bidirectional"
-                    ? "↔"
-                    : f.direction === "unknown"
-                      ? "—（方向未確認）"
-                      : "→"}{" "}
-                  {label(f.targetSystemId)}
-                </strong>
-                <span>
-                  {f.dataIds.map(label).join(" / ") || "データ未確認"} ·{" "}
-                  {f.automation === "automatic"
-                    ? "自動"
-                    : f.automation === "manual"
-                      ? "手動"
-                      : f.automation === "mixed"
-                        ? "自動・手動混在"
-                        : "方式未確認"}
-                </span>
-                <small>
-                  {view.workflows
-                    .filter((w) => f.workflowIds.includes(w.id))
-                    .map((w) => w.name)
-                    .join(" / ")}{" "}
-                  · {f.evidence || "根拠未登録"} ·{" "}
-                  {f.status === "confirmed" ? "確認済み" : "要確認"}
-                </small>
-              </article>
-            ))
-          ) : (
-            <p>
-              受け渡しは未登録です。共有データがあっても、業務間の受け渡しがあるとは確定できません。
-            </p>
-          )}
-        </section>
       ) : null}
       <details className="overview-reading">
         <summary>鳥瞰の読み方と設計の参考</summary>
