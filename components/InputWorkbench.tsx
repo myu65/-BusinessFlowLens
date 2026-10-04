@@ -1198,7 +1198,7 @@ export function InputWorkbench({
                           })}>
                           <option value="read">参照する</option>
                           <option value="receive">受け取る</option>
-                          <option value="create">新しく作る</option>
+                          <option value="create">情報を新たに作る</option>
                           <option value="update">更新する</option>
                           <option value="send">渡す</option>
                         </select>
