@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { SourceDocument, SourceImage } from "@/lib/source-document";
 import { DOCUMENT_MAX_BYTES } from "@/lib/source-document";
 import { ProjectChangedError, type BusinessFlowRepository, type NewWorkflowRevision, type ProjectSnapshot, type WorkflowRevision, type WorkflowRevisionSummary } from "./repository";
 import { normalizeSnapshotGraph } from "./normalize";
 import { SnowflakeClient, snowflakeStorageConfig, type SnowflakeSession, type SnowflakeStorageConfig } from "./snowflake-client";
 import { snowflakeObjects, snowflakeSetupStatements } from "./snowflake-schema";
+import { withStageDirectory } from "./temporary-stage";
 
 type StoredImage = { path: string; sha256: string; width: number; height: number; byteSize: number };
 type SourceRow = { DOCUMENT: SourceDocument; ORIGINAL_PATH: string; IMAGES: Record<string, StoredImage> };
@@ -83,18 +83,13 @@ export class SnowflakeBusinessFlowRepository implements BusinessFlowRepository {
     });
   }
 
-  private async temporary<T>(work: (folder: string) => Promise<T>): Promise<T> {
-    const base = resolve(tmpdir()), folder = await mkdtemp(join(base,"bfl-stage-"));
-    try { return await work(folder); }
-    finally { const absolute = resolve(folder); if (absolute.startsWith(base + sep) && absolute.slice(base.length + 1).startsWith("bfl-stage-")) await rm(absolute,{recursive:true,force:true}); }
-  }
   private stagePath(path: string): string {
     if (!/^projects\/[a-f0-9]{64}\/[a-f0-9]{64}\/(?:original|images\/[a-f0-9]{64})\/[a-f0-9]{64}\/(?:original\.(?:xlsx|pdf|docx|pptx|png|jpeg|webp)|page\.jpeg)$/.test(path)) throw new Error("元資料の保存位置を確認できません。");
     return `@${this.object("SOURCES")}/${path}`;
   }
   private async put(session: SnowflakeSession, path: string, bytes: Uint8Array): Promise<void> {
     this.stagePath(path);
-    await this.temporary(async folder => {
+    await withStageDirectory(async folder => {
       const filename = path.split("/").at(-1)!, file = join(folder,filename);
       await writeFile(file,bytes,{mode:0o600});
       const rows = await session.query(`PUT ${sqlString(`file://${file.replace(/\\/g,"/")}`)} @${this.object("SOURCES")}/${path.slice(0,path.lastIndexOf("/"))} AUTO_COMPRESS=FALSE OVERWRITE=FALSE`);
@@ -102,7 +97,7 @@ export class SnowflakeBusinessFlowRepository implements BusinessFlowRepository {
     });
   }
   private async get(session: SnowflakeSession, path: string, sha256: string, byteSize: number): Promise<Uint8Array> {
-    return this.temporary(async folder => {
+    return withStageDirectory(async folder => {
       const rows = await session.query(`GET ${this.stagePath(path)} ${sqlString(`file://${folder.replace(/\\/g,"/")}/`)} PARALLEL=1`);
       if (rows.length !== 1 || String(rows[0].status ?? rows[0].STATUS) !== "DOWNLOADED") throw new Error("元資料をステージから開けませんでした。再試行できます。");
       const bytes = await readFile(join(folder,path.split("/").at(-1)!));
