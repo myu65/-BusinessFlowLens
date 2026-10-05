@@ -6,6 +6,7 @@ import { groundStepEvidence, groundVisualRelations } from "./source-grounding";
 import { groundDiagramReferences, markDiagramVariants } from "./document-context";
 import type { WorkflowSourceImage } from "../source-document";
 import { CORRECTION_FIELDS, correctionCandidate, correctionPrior, type WorkflowCorrection, type CorrectionField } from "./workflow-correction";
+import { discardWithheldResultWrites } from "../rework-flow";
 import { normalizeWorkBoundary, separateWorkParties } from "../work-boundary";
 import { buildAssetResolutionContext, scopedAssetNodes } from "./asset-context";
 import type { AIConfigurationStatus } from "./status";
@@ -776,6 +777,7 @@ Rules:
 8a. Every step must have a meaning object. It captures business changes: purpose (why), basis (evidence used for judgment), result (what is decided/changed), next (what work this result triggers), condition and halt. Keep each unmentioned string empty. If no business meaning is stated, use empty strings, halt=false and certainty=unknown. A stated calculation, save, update, notification or decision has a result even when its purpose or decision rule is unknown: describe only that stated change, for example a calculated lot cost or a file made available for reference. Do not leave a stated result empty merely because other fields are unknown. Do not repeat a generic record name as a business outcome, invent a credit/ATP rule, or assume that checking inventory means shipment is allowed. Mark a modest interpretation inferred; keep explicit outcomes confirmed. Evidence must quote the exact source supporting the nonempty fields. Never fill unknown fields to complete the object.
 8g. An explicit stop/hold is a known business change even if its owner or release is unknown. Give the dedicated stop/hold step meaning with halt=true, result describing what remains stopped, and condition when stated. A common judgment or approval is not itself an unconditional hold: keep its normal action separate from the conditional hold/notification branch. For example, 'check and approve the master; when duplicates are suspected, hold approval and ask purchasing' requires a common check, its stated approval path, and a conditional hold/request path, without connecting the held path to publishing. Leave release authority and restart unknown instead of silently completing the flow.
 8h. Work on an exception continues while the business result remains held. Preserve explicitly described notification, investigation and cause repair in their stated order, without inventing release, retry or normal completion. 'Mark the instrument unusable and then notify the chief' has a stop-to-notification connection. Do not skip that stopping action by drawing the notification directly from the earlier check. 'Stop the update, notify monitoring and fix the cause' retains those exception actions; an unstated retry is a question. The 3-10 step preference must not collapse a normal decision, hold and response into a step that makes both paths stop.
+8i. A release request is response work, not a release. If the source explicitly says to re-prepare and return to the SAME earlier sample-setting or confirmation step, connect to that existing stepKey; do not create a duplicate retest/confirmation task that hides the return. Keep result registration or use held while the stated rework continues. Do not add release authority, approval or a result write. The normal registration path and the conditional rework path branch from the actual check before registration, never from an already completed registration. If a return destination is not stated, leave it unknown.
 9. Capture system-to-system dataFlows ONLY when the transcript explicitly describes information moving from one named system/tool to another, including human transcription. Examples: "ERPからWMSへCSVを送る", "Excelを見ながらERPへ手入力". Do NOT infer an API or integration merely because two systems appear in adjacent steps.
 10. For each dataFlow record source system, target system, transferred business data, transferType, direction, automation, frequency if stated, evidence, and relatedStepKeys. Use unknown rather than guessing a transfer method.
 11. Manual re-entry is a legitimate dataFlow: transferType=manual and automation=manual.
@@ -1582,7 +1584,7 @@ Keep the check's stable key, add a key for the stated approval, and keep every u
       scopedAssetNodes(args.graph, args.workflow).filter(n => n.kind === "system").flatMap(n => [n.label, ...(n.aliases ?? [])])),
     evidenceSource), evidenceSource);
   const sourceDraft = groundVisualRelations(validateAITransitions(
-    scopeReferenceDataFlows(sourceSemantics, args.graph, args.workflow.id, args.interview, args.followUpAnswers ?? []),
+    discardWithheldResultWrites(scopeReferenceDataFlows(sourceSemantics, args.graph, args.workflow.id, args.interview, args.followUpAnswers ?? []), evidenceSource),
     evidenceSource,
     followUpAnswers,
   ), evidenceSource);
