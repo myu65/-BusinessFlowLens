@@ -154,6 +154,7 @@ export function previewWorkflowMerge(input: MergeInput): {graph: LensGraph; tran
     documentEvidence:unique([...(context?.documentEvidence??[]),...(other?.documentEvidence??[])]),
     followUpAnswers:unique([...(context?.followUpAnswers??[]),...(other?.followUpAnswers??[])]),
     excludedSteps:unique([...(context?.excludedSteps??[]),...(other?.excludedSteps??[]).map(s=>({...s,stepKey:`merged-${encodeURIComponent(sourceId)}-${s.stepKey}`}))]),
+    excludedTransitions:unique([...(context?.excludedTransitions??[]),...(other?.excludedTransitions??[]).map(t=>({...t,fromStepKey:mappedStepKey(t.fromStepKey),toStepKey:mappedStepKey(t.toStepKey)}))]),
     protectedDetails:unique([...(context?.protectedDetails??[]),...(other?.protectedDetails??[]).map(p=>({...p,stepKey:mappedStepKey(p.stepKey)}))]),
     systemProfiles:unique([...(context?.systemProfiles??[]),...(other?.systemProfiles??[])]),systemDependencies:unique([...(context?.systemDependencies??[]),...(other?.systemDependencies??[])])},
     ...(landscape?{landscape:{...landscape,domains:ids([...(target!.landscape?.domains??[]),...(source!.landscape?.domains??[])]),materialHandoffs:unique([...(target!.landscape?.materialHandoffs??[]),...(source!.landscape?.materialHandoffs??[])])}}:{})};

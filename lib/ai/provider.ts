@@ -853,7 +853,7 @@ ${JSON.stringify(args.additionContext)}\n` : ""}
 
 ${
   args.previousReview
-    ? `Previous review draft, for comparison and stable keys. The interview above is the latest source and replaces earlier interview text: reflect additions, corrections and removals. The previous draft is not additional source evidence. Specifically recorded humanEdits.after remain authoritative: rereading unchanged older wording does not retract a human edit. Preserve those values and human-selected graph positions. humanPlacements and edits with field=placement record where a person inserted work; they do NOT freeze its AI-generated name, action, result, or a combined check-and-approval grouping. Splitting a step when a later answer clarifies a pre-approval branch is allowed; retain the human position and actual field corrections. When a source conflicts with a human edit, describe the unresolved discrepancy in warnings; never claim the human correction was overwritten, because the application keeps it. Do not freeze unedited fields:
+    ? `Previous review draft, for comparison and stable keys. The interview above is the latest source and replaces earlier interview text: reflect additions, corrections and removals. The previous draft is not additional source evidence. Specifically recorded humanEdits.after remain authoritative: rereading unchanged older wording does not retract a human edit. Preserve those values and human-selected graph positions. excludedTransitions are arrows a person removed, not removed tasks. Do not recreate them under new keys or paraphrased conditions. humanPlacements and edits with field=placement record where a person inserted work; they do NOT freeze its AI-generated name, action, result, or a combined check-and-approval grouping. Splitting a step when a later answer clarifies a pre-approval branch is allowed; retain the human position and actual field corrections. When a source conflicts with a human edit, describe the unresolved discrepancy in warnings; never claim the human correction was overwritten, because the application keeps it. Do not freeze unedited fields:
 ${JSON.stringify(buildPreviousReviewContext(args.previousReview))}
 `
     : ""
@@ -1438,6 +1438,7 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
           : undefined,
       })),
     excludedSteps: raw.excludedSteps,
+    excludedTransitions: raw.excludedTransitions,
     extraction: raw.extraction,
     protectedDetails: raw.protectedDetails,
     documentEvidence: raw.documentEvidence,
@@ -1650,6 +1651,7 @@ Keep the check's stable key, add a key for the stated approval, and keep every u
         origin: h.origin ?? "ai",
       })),
       excludedSteps: draft.excludedSteps,
+      excludedTransitions: draft.excludedTransitions,
       protectedDetails: draft.protectedDetails,
     },
     provider: providerLabel(),

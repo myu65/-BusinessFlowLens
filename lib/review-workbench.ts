@@ -10,6 +10,7 @@ import {
 import { findConfirmedAsset } from "./refinement";
 import { resolveHandoffInformation } from "./handoff-information";
 import { REVIEW_FIELD_LABELS, reviewFieldLabel } from "./review-copy";
+import {recordConnectionEdits} from './review-connection-edits';
 import { boundaryScope, boundaryVisibility, separateWorkParties } from "./work-boundary";
 import {
   applyInputOrganization,
@@ -239,6 +240,7 @@ export function previewReviewGraph(
         questions: review.questions,
         warnings: review.warnings,
         excludedSteps: review.excludedSteps,
+        excludedTransitions: review.excludedTransitions,
         extraction: review.extraction,
         protectedDetails: review.protectedDetails,
         organization: review.organization,
@@ -581,7 +583,7 @@ export function recordReviewEdits(
   before: ExtractionReview,
   after: ExtractionReview,
 ) {
-  let recorded = after;
+  let recorded = recordConnectionEdits(before,after);
   for (const step of after.steps) {
     const prior = before.steps.find((s) => s.stepKey === step.stepKey);
     if (!prior) continue;
@@ -622,6 +624,10 @@ export function recordReviewEdits(
 }
 
 export function describeHumanEdit(edit: import("./graph").HumanEdit): string[] {
+  if(edit.field==='connection'){
+    const describe=(raw:unknown)=>{if(!raw)return '接続なし';const edge=raw as {fromName?:string;toName?:string;condition?:string;holdEffect?:string;certainty?:string};return `${edge.fromName??'元の手順'} → ${edge.toName??'次の手順'}${edge.condition?`（${edge.condition}）`:''} · ${edge.holdEffect==='response'?'保留中の対応':edge.holdEffect==='resume'?'保留を解除して再開':edge.certainty==='unknown'?'進み方は未確認':'通常の流れ'}`;};
+    return [`次の手順・戻り先：${describe(edit.before)} → ${describe(edit.after)}`];
+  }
   if (edit.field === "placement") return ["追加する位置を、人が図の上で指定しました。入力した話は原文の根拠に残しています。"];
   const labels = REVIEW_FIELD_LABELS;
   const value = (v: unknown): string =>

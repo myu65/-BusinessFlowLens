@@ -3261,3 +3261,10 @@ button:disabled { cursor:not-allowed; opacity:.45; }
 .merge-step { margin:16px 0; padding:16px; border:1px solid #d6e2d9; border-radius:9px; background:white; }.merge-step-comparison { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }.merge-step-facts { padding:12px; background:#f3f7f4; border-radius:6px; }.merge-step-facts p { margin:6px 0; }.merge-difference { padding:8px; background:#fff1d7; border-left:3px solid #b78835; }
 .workflow-merge-panel pre,.workflow-merge-history pre { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; padding:12px; background:#f0f5f1; }.workflow-merge-history { margin:12px 0; }.workflow-merge-history article { padding:12px; border:1px solid #d5e3d9; margin:10px 0; border-radius:7px; }.workflow-merge-history h4 { margin:6px 0; }
 @media(max-width:700px) { .workflow-merge-dialog { padding:14px; }.merge-step-comparison { grid-template-columns:1fr; }.merge-heading { flex-direction:column; } }
+.input-connection-editor { margin-top: 1.2rem; padding: 1rem; border: 1px solid var(--line); border-radius: .65rem; background: #fafbf8; }
+.input-connection-editor article { padding: .75rem 0; border-bottom: 1px solid var(--line); }
+.input-connection-editor article div { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .5rem; }
+.input-connection-editor label { display: grid; gap: .3rem; margin: .75rem 0; font-size: .85rem; }
+.input-connection-editor fieldset { border: 0; padding: .75rem 0; min-width: 0; }
+.input-connection-editor select, .input-connection-editor input, .input-connection-editor textarea { width: 100%; min-width: 0; }
+.input-focus-actions { display: flex; flex-wrap: wrap; gap: .4rem; }

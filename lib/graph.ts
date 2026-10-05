@@ -59,7 +59,7 @@ export type Workflow = {
   landscape?: WorkflowLandscape;
   reviewContext?: Pick<
     ExtractionReview,
-    "summary" | "trigger" | "outcome" | "questions" | "warnings" | "excludedSteps" | "extraction" | "protectedDetails" | "organization" | "systemProfiles" | "systemDependencies" | "documentEvidence"
+    "summary" | "trigger" | "outcome" | "questions" | "warnings" | "excludedSteps" | "excludedTransitions" | "extraction" | "protectedDetails" | "organization" | "systemProfiles" | "systemDependencies" | "documentEvidence"
   > & {
     followUpAnswers?: FollowUpAnswer[];
   };
@@ -381,6 +381,7 @@ export type ExtractionReview = {
   outcome: string | null;
   steps: ExtractionReviewStep[];
   excludedSteps?: ExtractionReviewStep[];
+  excludedTransitions?: ExtractionTransition[];
   transitions: ExtractionTransition[];
   dataFlows: ExtractionDataFlow[];
   questions: ExtractionQuestion[];
@@ -1569,6 +1570,7 @@ export function buildWorkflowReviewFromGraph(
     questions: workflow?.reviewContext?.questions ?? [],
     warnings: workflow?.reviewContext?.warnings ?? [],
     excludedSteps: workflow?.reviewContext?.excludedSteps,
+    excludedTransitions: workflow?.reviewContext?.excludedTransitions,
     extraction: workflow?.reviewContext?.extraction,
     protectedDetails: workflow?.reviewContext?.protectedDetails,
     organization: workflow?.reviewContext?.organization,

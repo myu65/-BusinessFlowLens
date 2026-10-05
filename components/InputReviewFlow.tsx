@@ -30,6 +30,7 @@ export function InputReviewFlow({
   choose,
   onOverview,
   onEdit,
+  onEditConnections,
   onExclude,
   onWorkflow,
   onConfirmIncomingData,
@@ -44,6 +45,7 @@ export function InputReviewFlow({
   choose: (step: ExtractionReviewStep) => void;
   onOverview?: () => void;
   onEdit: () => void;
+  onEditConnections?: () => void;
   onExclude: () => void;
   onWorkflow: (id: string, stepKey?: string) => void;
   onConfirmIncomingData?: (handoff: ReviewIncomingHandoff, name: string, dataId: string) => void;
@@ -150,9 +152,9 @@ export function InputReviewFlow({
           )}
           <h3 title={selected.name}>{inputStepName(selected)}</h3>
         </div>
-        <button className="button-secondary" disabled={busy} onClick={onEdit}>
+        <div className="input-focus-actions"><button className="button-secondary" disabled={busy} onClick={onEdit}>
           手順を編集
-        </button>
+        </button>{onEditConnections&&<button className="button-secondary" disabled={busy} onClick={onEditConnections}>矢印を直す</button>}</div>
       </div>
       <div className="input-who">
         <span>
@@ -205,7 +207,7 @@ export function InputReviewFlow({
           <h4>停止・保留からの対応</h4>
           {heldInputs.map(({ transition, stopped }, i) => (
             <div key={i}>
-              <p>停止・保留中に進む対応 · {transition.certainty === "confirmed" ? "原文に明示" : "接続は要確認"}</p>
+              <p>停止・保留中に進む対応 · {transition.certainty === "confirmed" ? transition.humanEdits?.length ? "利用者が確認" : "原文に明示" : "接続は要確認"}</p>
               <button onClick={() => choose(stopped)}>停止した処理：{inputStepName(stopped)} ←</button>
             </div>
           ))}
