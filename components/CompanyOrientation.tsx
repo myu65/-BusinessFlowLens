@@ -50,6 +50,7 @@ export function CompanyOrientation({
           onWorkflow={onWorkflow}
           onActivity={onActivity}
           onSystem={onSystem}
+          onSystems={onSystems}
           position={position}
           onPositionChange={onPositionChange}
         />
@@ -58,6 +59,7 @@ export function CompanyOrientation({
           className="company-stories-map"
           aria-label="保存した仕事と人・道具・情報"
         >
+          <div className="company-map-heading-actions"><button onClick={onSystems}>システム・道具から調べる →</button></div>
           <h2>保存した仕事のつながり</h2>
           <p>
             話を足すと、会社の構造が育ちます。活動への分類は後から整えられます。
@@ -167,10 +169,6 @@ export function CompanyOrientation({
               <span>{example.name}</span>
             </button>
           )}
-          <button onClick={onSystems}>
-            <strong>システム・道具から調べる →</strong>
-            <span>どんな仕事を支え、どの情報を渡しているか</span>
-          </button>
         </div>
       )}
     </section>

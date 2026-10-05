@@ -232,6 +232,8 @@
 .company-map-heading-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
 .company-map-heading-actions > span { white-space: nowrap; color: #4e6d51; font-size: 12px; }
 .company-map-heading-actions .kg-primary { white-space: normal; }
+.system-relationship-map .company-map-heading { scroll-margin-top: 86px; }
+@media (max-width: 700px) { .system-relationship-map .company-map-heading { scroll-margin-top: 150px; } }
 .relationship-open-work { margin: 0 0 14px; }
 .company-map-heading h2 { font-size: 15px; }
 .company-map-heading p, .company-map-caption { font-size: 11px; margin: 4px 0 8px; }

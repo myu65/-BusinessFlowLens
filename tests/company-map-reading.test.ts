@@ -19,6 +19,8 @@ test("company orientation restores the chosen activity and relation without chan
   assert.match(html, /関係の根拠/);
   assert.equal((html.match(/この活動の仕事を見る/g) ?? []).length, 1);
   assert.ok(html.indexOf("この活動の仕事を見る") < html.indexOf('aria-label="活動の関係図"'));
+  assert.equal((html.match(/システム・道具から調べる/g) ?? []).length, 1);
+  assert.ok(html.indexOf("システム・道具から調べる") < html.indexOf('aria-label="活動の関係図"'));
   assert.equal(JSON.stringify(graph), before);
 
   const other = view.rows.filter(r => !r.capabilities.some(c => c.activity.id === relation.source));

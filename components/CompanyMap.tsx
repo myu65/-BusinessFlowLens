@@ -14,6 +14,7 @@ export function CompanyMap({
   onWorkflow,
   onActivity,
   onSystem,
+  onSystems,
   position,
   onPositionChange,
 }: {
@@ -23,6 +24,7 @@ export function CompanyMap({
   onWorkflow: (id: string, stepId?: string) => void;
   onActivity?: (id: string) => void;
   onSystem?: (id: string) => void;
+  onSystems?: () => void;
   position?: CompanyReadingPosition;
   onPositionChange?: (position: CompanyReadingPosition) => void;
 }) {
@@ -135,6 +137,7 @@ export function CompanyMap({
           <p>まず活動のまとまりを見渡します。選ぶと、前後の活動と、その中の仕事を開けます。</p>
         </div>
         <div className="company-map-heading-actions"><span>{activities.length}の活動</span>
+          {onSystems && <button onClick={onSystems}>システム・道具から調べる →</button>}
           {selected && onActivity && <button className="kg-primary" onClick={() => onActivity(selected.id)}>この活動の仕事を見る →</button>}
         </div>
       </div>
