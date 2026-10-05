@@ -23,6 +23,7 @@ import {
 } from "../review-connections";
 import { retainRegisteredGrouping } from "../input-knowledge";
 import { effectiveFollowUpAnswers, scopeReferenceDataFlows, groundedReferenceReading, referencePromptAnswer, referenceSourceClauses } from "../question-evidence";
+import {dialogueCitationSource} from '../input-dialogue';
 import type {
   Confidence,
   ExtractionQuestion,
@@ -861,7 +862,7 @@ ${JSON.stringify(buildPreviousReviewContext(args.previousReview))}
 
 ${
   answered.length > 0
-    ? `Follow-up Q&A. Treat the answers as additional interview evidence:
+    ? `Follow-up Q&A. Treat the active answers as additional interview evidence. They clarify or correct the corresponding earlier unknown statements. Do not keep an old "actor/sequence unknown" summary when a later answer states that fact. Superseded answers are retained in history but are not active evidence:
 ${JSON.stringify(answered)}
 `
     : ""
@@ -874,6 +875,7 @@ Use existing company context to interpret shorthand and references such as "ERP"
 - If the interview says "after that we do the usual shipping process" and an existing shipping workflow is present, do not invent its internal steps; describe the handoff and ask only what is still needed.
 - If a follow-up answer resolves a question, update the draft and remove that question.
 - Ask new questions only for remaining material gaps.
+- Each question asks about one concrete gap. Do not bundle the actor, sequence, tools and exceptions into a single multi-part question; prioritize what helps the person understand or correct the diagram next.
 
 Before returning, check that every explicitly performed action in the current interview and direct answers remains represented. Splitting a combined check/approval must retain BOTH the check and the stated approval, as well as any pre-approval request. A missing approval method, result-record location, approval condition, or response to the request is a question about that field, not a reason to delete the stated approval. Do not invent the missing fields or a request-to-approval connection. Human exclusions and explicit retractions still remove the relevant action.
 
@@ -1579,15 +1581,19 @@ Keep the check's stable key, add a key for the stated approval, and keep every u
   rawDraft = groundedDiagram.review;
   const prior = correctionPrior(args.previousReview, rawDraft, args.correction, rawDraft.correctionFields);
   const evidenceSource = [args.interview, ...additionalEvidence, groundedDiagram.interpretation].join("\n");
+  // Corrections replace active facts, but do not make preserved older quotes fabricated.
+  // Historical answers are used only for literal citation checks, never for inference,
+  // transfer scoping, transition validation, or the model's current source.
+  const citationSource=[evidenceSource,dialogueCitationSource(followUpAnswers)].join('\n');
   const sourceSemantics = distinguishRegistrationInputs(separateDependencyDescriptions(
     supplementSourceDependencies(validateSystemDependencies(
-      separateMissingFacts(groundStepEvidence(separateWorkParties(normalizeDraft(rawDraft)), evidenceSource), evidenceSource), evidenceSource, false), evidenceSource,
+      separateMissingFacts(groundStepEvidence(separateWorkParties(normalizeDraft(rawDraft)), citationSource), evidenceSource), evidenceSource, false), evidenceSource,
       scopedAssetNodes(args.graph, args.workflow).filter(n => n.kind === "system").flatMap(n => [n.label, ...(n.aliases ?? [])])),
     evidenceSource), evidenceSource);
   const sourceDraft = groundVisualRelations(validateAITransitions(
     discardWithheldResultWrites(scopeReferenceDataFlows(sourceSemantics, args.graph, args.workflow.id, args.interview, args.followUpAnswers ?? []), evidenceSource),
     evidenceSource,
-    followUpAnswers,
+    effectiveFollowUpAnswers(followUpAnswers),
   ), evidenceSource);
 
   if (!rawDraft.steps.length && !sourceDraft.systemDependencies?.some(d => d.certainty !== "unknown" && !d.rejected)

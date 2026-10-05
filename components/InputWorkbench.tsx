@@ -48,6 +48,8 @@ import type {ProjectSnapshot} from '@/lib/storage/repository';
 import {workflowMergeDestination,workflowMergeSite} from '@/lib/workflow-merge';
 import {emptyLandscape} from '@/lib/landscape';
 import {FlowConnectionEditor} from './FlowConnectionEditor';
+import {InputDialogue} from './InputDialogue';
+import {appendDialogueAnswer, dialogueAnswerStatus, includePendingDialogueAnswers} from '@/lib/input-dialogue';
 
 const REVIEW_PAGE_SIZE = INPUT_CANVAS_PAGE_SIZE;
 
@@ -118,10 +120,14 @@ export function InputWorkbench({
   const [organizeNotice, setOrganizeNotice] = useState("");
   const [correctionText, setCorrectionText] = useState("");
   const [correctionScope, setCorrectionScope] = useState("all");
+  const [correctAnswerIndex,setCorrectAnswerIndex]=useState<number|undefined>();
+  const [inputMode,setInputMode]=useState<'dialogue'|'summary'>('dialogue');
+  useEffect(()=>{try{const value=localStorage.getItem('lens-input-mode');if(value==='dialogue'||value==='summary')setInputMode(value);}catch{}},[]);
+  function changeInputMode(mode:'dialogue'|'summary'){setInputMode(mode);try{localStorage.setItem('lens-input-mode',mode);}catch{}}
   const [renameOpen, setRenameOpen] = useState(false);
   const [mergeOpen,setMergeOpen]=useState(false);
   const [undoCorrection,setUndoCorrection]=useState<{draft:InputDraft|null}|null>(null);
-  useEffect(()=>{setCorrectionText("");setCorrectionScope("all");setRenameOpen(false);setMergeOpen(false);setUndoCorrection(null);},[key]);
+  useEffect(()=>{setCorrectionText("");setCorrectionScope("all");setCorrectAnswerIndex(undefined);setRenameOpen(false);setMergeOpen(false);setUndoCorrection(null);},[key]);
   const [operation, setOperation] = useState<"organize" | "addition" | "save">("organize");
   const [waitingSeconds, setWaitingSeconds] = useState(0);
   useEffect(() => {
@@ -417,7 +423,8 @@ export function InputWorkbench({
     documentStart?: { workflow: Workflow; key: string; evidence: DocumentEvidence },
     correction?: WorkflowCorrection,
   ) {
-    if (!text.trim()) return;
+    if (!text.trim()) return false;
+    if(!documentStart)answers=includePendingDialogueAnswers(answers,draft?.answers??{});
     const w = documentStart?.workflow ?? workflow ?? {
       id: `note-${crypto.randomUUID()}`,
       familyId: undefined,
@@ -454,7 +461,7 @@ export function InputWorkbench({
         }),
       });
       const payload = await response.json();
-      if (controller.signal.aborted || organizeRequest.current !== controller) return;
+      if (controller.signal.aborted || organizeRequest.current !== controller) return false;
       if (!response.ok) {
         responseFailure = payload.code === "invalid_response" ? "unusable" : "failure";
         throw new Error(payload.error ?? "構造化に失敗しました。");
@@ -501,12 +508,14 @@ export function InputWorkbench({
           }),
         );
       }
+      return true;
     } catch (cause) {
-      if (controller.signal.aborted || organizeRequest.current !== controller) return;
+      if (controller.signal.aborted || organizeRequest.current !== controller) return false;
       if (aiConfig?.configured) setAIResponse(responseFailure);
       setError(
         cause instanceof Error ? cause.message : "読み取りに失敗しました。",
       );
+      return false;
     } finally {
       if (organizeRequest.current === controller) { organizeRequest.current=null;setBusy(false); }
     }
@@ -671,6 +680,16 @@ export function InputWorkbench({
       }))
       .filter((a) => a.answer.trim());
     await organize([...draft.answerHistory, ...answers]);
+  }
+  const answerHistory=draft?.answerHistory??saved?.reviewContext?.followUpAnswers??[];
+  const newDialogue=answerHistory.slice(saved?.reviewContext?.followUpAnswers?.length??0);
+  async function correctFromDialogue(text:string,correctIndex=correctAnswerIndex){
+    const scope=correctIndex===undefined&&correctionScope==='step'?selected?.stepKey:undefined;
+    const question=correctIndex===undefined?(scope&&selected?`「${selected.name}」への補足・訂正`:'この仕事の流れへの補足・訂正'):answerHistory[correctIndex]?.question??'';
+    const history=appendDialogueAnswer(answerHistory,question,text,'correction',correctIndex);
+    const applied=await organize(history,memo,undefined,{text:text.trim(),stepKey:scope});
+    if(applied)setCorrectAnswerIndex(undefined);
+    return applied;
   }
   const memoComposer = (<>
           <label className="kg-edit-field input-main-note">
@@ -1297,7 +1316,7 @@ export function InputWorkbench({
         <section className="input-note-pane">
           <div className="input-note-heading">
             <h2>
-              {documentEvidence?.length?"元資料と補足":"話とメモ"}
+              {documentEvidence?.length?"元資料と補足":inputMode==='dialogue'?"図を見ながら話す":"話とメモ"}
             </h2>
             {key !== NEW_MEMO_ID && (
               <button
@@ -1312,16 +1331,28 @@ export function InputWorkbench({
               </button>
             )}
           </div>
+          <nav className="input-mode-switch" aria-label="話の入力方法"><button aria-pressed={inputMode==='dialogue'} onClick={()=>changeInputMode('dialogue')}>対話で整理</button><button aria-pressed={inputMode==='summary'} onClick={()=>changeInputMode('summary')}>まとめて書く</button></nav>
           {!documentEvidence?.length&&<button className="input-document-entry button-secondary" disabled={busy} onClick={() => { documentReturnKey.current=key;setDocumentInputOpen(true); }}>資料・画像から始める</button>}
-          {!review && !documentEvidence?.length && memoComposer}
-          {!!documentEvidence?.length&&<DocumentOriginalPane projectId={projectId} evidence={documentEvidence} sourceRefs={selected?.sourceRefs}/>}
+          {!review && !documentEvidence?.length && <div hidden={inputMode!=='summary'}>{memoComposer}</div>}
+          {!!documentEvidence?.length&&<DocumentOriginalPane projectId={projectId} evidence={documentEvidence} sourceRefs={selected?.sourceRefs} compact={inputMode==='dialogue'}/>}
+          {(review||!documentEvidence?.length)&&<div hidden={inputMode!=='dialogue'}><InputDialogue key={key} source={memo} onSource={text=>onTranscripts({...transcripts,[key]:text})}
+            review={review} history={answerHistory} answers={draft?.answers??{}} busy={busy}
+            blockedReason={stale?'本文の変更を先に流れへ反映してください。':edit?'編集中の手順を先に反映してください。':addition.trim()?'入力中の追記を先に図へ反映してください。':''}
+            onStart={()=>organize()}
+            onAnswerText={(question,text)=>onDraft(key,{...ensureDraft(review!),answers:{...(draft?.answers??{}),[question]:text}})}
+            onAnswer={(question,text)=>organize(appendDialogueAnswer(answerHistory,question,text))}
+            onDefer={question=>onDraft(key,{...ensureDraft(review!),answerHistory:appendDialogueAnswer(answerHistory,question,'まだ分からない','deferred')})}
+            correctionText={correctionText} onCorrectionText={setCorrectionText} correctionScope={correctionScope} onCorrectionScope={setCorrectionScope}
+            correctIndex={correctAnswerIndex} onCorrectIndex={setCorrectAnswerIndex}
+            selectedName={selected&&inputStepName(selected)} onCorrection={correctFromDialogue}/></div>}
           {!review&&!!documentEvidence?.length&&<div className="input-document-organizing"><p>{busy?"原図を読み、手順と矢印を組み立てています。元資料を見ながら待てます。":"元資料は残っています。もう一度流れを作れます。"}</p>{!busy&&<button className="button-primary" onClick={()=>organize()}>この資料から流れを作る</button>}</div>}
-          {review&&<section className="input-correction" aria-label="流れを言葉で補足・訂正する">
+          {review&&<section hidden={inputMode!=='summary'} className="input-correction" aria-label="流れを言葉で補足・訂正する">
             <h3>違うところ・足りないところを直す</h3>
-            <label>直す範囲<select aria-label="言葉で直す範囲" value={correctionScope} onChange={event=>setCorrectionScope(event.target.value)}><option value="all">この仕事の流れ全体</option>{selected&&<option value="step">選んだ手順：{inputStepName(selected)}</option>}</select></label>
+            {correctAnswerIndex!==undefined&&<p>訂正する回答：{answerHistory[correctAnswerIndex]?.question}</p>}
+            <label>直す範囲<select aria-label="言葉で直す範囲" disabled={correctAnswerIndex!==undefined} value={correctAnswerIndex!==undefined?'all':correctionScope} onChange={event=>setCorrectionScope(event.target.value)}><option value="all">この仕事の流れ全体</option>{selected&&<option value="step">選んだ手順：{inputStepName(selected)}</option>}</select></label>
             <textarea aria-label="流れへの補足・訂正" value={correctionText} disabled={busy} onChange={event=>setCorrectionText(event.target.value)} placeholder="例：成績書を受け取るのは品質担当ではなく、購買担当です。受取後に品質担当へ渡します。"/>
             <button className="button-primary" disabled={busy||stale||!!edit||!correctionText.trim()} onClick={()=>{
-              const text=correctionText.trim();void organize([...(draft?.answerHistory??saved?.reviewContext?.followUpAnswers??[]),{question:correctionScope==="step"&&selected?`「${selected.name}」への補足・訂正`:"この仕事の流れへの補足・訂正",answer:text}],memo,undefined,{text,stepKey:correctionScope==="step"?selected?.stepKey:undefined});
+              void correctFromDialogue(correctionText.trim());
             }}>補足・訂正を流れに反映する</button>
             <p>原本と元の話は残ります。変更した箇所を確認してから保存できます。</p>
             {undoCorrection&&draft&&<button className="input-text-button" disabled={busy} onClick={()=>{onDraft(key,undoCorrection.draft);setUndoCorrection(null);setCorrectionText("");setOrganizeNotice("今回の補足・訂正を取り消し、直す前の候補に戻しました。");}}>今回の補足・訂正を取り消す</button>}
@@ -1505,6 +1536,7 @@ export function InputWorkbench({
               </button>
             )}
           </div>
+          {draft&&!!newDialogue.length&&<p className="input-dialogue-change" role="status">保存前の対話：回答・補足 {newDialogue.filter(a=>a.kind!=='deferred'&&a.kind!=='correction').length}件 · 回答の訂正 {newDialogue.filter(a=>a.kind==='correction').length}件 · 未確認のまま残した内容 {newDialogue.filter(a=>a.kind==='deferred').length}件</p>}
           {workflow&&review&&graph.workflows.some(w=>w.id!==workflow.id)&&<button className="input-text-button" disabled={busy||stale||!!edit||!!addition.trim()||!!correctionText.trim()||pendingAnswers} onClick={()=>setMergeOpen(true)}>同じ業務とまとめる</button>}
           {mergeOpen&&workflow&&review&&<WorkflowMergePanel projectId={projectId} sourceId={workflow.id}
             graph={mergeGraph}
@@ -1771,7 +1803,7 @@ export function InputWorkbench({
                     <summary>補足に使った根拠 · {(draft?.answerHistory ?? saved?.reviewContext?.followUpAnswers)!.length}件</summary>
                     {(draft?.answerHistory ?? saved?.reviewContext?.followUpAnswers)!.map((a, i) => (
                       <article key={i}>
-                        <p>確認事項：{a.question}</p>
+                        <p>{dialogueAnswerStatus(a,answerHistory)}：{a.question}</p>
                         {a.reference && <p>補足元：{a.reference.workflowName} · 補足当時の本文を保持
                           {savedTranscripts[a.reference.workflowId] !== a.answer && <strong> · 元の話はその後更新されています</strong>}
                           {graph.workflows.some(w => w.id === a.reference!.workflowId) && (

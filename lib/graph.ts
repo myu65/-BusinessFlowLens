@@ -300,6 +300,10 @@ export type ExtractionQuestion = {
 };
 
 export type FollowUpAnswer = {
+  id?: string;
+  createdAt?: string;
+  kind?: "answer" | "correction" | "deferred";
+  supersedes?: string;
   question: string;
   answer: string;
   reference?: { workflowId: string; workflowName: string; usedAt: string };
