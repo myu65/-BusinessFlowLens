@@ -50,7 +50,11 @@ jobs:
         run: npm run typecheck
 
       - name: Production build
-        run: npm run build
+        run: npm run build:app-runtime
+
+      - name: App Runtime package and document rendering
+        timeout-minutes: 3
+        run: node scripts/test-app-runtime.mjs --package-only
 
       - name: Workflow persistence regressions
         timeout-minutes: 3
@@ -71,3 +75,4 @@ jobs:
           path: |
             .data/regression-server.log
             .data/review-remaining-results.json
+            .data/snowflake/package-http-results.json

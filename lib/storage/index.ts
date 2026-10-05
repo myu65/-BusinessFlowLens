@@ -1,5 +1,6 @@
 import type { BusinessFlowRepository } from "@/lib/storage/repository";
 import { SqliteBusinessFlowRepository } from "@/lib/storage/sqlite";
+import { SnowflakeBusinessFlowRepository } from "@/lib/storage/snowflake";
 
 let repository: BusinessFlowRepository | null = null;
 
@@ -11,6 +12,10 @@ export function getBusinessFlowRepository(): BusinessFlowRepository {
   switch (backend) {
     case "sqlite":
       repository = new SqliteBusinessFlowRepository();
+      return repository;
+
+    case "snowflake":
+      repository = new SnowflakeBusinessFlowRepository();
       return repository;
 
     default:

@@ -1,0 +1,65 @@
+version: 2
+name: BUSINESS_FLOW_LENS
+database: BFL_TEST
+schema: APP
+query_warehouse: COMPUTE_WH
+label: BusinessFlowLens
+description: 仕事の話と資料から会社のしくみを育てる
+auto_suspend_secs: 900
+auto_resume: true
+min_instances: 1
+max_instances: 1
+default_target: standard
+ignore:
+  - node_modules
+  - .next
+  - .git
+  - .data
+  - .env*
+  - '*.sqlite*'
+  - '*.tsbuildinfo'
+  - '*.pem'
+  - 'npm-debug.log*'
+install:
+  commands:
+    - [npm, ci, --no-fund]
+build:
+  commands:
+    - [npm, run, build:app-runtime]
+run:
+  command: [node, scripts/start-app-runtime.mjs]
+environment_variables:
+  - name: BUSINESS_FLOW_STORAGE
+    value: snowflake
+  - name: SNOWFLAKE_STORAGE_AUTH
+    value: oauth
+  - name: SNOWFLAKE_TOKEN_FILE
+    value: /snowflake/session/token
+  - name: SNOWFLAKE_WAREHOUSE
+    value: COMPUTE_WH
+  - name: SNOWFLAKE_TABLE_KIND
+    value: standard
+  - name: AI_PROTOCOL
+    value: openai
+  - name: AI_TARGET
+    value: cortex
+targets:
+  standard:
+    name: BUSINESS_FLOW_LENS_STANDARD
+  hybrid:
+    name: BUSINESS_FLOW_LENS_HYBRID
+    environment_variables:
+      - name: BUSINESS_FLOW_STORAGE
+        value: snowflake
+      - name: SNOWFLAKE_STORAGE_AUTH
+        value: oauth
+      - name: SNOWFLAKE_TOKEN_FILE
+        value: /snowflake/session/token
+      - name: SNOWFLAKE_WAREHOUSE
+        value: COMPUTE_WH
+      - name: SNOWFLAKE_TABLE_KIND
+        value: hybrid
+      - name: AI_PROTOCOL
+        value: openai
+      - name: AI_TARGET
+        value: cortex
