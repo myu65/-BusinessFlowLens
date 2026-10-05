@@ -27,7 +27,7 @@ test("vision transports keep image bytes and unit IDs paired for OpenAI and Anth
       requestBody=JSON.parse(Buffer.concat(chunks).toString());
       const text=JSON.stringify({pages:[{unitId:invalid?"invented-page":"image-1",description:"外部検査会社へ依頼書を送る。",uncertainties:["業者内の判断は見えない。"]}]});
       response.setHeader("Content-Type","application/json");
-      response.end(JSON.stringify(mode==="openai"?{choices:[{message:{content:text}}]}:{content:[{type:"text",text}]}));
+      response.end(JSON.stringify(mode==="openai"?{choices:[{message:{content:text}}]}:{content:[{type:"text",text}],stop_reason:"end_turn"}));
     });
     await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));
     try{await withConfig({AI_MODEL:"mock-vision",AI_API_KEY:"test-only",AI_BASE_URL:`http://127.0.0.1:${(server.address() as {port:number}).port}`,AI_PROTOCOL:mode},async()=>{

@@ -500,7 +500,7 @@ for (const protocol of ["openai", "anthropic"] as const) {
         JSON.stringify(
           protocol === "openai"
             ? { choices: [{ message: { content: output } }] }
-            : { content: [{ type: "text", text: output }] },
+            : { content: [{ type: "text", text: output }], stop_reason: "end_turn" },
         ),
       );
     });
