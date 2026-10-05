@@ -34,6 +34,7 @@ export function ActivityRelationshipMap({ graph, activity, workflowIds, onActivi
     <p>まとまりを選ぶと中の業務が開きます。線を選ぶと、何を渡す・参照するか確かめられます。</p>
     <p className="relationship-caption">{selected ? `「${selected.name}」と、直接つながるまとまり` : `${activity.capabilities.filter(c => c.rows.length).length}の仕事のまとまりと、つながる別の活動`}。
       点線は推定・未確認の接続です。まとまり自体が整理案の場合は、ノードに示します。</p>
+    {selected && <button className="kg-primary relationship-open-work" onClick={() => onCapability(selected.id)}>このまとまりの業務を開く →</button>}
     <RelationshipDiagram nodes={map.nodes} edges={map.edges} layoutEdges={map.layoutEdges} selectedId={selected?.id}
       onNode={choose} onEdge={setRelation} label="仕事のまとまりの関係図" graph={graph} />
     <div className="relationship-pagination">
@@ -52,7 +53,6 @@ export function ActivityRelationshipMap({ graph, activity, workflowIds, onActivi
       <h3>{selected.name}</h3><p>{selected.description}</p>
       <p>{selected.rows.length}業務。{projection.nodes.find(n => n.id === selected.id)?.note}</p>
       <div className="company-system-chips">{selected.rows.slice(0, 3).map(r => <button key={r.workflow.id} onClick={() => onWorkflow(r.workflow.id)}>{r.workflow.name} →</button>)}</div>
-      <button className="kg-primary" onClick={() => onCapability(selected.id)}>このまとまりの業務を開く →</button>
       {!!internal.length && <details><summary>同じまとまり内の受渡し・参照 · {internal.length}件</summary>
         <RelationshipEvidence edge={{ id: `internal:${selected.id}`, source: selected.id, target: selected.id, kind: "handoff", certainty: "unknown", references: internal }}
           title={`${selected.name}の中の受渡し・参照`} nodes={projection.nodes} graph={graph} onWorkflow={onWorkflow} />

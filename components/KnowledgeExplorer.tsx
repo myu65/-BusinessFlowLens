@@ -28,7 +28,7 @@ import { SystemRelationshipMap } from "./SystemRelationshipMap";
 import { ActivityRelationshipMap } from "./ActivityRelationshipMap";
 import { readingPage } from "@/lib/overview-reading";
 import { KnowledgeReportPreview } from "./KnowledgeReportPreview";
-import type { ActivityReadingPosition, ExplorationFocus as Focus, ExplorationPosition, KnowledgeExploration } from "@/lib/exploration";
+import type { ActivityReadingPosition, CompanyReadingPosition, ExplorationFocus as Focus, ExplorationPosition, KnowledgeExploration } from "@/lib/exploration";
 export type { KnowledgeExploration } from "@/lib/exploration";
 
 const mode = {
@@ -84,14 +84,16 @@ export function KnowledgeExplorer({
   const [readDepth, setReadDepth] = useState<FlowReadingPosition["depth"]>(exploration?.depth ?? "step");
   const [readLens, setReadLens] = useState<FlowReadingPosition["lens"]>(exploration?.lens ?? (exploration?.dataId ? "data" : "work"));
   const [activityReading, setActivityReading] = useState<ActivityReadingPosition | undefined>(exploration?.activityReading);
+  const [companyReading, setCompanyReading] = useState<CompanyReadingPosition | undefined>(exploration?.companyReading);
+  const rememberCompany = useCallback((position: CompanyReadingPosition) => setCompanyReading(position), []);
   const rememberActivity = useCallback((position: ActivityReadingPosition) => setActivityReading(position), []);
   const rememberReading = useCallback((position: FlowReadingPosition) => {
     setReadStep(position.stepId); setReadData(position.dataId);
     setReadDepth(position.depth); setReadLens(position.lens); setReaderJourney(position.journey);
   }, []);
   useEffect(() => {
-    onExplorationChange?.({ focus, history, scope, query, department, category, stepId: readStepId, dataId: readDataId, depth: readDepth, lens: readLens, journey: readerJourney, activityReading, listPage: page });
-  }, [focus, history, scope, query, department, category, readStepId, readDataId, readDepth, readLens, readerJourney, activityReading, page, onExplorationChange]);
+    onExplorationChange?.({ focus, history, scope, query, department, category, stepId: readStepId, dataId: readDataId, depth: readDepth, lens: readLens, journey: readerJourney, activityReading, companyReading, listPage: page });
+  }, [focus, history, scope, query, department, category, readStepId, readDataId, readDepth, readLens, readerJourney, activityReading, companyReading, page, onExplorationChange]);
   const [editingStep, setEditingStep] = useState("");
   const [categoryName, setCategoryName] = useState("");
   const [dependencyId, setDependencyId] = useState("");
@@ -103,7 +105,7 @@ export function KnowledgeExplorer({
     [graph, scope, query, department],
   );
   const go = (next: Focus) => {
-    setHistory((h) => [...h, { focus, scope, query, department, category, stepId: readStepId, dataId: readDataId, depth: readDepth, lens: readLens, journey: readerJourney, activityReading, listPage: page }]);
+    setHistory((h) => [...h, { focus, scope, query, department, category, stepId: readStepId, dataId: readDataId, depth: readDepth, lens: readLens, journey: readerJourney, activityReading, companyReading, listPage: page }]);
     setFocus(next);
     if (next.kind === "process") { setReadDepth("detail"); setReadLens("work"); setReadData(""); }
     setPage(0);
@@ -378,6 +380,7 @@ export function KnowledgeExplorer({
               setReadLens(previous.lens ?? (previous.dataId ? "data" : "work"));
               setReaderJourney(previous.journey);
               setActivityReading(previous.activityReading);
+              setCompanyReading(previous.companyReading);
               setHistory((h) => h.slice(0, -1));
               setPage(previous.listPage ?? 0);
               window.scrollTo({ top: 0, behavior: "instant" });
@@ -399,6 +402,7 @@ export function KnowledgeExplorer({
             value={scope}
             onChange={(e) => {
               setScope(e.target.value as KnowledgeScope);
+              setCompanyReading(undefined);
               if (focus.kind !== "asset" && focus.kind !== "systems") setFocus({ kind: "company" });
               setHistory([]);
               setPage(0);
@@ -460,6 +464,8 @@ export function KnowledgeExplorer({
           onActivity={(id) => go({ kind: "activity", id })}
           onSystem={(id) => go({ kind: "asset", id })}
           onInput={onInput ? () => onInput() : undefined}
+          position={companyReading}
+          onPositionChange={rememberCompany}
         />
       )}
       {focus.kind !== "company" && focus.kind !== "systems" && (
