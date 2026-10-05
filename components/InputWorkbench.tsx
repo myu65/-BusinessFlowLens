@@ -43,6 +43,10 @@ import { DocumentInput, DocumentSourceEvidence } from "./DocumentInput";
 import { documentWorkSource, documentWorkName, type DocumentEvidence, type SourceDocument, type DocumentWorkItem } from "@/lib/source-document";
 import { DocumentOriginalPane } from "./DocumentOriginalPane";
 import type { WorkflowCorrection } from "@/lib/ai/workflow-correction";
+import {WorkflowMergePanel,WorkflowMergeHistory} from './WorkflowMergePanel';
+import type {ProjectSnapshot} from '@/lib/storage/repository';
+import {workflowMergeDestination,workflowMergeSite} from '@/lib/workflow-merge';
+import {emptyLandscape} from '@/lib/landscape';
 
 const REVIEW_PAGE_SIZE = INPUT_CANVAS_PAGE_SIZE;
 
@@ -114,8 +118,9 @@ export function InputWorkbench({
   const [correctionText, setCorrectionText] = useState("");
   const [correctionScope, setCorrectionScope] = useState("all");
   const [renameOpen, setRenameOpen] = useState(false);
+  const [mergeOpen,setMergeOpen]=useState(false);
   const [undoCorrection,setUndoCorrection]=useState<{draft:InputDraft|null}|null>(null);
-  useEffect(()=>{setCorrectionText("");setCorrectionScope("all");setRenameOpen(false);setUndoCorrection(null);},[key]);
+  useEffect(()=>{setCorrectionText("");setCorrectionScope("all");setRenameOpen(false);setMergeOpen(false);setUndoCorrection(null);},[key]);
   const [operation, setOperation] = useState<"organize" | "addition" | "save">("organize");
   const [waitingSeconds, setWaitingSeconds] = useState(0);
   useEffect(() => {
@@ -268,6 +273,11 @@ export function InputWorkbench({
     };
   }, [projectId, saved, draft]);
   const navigationGraph = useMemo(() => previewInputDrafts(graph, drafts), [graph, drafts]);
+  const mergeGraph=useMemo(()=>{
+    if(!draft)return graph;
+    const candidate=previewReviewGraph(graph,draft.workflow,draft.review);
+    return {...candidate,workflows:candidate.workflows.map(w=>w.id===draft.workflow.id?{...w,reviewContext:{...w.reviewContext!,followUpAnswers:draft.answerHistory}}:w)};
+  },[graph,draft]);
   const preview = useMemo(
     () =>
       workflow && review ? previewReviewGraph(navigationGraph, workflow, review) : navigationGraph,
@@ -498,12 +508,16 @@ export function InputWorkbench({
   async function startDocumentWork(document: SourceDocument, item: DocumentWorkItem) {
     const requestKey = `doc-${document.id}-${item.id}`;
     setDocumentInputOpen(false);
+    const destination=workflowMergeDestination(graph,requestKey);
+    if(destination!==requestKey&&graph.workflows.some(w=>w.id===destination)){onSelect(destination);setMobilePane('flow');return;}
     if (drafts[requestKey] || graph.workflows.some(w => w.id === requestKey)) { onSelect(requestKey); setMobilePane("flow"); return; }
     const text = documentWorkSource(document, item);
-    setPendingDocument({key:requestKey,workflow:{id:requestKey,name:documentWorkName(item),scenario:item.scope,scenarioLabel:item.site||undefined},evidence:{documentId:document.id,documentName:document.name,sha256:document.sha256,itemId:item.id,unitIds:[...new Set([...item.contextUnitIds,...item.unitIds])]}});
+    const work:Workflow={id:requestKey,name:documentWorkName(item),scenario:item.scope,scenarioLabel:item.site||undefined,
+      ...(item.site?{landscape:{...emptyLandscape(),site:item.site,evidence:'資料から読み取った工場・拠点の候補（要確認）'}}:{})};
+    setPendingDocument({key:requestKey,workflow:work,evidence:{documentId:document.id,documentName:document.name,sha256:document.sha256,itemId:item.id,unitIds:[...new Set([...item.contextUnitIds,...item.unitIds])]}});
     onTranscripts({ ...latest.current.transcripts, [requestKey]: text });
     onSelect(requestKey);
-    await organize([], text, { key: requestKey, workflow: { id: requestKey, name: documentWorkName(item), scenario: item.scope, scenarioLabel: item.site || undefined }, evidence: {
+    await organize([], text, { key: requestKey, workflow: work, evidence: {
       documentId: document.id, documentName: document.name, sha256: document.sha256, itemId: item.id, unitIds: [...new Set([...item.contextUnitIds, ...item.unitIds])],
     } });
   }
@@ -571,6 +585,11 @@ export function InputWorkbench({
     } finally {
       setBusy(false);
     }
+  }
+  function receiveMerge(project:ProjectSnapshot,selectedId:string){
+    if(onSaved)onSaved(project.graph,project.transcripts,key);
+    else{onGraphApply(project.graph);onTranscripts(project.transcripts);}
+    onDraft(key,null);onSelect(selectedId);setLastSavedId(selectedId);setMergeOpen(false);setUndoCorrection(null);setUndoAddition(null);
   }
   function applyEdit() {
     if (!edit || !review || !selected || edit.data.some(data => !data.name.trim())) return;
@@ -1265,7 +1284,7 @@ export function InputWorkbench({
         </button>
         <button aria-pressed={mobilePane === "details"} disabled={!selected} onClick={() => setMobilePane("details")}>3 手順の詳細</button>
       </nav>
-      <div hidden={!documentInputOpen}><DocumentInput projectId={projectId} busy={busy} completed={new Set([...Object.keys(drafts), ...graph.workflows.map(w => w.id)])} savedIds={new Set(graph.workflows.map(w => w.id))} activeDocumentId={review?.documentEvidence?.[0]?.documentId} onClose={() => setDocumentInputOpen(false)} onStart={startDocumentWork} onWithdraw={withdrawDocumentCandidates} onAIResponse={() => setAIResponse("success")} /></div>
+      <div hidden={!documentInputOpen}><DocumentInput projectId={projectId} busy={busy} completed={new Set([...Object.keys(drafts), ...graph.workflows.map(w => w.id)])} savedIds={new Set([...graph.workflows.map(w=>w.id),...(graph.knowledge?.workflowMerges??[]).filter(r=>r.state==='merged'&&graph.workflows.some(w=>w.id===workflowMergeDestination(graph,r.sourceWorkflowId))).map(r=>r.sourceWorkflowId)])} activeDocumentId={review?.documentEvidence?.[0]?.documentId} onClose={() => setDocumentInputOpen(false)} onStart={startDocumentWork} onWithdraw={withdrawDocumentCandidates} onAIResponse={() => setAIResponse("success")} /></div>
       <div className="input-workbench-grid" hidden={documentInputOpen}>
         <section className="input-note-pane">
           <div className="input-note-heading">
@@ -1385,6 +1404,10 @@ export function InputWorkbench({
                   }
                 />
               </label>
+              <label className="kg-edit-field">工場・拠点<input aria-label="この業務の工場・拠点" disabled={busy} value={workflowMergeSite(workflow)} placeholder="分かっている場合だけ入力" onChange={event=>{
+                const site=event.target.value;
+                onDraft(key,{...ensureDraft(review!),workflow:{...workflow,landscape:{...(workflow.landscape??emptyLandscape()),site,evidence:`利用者が工場・拠点を訂正：${site||'未確認'}`},...(documentEvidence?.length?{scenarioLabel:site||undefined}:{})}});
+              }}/></label>
               <label className="kg-edit-field">
                 表示する状態
                 <select
@@ -1474,6 +1497,13 @@ export function InputWorkbench({
               </button>
             )}
           </div>
+          {workflow&&review&&graph.workflows.some(w=>w.id!==workflow.id)&&<button className="input-text-button" disabled={busy||stale||!!edit||!!addition.trim()||!!correctionText.trim()||pendingAnswers} onClick={()=>setMergeOpen(true)}>同じ業務とまとめる</button>}
+          {mergeOpen&&workflow&&review&&<WorkflowMergePanel projectId={projectId} sourceId={workflow.id}
+            graph={mergeGraph}
+            transcripts={draft?{...savedTranscripts,[workflow.id]:draft.sourceNotes}:savedTranscripts}
+            draft={draft} blockedIds={Object.values(drafts).filter(d=>d.workflow.id!==workflow.id).map(d=>d.workflow.id)}
+            onSaved={receiveMerge} onClose={()=>setMergeOpen(false)}/>}
+          {workflow&&<WorkflowMergeHistory projectId={projectId} graph={graph} workflowId={workflow.id} disabled={busy||!!draft||stale||!!edit||!!addition.trim()||!!correctionText.trim()} onSaved={receiveMerge}/>}
           {review?.extraction && (
             <p className="input-extraction-origin">
               この構造の整理：

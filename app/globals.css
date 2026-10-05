@@ -3253,3 +3253,11 @@ button:disabled { cursor:not-allowed; opacity:.45; }
 .flow-connections button { display:block; margin:8px 0; padding:10px; text-align:left; }
 @media(max-width:1000px) { .input-workbench-grid { grid-template-columns:1fr; gap:16px; }.input-note-pane { position:static; }.input-main-note textarea { min-height:170px; } }
 @media(max-width:700px) { .flow-meaning-grid { grid-template-columns:1fr; }.input-workbench { padding:12px; }.input-note-pane,.input-structure-pane { padding:12px; } }
+.workflow-merge-dialog { width:min(1060px,94vw); max-height:92vh; padding:24px; border:1px solid #bdd0c3; border-radius:14px; color:#213d2c; background:#fbfcfa; }
+.workflow-merge-dialog::backdrop { background:rgba(18,39,27,.48); }
+.workflow-merge-panel { line-height:1.65; }.merge-heading { display:flex; gap:20px; align-items:start; justify-content:space-between; }.merge-heading h3 { margin:0; }
+.workflow-merge-panel label { display:block; margin:12px 0; }.workflow-merge-panel input,.workflow-merge-panel select { display:block; width:100%; margin-top:5px; padding:10px; border:1px solid #c6d5ca; border-radius:6px; background:white; color:inherit; }
+.merge-targets { display:flex; gap:8px; flex-wrap:wrap; }.merge-targets button { text-align:left; padding:9px 12px; border:1px solid #c8d5cd; border-radius:7px; background:white; }.merge-targets button[aria-pressed=true] { border:2px solid #427552; background:#e8f3ec; }
+.merge-step { margin:16px 0; padding:16px; border:1px solid #d6e2d9; border-radius:9px; background:white; }.merge-step-comparison { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }.merge-step-facts { padding:12px; background:#f3f7f4; border-radius:6px; }.merge-step-facts p { margin:6px 0; }.merge-difference { padding:8px; background:#fff1d7; border-left:3px solid #b78835; }
+.workflow-merge-panel pre,.workflow-merge-history pre { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; padding:12px; background:#f0f5f1; }.workflow-merge-history { margin:12px 0; }.workflow-merge-history article { padding:12px; border:1px solid #d5e3d9; margin:10px 0; border-radius:7px; }.workflow-merge-history h4 { margin:6px 0; }
+@media(max-width:700px) { .workflow-merge-dialog { padding:14px; }.merge-step-comparison { grid-template-columns:1fr; }.merge-heading { flex-direction:column; } }

@@ -70,6 +70,13 @@ export function transcriptsForSave(
   delete next[NEW_MEMO_ID];
   return next;
 }
+// Server operations may update another workflow's original (for example a merge).
+// Preserve only unrelated unsaved notes, never overlay stale saved text onto it.
+export function notesAfterSave(previous:Record<string,string>,saved:Record<string,string>,current:Record<string,string>,sourceKey:string){
+  const next={...saved};
+  for(const [key,text]of Object.entries(current))if(key!==sourceKey&&text!==(previous[key]??''))next[key]=text;
+  return next;
+}
 export type InputDraft = {
   workflow: Workflow;
   review: ExtractionReview;
@@ -237,6 +244,7 @@ export function previewReviewGraph(
         organization: review.organization,
         systemProfiles: review.systemProfiles,
         systemDependencies: review.systemDependencies,
+        documentEvidence: review.documentEvidence,
       },
     },
     patch,
@@ -669,7 +677,8 @@ export function describeHumanEdit(edit: import("./graph").HumanEdit): string[] {
       .filter(([field, v]) => !["evidence", "certainty"].includes(field) && JSON.stringify((edit.before as Record<string, unknown>)?.[field]) !== JSON.stringify(v))
       .flatMap(([field, after]) => describeHumanEdit({ ...edit, field: `boundary.${field}`, before: (edit.before as Record<string, unknown>)?.[field], after }));
   if (edit.field === "meaning")
-    return Object.entries(edit.after as Record<string, unknown>)
+    return [...new Set([...Object.keys((edit.before ?? {}) as object), ...Object.keys((edit.after ?? {}) as object)])]
+      .map(field => [field, (edit.after as Record<string, unknown> | undefined)?.[field]] as const)
       .filter(
         ([field, v]) =>
           !["evidence", "certainty"].includes(field) &&

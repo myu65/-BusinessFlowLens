@@ -6,7 +6,7 @@ import { KnowledgeExplorer, type KnowledgeExploration } from "./KnowledgeExplore
 import { exploreSavedStory } from "@/lib/exploration";
 import { InputWorkbench } from "./InputWorkbench";
 import { AssetExplorer, CrossBusinessOverview, type AssetExploration } from "./ScopedExplorers";
-import { NEW_MEMO_ID, hasUnreflectedNotes, inputKeyForWorkflow, previewReviewGraph, recordReviewEdits, type InputDraft } from "@/lib/review-workbench";
+import { NEW_MEMO_ID, hasUnreflectedNotes, inputKeyForWorkflow, notesAfterSave, previewReviewGraph, recordReviewEdits, type InputDraft } from "@/lib/review-workbench";
 
 import { StepDetailEditor, TechnicalDetails, WorkflowExplorer } from "./ProgressiveWorkflow";
 
@@ -2388,7 +2388,7 @@ function Workspace() {
           drafts={drafts}
           onDraft={(id, value) => setDrafts(current => { const next = {...current}; if (value) next[id] = value; else delete next[id]; return next; })}
           onGraphApply={setGraph}
-          onSaved={(nextGraph, nextNotes, sourceKey) => {persistedTranscripts.current=nextNotes;savedSnapshot.current=JSON.stringify({graph:nextGraph,transcripts:nextNotes});setGraph(nextGraph);setTranscripts(current=>{const next={...nextNotes,...current};if(sourceKey===NEW_MEMO_ID)delete next[NEW_MEMO_ID];return next;});setSaveStatus("saved");}}
+          onSaved={(nextGraph, nextNotes, sourceKey) => {const previous=persistedTranscripts.current;persistedTranscripts.current=nextNotes;savedSnapshot.current=JSON.stringify({graph:nextGraph,transcripts:nextNotes});setGraph(nextGraph);setTranscripts(current=>notesAfterSave(previous,nextNotes,current,sourceKey));setSaveStatus("saved");}}
           renderAdvanced={a => <ReviewPanel graph={graph} model={{workflowId: a.draft.workflow.id, review: a.draft.review, provider: a.draft.provider, answers: a.draft.answers, answerHistory: a.draft.answerHistory}} dirty onChange={v => setDrafts(current => ({...current, [selectedWorkflowId]: {...a.draft, review: recordReviewEdits(a.draft.review,v.review), answers: v.answers, answerHistory: v.answerHistory}}))} onDiscard={a.onDiscard} onRefine={a.onRefine} onApply={a.onSave} applying={a.busy} refining={a.busy} revisions={[]} historyDetail={null} historyLoading={false} onOpenRevision={()=>{}} onCloseHistory={()=>{}} />}
         />
       ) : null}

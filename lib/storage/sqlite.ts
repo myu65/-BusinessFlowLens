@@ -23,6 +23,7 @@ import type {
   WorkflowRevision,
   WorkflowRevisionSummary,
 } from "@/lib/storage/repository";
+import { ProjectChangedError } from "@/lib/storage/repository";
 import type { SourceDocument, SourceImage } from "@/lib/source-document";
 
 type SqliteRow = Record<string, unknown>;
@@ -747,7 +748,7 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
     };
   }
 
-  async saveProject(snapshot: ProjectSnapshot): Promise<void> {
+  async saveProject(snapshot: ProjectSnapshot, expectedUpdatedAt?: string): Promise<void> {
     const now = snapshot.updatedAt || new Date().toISOString();
     const graph = normalizeSnapshotGraph(snapshot.graph);
 
@@ -800,6 +801,10 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
 
     this.db.exec("BEGIN IMMEDIATE");
     try {
+      if (expectedUpdatedAt !== undefined) {
+        const current = this.db.prepare("SELECT updated_at FROM projects WHERE id = ?").get(snapshot.projectId) as SqliteRow | undefined;
+        if (!current || current.updated_at !== expectedUpdatedAt) throw new ProjectChangedError();
+      }
       upsertProject.run(snapshot.projectId, snapshot.projectName, now, JSON.stringify(graph.knowledge ?? null));
 
       this.db
