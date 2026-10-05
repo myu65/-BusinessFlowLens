@@ -86,6 +86,7 @@ export async function POST(request: Request) {
         organization: result.review.organization,
         systemProfiles: result.review.systemProfiles,
         systemDependencies: result.review.systemDependencies,
+        documentEvidence: result.review.documentEvidence,
       },
     };
     const connected = applyReviewConnections(

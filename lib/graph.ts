@@ -1,3 +1,4 @@
+import type { DocumentEvidence } from "./source-document";
 export type NodeKind = "process" | "system" | "data";
 export type Confidence = "confirmed" | "inferred" | "unknown";
 export type Relation =
@@ -58,7 +59,7 @@ export type Workflow = {
   landscape?: WorkflowLandscape;
   reviewContext?: Pick<
     ExtractionReview,
-    "summary" | "trigger" | "outcome" | "questions" | "warnings" | "excludedSteps" | "extraction" | "protectedDetails" | "organization" | "systemProfiles" | "systemDependencies"
+    "summary" | "trigger" | "outcome" | "questions" | "warnings" | "excludedSteps" | "extraction" | "protectedDetails" | "organization" | "systemProfiles" | "systemDependencies" | "documentEvidence"
   > & {
     followUpAnswers?: FollowUpAnswer[];
   };
@@ -344,6 +345,7 @@ export type ExtractionTransition = {
 };
 
 export type ExtractionReview = {
+  documentEvidence?: DocumentEvidence[];
   organization?: ReviewOrganization | null;
   systemProfiles?: ReviewSystemProfile[];
   systemDependencies?: ReviewSystemDependency[];
@@ -1539,6 +1541,7 @@ export function buildWorkflowReviewFromGraph(
     organization: workflow?.reviewContext?.organization,
     systemProfiles: workflow?.reviewContext?.systemProfiles,
     systemDependencies: workflow?.reviewContext?.systemDependencies,
+    documentEvidence: workflow?.reviewContext?.documentEvidence,
     incomingHandoffs: (graph.knowledge?.handoffs ?? []).filter(h => h.targetWorkflowId === workflowId && h.reviewedWorkflowId === workflowId && h.targetProcessId).map(h => ({
       sourceWorkflowId: h.sourceWorkflowId,
       sourceStepKey: byId.get(h.sourceProcessId ?? "")?.canonicalKey.split(":").at(-1),
