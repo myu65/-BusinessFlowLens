@@ -17,18 +17,17 @@ import {
 } from "@/lib/knowledge";
 import { ProcessContextEditor } from "./ProcessContextEditor";
 import { WorkflowReading } from "./WorkflowReading";
-import { USAGE_DEFINITION } from "./ScopedExplorers";
+import { AssetReading } from "./AssetReading";
 import { CompanyOrientation } from "./CompanyOrientation";
 import { termExplanation, connectionKindLabel, connectionRoleLabel } from "@/lib/knowledge-guide";
 import { KnowledgeEditor } from "./KnowledgeEditor";
 import { createChemicalCompany } from "@/lib/chemical-company";
-import { inputSystemRoles } from "@/lib/input-knowledge";
 import { SystemLandscapeCards } from "./SystemLandscapeCards";
 import { SystemRelationshipMap } from "./SystemRelationshipMap";
 import { ActivityRelationshipMap } from "./ActivityRelationshipMap";
 import { readingPage } from "@/lib/overview-reading";
 import { KnowledgeReportPreview } from "./KnowledgeReportPreview";
-import type { ActivityReadingPosition, CompanyReadingPosition, SystemReadingPosition, ExplorationFocus as Focus, ExplorationPosition, KnowledgeExploration } from "@/lib/exploration";
+import type { ActivityReadingPosition, AssetReadingPosition, CompanyReadingPosition, SystemReadingPosition, ExplorationFocus as Focus, ExplorationPosition, KnowledgeExploration } from "@/lib/exploration";
 export type { KnowledgeExploration } from "@/lib/exploration";
 
 const mode = {
@@ -86,16 +85,18 @@ export function KnowledgeExplorer({
   const [activityReading, setActivityReading] = useState<ActivityReadingPosition | undefined>(exploration?.activityReading);
   const [companyReading, setCompanyReading] = useState<CompanyReadingPosition | undefined>(exploration?.companyReading);
   const [systemReading, setSystemReading] = useState<SystemReadingPosition | undefined>(exploration?.systemReading);
+  const [assetReading, setAssetReading] = useState<AssetReadingPosition | undefined>(exploration?.assetReading);
   const rememberCompany = useCallback((position: CompanyReadingPosition) => setCompanyReading(position), []);
   const rememberSystem = useCallback((position: SystemReadingPosition) => setSystemReading(position), []);
+  const rememberAsset = useCallback((position: AssetReadingPosition) => setAssetReading(position), []);
   const rememberActivity = useCallback((position: ActivityReadingPosition) => setActivityReading(position), []);
   const rememberReading = useCallback((position: FlowReadingPosition) => {
     setReadStep(position.stepId); setReadData(position.dataId);
     setReadDepth(position.depth); setReadLens(position.lens); setReaderJourney(position.journey);
   }, []);
   useEffect(() => {
-    onExplorationChange?.({ focus, history, scope, query, department, category, stepId: readStepId, dataId: readDataId, depth: readDepth, lens: readLens, journey: readerJourney, activityReading, companyReading, systemReading, listPage: page });
-  }, [focus, history, scope, query, department, category, readStepId, readDataId, readDepth, readLens, readerJourney, activityReading, companyReading, systemReading, page, onExplorationChange]);
+    onExplorationChange?.({ focus, history, scope, query, department, category, stepId: readStepId, dataId: readDataId, depth: readDepth, lens: readLens, journey: readerJourney, activityReading, companyReading, systemReading, assetReading, listPage: page });
+  }, [focus, history, scope, query, department, category, readStepId, readDataId, readDepth, readLens, readerJourney, activityReading, companyReading, systemReading, assetReading, page, onExplorationChange]);
   const [editingStep, setEditingStep] = useState("");
   const [categoryName, setCategoryName] = useState("");
   const [dependencyId, setDependencyId] = useState("");
@@ -107,7 +108,7 @@ export function KnowledgeExplorer({
     [graph, scope, query, department],
   );
   const go = (next: Focus) => {
-    setHistory((h) => [...h, { focus, scope, query, department, category, stepId: readStepId, dataId: readDataId, depth: readDepth, lens: readLens, journey: readerJourney, activityReading, companyReading, systemReading, listPage: page }]);
+    setHistory((h) => [...h, { focus, scope, query, department, category, stepId: readStepId, dataId: readDataId, depth: readDepth, lens: readLens, journey: readerJourney, activityReading, companyReading, systemReading, assetReading, listPage: page }]);
     setFocus(next);
     if (next.kind === "process") { setReadDepth("detail"); setReadLens("work"); setReadData(""); }
     setPage(0);
@@ -385,6 +386,7 @@ export function KnowledgeExplorer({
               setActivityReading(previous.activityReading);
               setCompanyReading(previous.companyReading);
               setSystemReading(previous.systemReading);
+              setAssetReading(previous.assetReading);
               setHistory((h) => h.slice(0, -1));
               setPage(previous.listPage ?? 0);
               window.scrollTo({ top: 0, behavior: "instant" });
@@ -398,7 +400,7 @@ export function KnowledgeExplorer({
       {error && <p role="alert">{error}</p>}
       {report && <KnowledgeReportPreview key={report.url} {...report} onClose={() => setReport(null)} />}
 
-      <ScopeControls compact={!!(activity || cap)} scope={scope} department={department} query={query} count={selectedRows.length}>
+      <ScopeControls compact={["activity", "capability", "asset", "workflow", "process"].includes(focus.kind)} scope={scope} department={department} query={query} count={focus.kind === "asset" ? view.rows.length : selectedRows.length}>
       <div className="kg-toolbar company-filters">
         <label>
           表示する状態
@@ -408,6 +410,7 @@ export function KnowledgeExplorer({
               setScope(e.target.value as KnowledgeScope);
               setCompanyReading(undefined);
               setSystemReading(undefined);
+              setAssetReading(undefined);
               if (focus.kind !== "asset" && focus.kind !== "systems") setFocus({ kind: "company" });
               setHistory([]);
               setPage(0);
@@ -425,6 +428,7 @@ export function KnowledgeExplorer({
             onChange={(e) => {
               setDepartment(e.target.value);
               setSystemReading(undefined);
+              setAssetReading(undefined);
               setPage(0);
             }}
           >
@@ -442,11 +446,12 @@ export function KnowledgeExplorer({
             onChange={(e) => {
               setQuery(e.target.value);
               setSystemReading(undefined);
+              setAssetReading(undefined);
               setPage(0);
             }}
           />
         </label>
-        <span>この範囲：{selectedRows.length}業務</span>
+        <span>この範囲：{focus.kind === "asset" ? view.rows.length : selectedRows.length}業務</span>
       </div>
       {(query || department) && (
         <button
@@ -454,6 +459,7 @@ export function KnowledgeExplorer({
             setQuery("");
             setDepartment("");
             setSystemReading(undefined);
+            setAssetReading(undefined);
             setPage(0);
           }}
         >
@@ -950,78 +956,26 @@ export function KnowledgeExplorer({
         </>
       )}
       {focus.kind === "asset" && asset && impact && (
-        <>
-          <h2>{asset.label}</h2>
-          {termExplanation(asset.label) && (
-            <p className="kg-term">{termExplanation(asset.label)}</p>
-          )}
-          <p>{impact.profile?.purpose ?? (asset.kind === "system" && asset.status === "unknown" ? "同じ道具か確認してください。ここでは、その話で使う道具として扱います。" : asset.description)}</p>
-          {impact.profile?.certainty && (
-            <p>
-              {impact.profile.certainty === "confirmed"
-                ? "原文にある役割"
-                : "入力された話からの整理案"}{" "}
-              · 根拠：{impact.profile.evidence || "未確認"}
-            </p>
-          )}
-          <p>管理部署: {impact.profile?.owner || "未登録"}</p>
-          {asset.kind === "system" &&
-            (() => {
-              const roles = inputSystemRoles(
-                graph,
-                asset.id,
-                impact.direct.map((r) => r.workflow.id),
-              );
-              const role = (r: (typeof roles)[number]) => (
-                <li key={`${r.workflowId}:${r.name}`}>
-                  <button
-                    onClick={() => go({ kind: "workflow", id: r.workflowId })}
-                  >
-                    {r.workflowName}
-                  </button>
-                  <p>{r.purpose}</p>
-                  <small>
-                    {r.certainty === "confirmed"
-                      ? "原文に明示"
-                      : r.certainty === "unknown"
-                        ? "対応は未確認"
-                        : "整理案・要確認"}{" "}
-                    · 根拠：{r.evidence}
-                  </small>
-                </li>
-              );
-              return (
-                roles.length > 0 && (
-                  <section aria-label="入力した話ごとのシステムの役割">
-                    <h3>この道具は、どの仕事で何をする？</h3>
-                    <ul>{roles.slice(0, 3).map(role)}</ul>
-                    {roles.length > 3 && (
-                      <details>
-                        <summary>
-                          ほか{roles.length - 3}業務の役割を見る
-                        </summary>
-                        <ul>{roles.slice(3, 20).map(role)}</ul>
-                        {roles.length > 20 && (
-                          <p>
-                            ここでは20業務まで表示しています。ほかの役割は、下の業務一覧から確認できます。
-                          </p>
-                        )}
-                      </details>
-                    )}
-                  </section>
-                )
-              );
-            })()}
-          <p className="kg-context">
-            {asset.kind === "data"
-              ? "これは業務で受け取り、参照・更新する情報です。下で、その情報を使う仕事と、受渡し先を確かめられます。"
-              : USAGE_DEFINITION}
-          </p>
-          <p aria-label="集計の内訳">
-            直接関連 {impact.direct.length}業務（手順で利用{" "}
-            {impact.stepUse.length} / 連携で関連 {impact.flowUse.length} ·
-            重複あり） / 間接影響 {impact.indirect.length}業務
-          </p>
+        <AssetReading key={JSON.stringify([asset.id, scope, query, department])}
+          graph={graph} view={view} asset={asset} impact={impact}
+          position={assetReading} onPositionChange={rememberAsset}
+          onActivity={id => go({ kind: "activity", id })}
+          onWorkflow={id => {
+            go({ kind: "workflow", id });
+            if (!view.rows.some(r => r.workflow.id === id)) {
+              const target = graph.workflows.find(w => w.id === id);
+              if (target) setScope(target.scenario ?? "current");
+              setQuery(""); setDepartment(""); setSystemReading(undefined); setAssetReading(undefined);
+            }
+          }}
+          onAsset={id => go({ kind: "asset", id })}
+          onProcess={id => go({ kind: "process", id })} onInput={onInput}
+          onReadData={() => {
+            if (!impact.direct[0]) return;
+            setReadData(asset.id); setReadLens("data"); setReadStep("");
+            go({ kind: "workflow", id: impact.direct[0].workflow.id });
+          }}
+          editor={<>
           {asset.kind === "system" && graph.knowledge && (
             <label>
               分類
@@ -1056,104 +1010,6 @@ export function KnowledgeExplorer({
                 ))}
               </select>
             </label>
-          )}
-          <h3>会社のどの活動を支えているか</h3>
-          <div className="kg-toolbar">
-            {view.activities
-              .filter((a) =>
-                a.rows.some(
-                  (r) =>
-                    impact.direct.includes(r) || impact.indirect.includes(r),
-                ),
-              )
-              .map((a) => (
-                <button
-                  key={a.id}
-                  onClick={() => go({ kind: "activity", id: a.id })}
-                >
-                  {a.name} · 直接
-                  {a.rows.filter((r) => impact.direct.includes(r)).length}業務 /
-                  間接{a.rows.filter((r) => impact.indirect.includes(r)).length}
-                  業務
-                </button>
-              ))}
-          </div>
-          <p>
-            {[
-              ...new Set(
-                [...impact.direct, ...impact.indirect].flatMap((r) =>
-                  r.capabilities.map((c) => c.capability.name),
-                ),
-              ),
-            ].join(" / ")}
-          </p>
-          {asset.kind === "data" && impact.direct[0] && (
-            <button
-              onClick={() => {
-                setReadData(asset.id);
-                setReadLens("data");
-                setReadStep("");
-                go({ kind: "workflow", id: impact.direct[0].workflow.id });
-              }}
-            >
-              この情報を業務の流れの中で辿る →
-            </button>
-          )}
-          <h3>使用部署</h3>
-          <p>
-            {[
-              ...new Set(
-                [...impact.direct, ...impact.indirect].flatMap(
-                  (r) => r.departments,
-                ),
-              ),
-            ].join(" / ") || "登録なし"}
-          </p>
-          <h3>自動処理・個別工程（{impact.processes.length}）</h3>
-          <div className="kg-links">
-            {impact.processes.slice(0, 6).map(processButton)}
-          </div>
-          {impact.processes.length > 6 && <details><summary>ほか{Math.min(30, impact.processes.length) - 6}工程を読む</summary>
-            <div className="kg-links">{impact.processes.slice(6, 30).map(processButton)}</div>
-          </details>}
-          {impact.processes.length > 30 && (
-            <p>
-              先頭30工程を表示。部署・検索で絞るか、関連業務からすべての工程を読めます。
-            </p>
-          )}
-          <h3>
-            道具の間で情報を渡す経路（
-            {impact.flows.length}）
-          </h3>
-          {!impact.flows.length && (
-            <p className="kg-context">
-              別の道具への転送は、まだ説明されていません。人や業務への受渡しは、上の手順から辿れます。
-            </p>
-          )}
-          <div className="kg-links">
-            {impact.flows.slice(0, 4).map(flowCard)}
-          </div>
-          {impact.flows.length > 4 && <details><summary>ほか{Math.min(30, impact.flows.length) - 4}受渡しを読む</summary>
-            <div className="kg-links">{impact.flows.slice(4, 30).map(flowCard)}</div>
-          </details>}
-          {impact.flows.length > 30 && (
-            <p>
-              先頭30受渡しを表示。レポートにはこの条件の全受渡しを出力します。
-            </p>
-          )}
-          <h3>動くために必要な仕組み</h3>
-          {impact.profile?.dependsOn.length ? (
-            impact.profile.dependsOn.map((d) => (
-              <p key={d.systemId}>
-                <button onClick={() => go({ kind: "asset", id: d.systemId })}>
-                  {label(d.systemId)}
-                </button>{" "}
-                · {d.reason}
-                {d.sourceWorkflowId && <><br /><small>{d.certainty === "confirmed" ? "入力・訂正の根拠あり" : "推定・要確認"} · 根拠：{d.evidence}</small> <button onClick={() => onInput?.(d.sourceWorkflowId)}>この話で依存を確認・訂正する</button></>}
-              </p>
-            ))
-          ) : (
-            <p>未登録</p>
           )}
           {asset.kind === "system" && graph.knowledge && (
             <details>
@@ -1275,44 +1131,7 @@ export function KnowledgeExplorer({
               ))}
             </details>
           )}
-          <h3>この仕組みを必要とするシステム</h3>
-          {impact.dependents.map(assetButton)}
-          <p>
-            間接影響: {impact.indirect.length}
-            業務。システムの明示的な依存を辿った範囲です。
-          </p>
-          {impact.indirect.length > 0 && (
-            <details>
-              <summary>間接影響の業務を確認</summary>
-              <div className="kg-links">
-                {impact.indirect.map((r) => workflowButton(r.workflow.id))}
-              </div>
-            </details>
-          )}
-          <h3>依存する重要業務</h3>
-          <div className="kg-links">
-            {[...impact.direct, ...impact.indirect]
-              .filter((r) =>
-                graph.knowledge?.criticalWorkflows.some(
-                  (w) => w.workflowId === r.workflow.id,
-                ),
-              )
-              .map((r) => (
-                <article key={r.workflow.id}>
-                  {workflowButton(r.workflow.id)}
-                  <p>
-                    {
-                      graph.knowledge?.criticalWorkflows.find(
-                        (w) => w.workflowId === r.workflow.id,
-                      )?.reason
-                    }
-                  </p>
-                </article>
-              ))}
-          </div>
-          <h3>このシステム・情報を使う業務</h3>
-          {list(impact.direct)}
-        </>
+          </>} />
       )}
       {view.rows.length === 0 && (
         <p role="status">
