@@ -20,12 +20,19 @@ export function structuredResponseText(payload: unknown, protocol: 'openai' | 'a
     if (choice.finish_reason === 'length') throw invalid('AIの応答が出力上限で途中終了しました。入力の範囲を小さくして再試行してください。');
     if (choice.finish_reason !== undefined && choice.finish_reason !== 'stop') throw invalid('AIの応答が整理結果として完了していません。');
     if (choice.message.refusal) throw invalid('AIが整理結果を返しませんでした。');
+    // Cortex Claude does not support finish_reason; inspect tool calls independently.
+    const calls = choice.message.tool_calls;
+    if ((calls != null && (!Array.isArray(calls) || calls.length > 0)) || choice.message.function_call != null)
+      throw invalid('AIの応答に本文以外の未処理の操作が含まれています。');
     if (typeof choice.message.content !== 'string' || !choice.message.content.trim()) throw invalid('AIの応答に整理結果がありませんでした。');
     return choice.message.content;
   }
   if (!Array.isArray(payload.content)) throw invalid('接続設定の応答形式とAIの戻り値が一致していません。');
+  // Anthropic can report a refusal in stop_details even when stop_reason is end_turn.
+  if (record(payload.stop_details) && payload.stop_details.type === 'refusal') throw invalid('AIが整理結果を返しませんでした。');
   if (payload.stop_reason === 'max_tokens') throw invalid('AIの応答が出力上限で途中終了しました。入力の範囲を小さくして再試行してください。');
-  if (payload.stop_reason !== undefined && !['end_turn', 'stop_sequence'].includes(String(payload.stop_reason))) throw invalid('AIの応答が整理結果として完了していません。');
+  // A non-streaming Messages response always has a non-null completion reason.
+  if (!['end_turn', 'stop_sequence'].includes(String(payload.stop_reason))) throw invalid('AIの応答が整理結果として完了していません。');
   const texts: string[] = [];
   for (const part of payload.content) {
     if (!record(part)) throw invalid();
