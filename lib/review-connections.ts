@@ -1,4 +1,5 @@
 import type { ExtractionReview, ExtractionTransition, FollowUpAnswer, LensGraph, Workflow } from "./graph";
+import { effectiveFollowUpAnswers } from './question-evidence';
 import { normalizeAssetName } from "./refinement";
 import { sourceEvidence } from "./source-evidence";
 import { statedReworkReturn } from "./rework-flow";
@@ -169,8 +170,9 @@ export function validateAITransitions<T extends ExtractionReview>(
       !/(?:調べ|調査|修正)(?:ない|しない|ません|しません|しなかった)|直(?:さない|さず|さなかった|しません)|不明|分から|分かりません|未確認|未定/.test(scoped);
   };
   const heldSteps = review.steps.filter(s => s.meaning?.halt && s.meaning.condition);
-  const directAnswers = answers.filter((a, i) => !a.reference && !a.referenceReading &&
-    !answers.slice(i + 1).some(later => !later.reference && later.question === a.question));
+  const activeAnswers = effectiveFollowUpAnswers(answers);
+  const directAnswers = activeAnswers.filter((a, i) => !a.reference && !a.referenceReading &&
+    !activeAnswers.slice(i + 1).some(later => !later.reference && later.question === a.question));
   const responseWork = (text: string) => repair(text) ||
     (/条項.{0,16}調整/.test(text) && !/調整(?:しない|しません|していない|していません|せず|しなかった)|不明|分から|未確認|未定/.test(text));
   const completion = /確定|承認|完了|公開|納品|出荷|反映|再開|再実行|再試行|解除|配信/;

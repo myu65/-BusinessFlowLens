@@ -167,6 +167,13 @@ const connectionReloaded=(await api('/api/project?projectId=connection-regressio
 check('human_connections_and_excluded_arrows_survive_apply_and_reload',connectionSaved.status===200&&connectionRoundtrip.excludedTransitions[0].evidence==='除外前の原図の矢印'&&connectionRoundtrip.transitions[0].holdEffect==='response'&&connectionRoundtrip.transitions[0].humanEdits[0].evidence==='担当者が戻り先を確認'&&connectionReloaded.transcripts[workflow.id]==='原文を保持');
 const connectionRevision=await api('/api/workflow-revisions?projectId=connection-regression&revisionId='+connectionSaved.body.revision.id);
 check('revision_keeps_connection_exclusions_and_confirmation_evidence',connectionRevision.body.revision.review.excludedTransitions.length===1&&connectionRevision.body.revision.review.transitions[0].humanEdits[0].evidence==='担当者が戻り先を確認');
+const dialogueHistory=[{id:'answer-original',kind:'answer',question:'担当は？',answer:'品質担当'}, {id:'answer-correction',kind:'correction',supersedes:'answer-original',question:'担当は？',answer:'購買担当'}, {id:'deferred',kind:'deferred',question:'承認先は？',answer:'まだ分からない'}];
+const dialogueSaved=await api('/api/apply','POST',{projectId:'dialogue-regression',workflow,graph:empty,review,transcripts:{[workflow.id]:'最初の話を残す'},sourceNotes:'最初の話を残す',followUpAnswers:dialogueHistory});
+const dialogueLoaded=(await api('/api/project?projectId=dialogue-regression')).body.project;
+const dialogueRevision=(await api('/api/workflow-revisions?projectId=dialogue-regression&revisionId='+dialogueSaved.body.revision.id)).body.revision;
+check('dialogue_keeps_correction_link_and_deferred_question_in_graph_and_revision',dialogueSaved.status===200&&JSON.stringify(dialogueLoaded.graph.workflows[0].reviewContext.followUpAnswers)===JSON.stringify(dialogueHistory)&&JSON.stringify(dialogueRevision.followUpAnswers)===JSON.stringify(dialogueHistory)&&dialogueLoaded.transcripts[workflow.id]==='最初の話を残す');
+const deferredLocal=await api('/api/extract','POST',{workflow,graph:empty,interview:'誰かが確認する。',followUpAnswers:[dialogueHistory[2]]});
+check('local_extraction_does_not_treat_deferred_chat_as_answered_fact',deferredLocal.status===200&&deferredLocal.body.review.questions.length>0&&!deferredLocal.body.review.warnings.some(w=>w.includes('自由な回答')));
 await fs.writeFile('.data/review-remaining-results.json',JSON.stringify(cases,null,2));
 console.log(JSON.stringify(cases,null,2));
 if (cases.some(item => !item.ok)) process.exitCode = 1;

@@ -6,6 +6,7 @@ import type {
   TechnicalDetail,
 } from "./graph";
 import { preserveRefinements } from "./refinement";
+import { effectiveFollowUpAnswers } from './question-evidence';
 
 function technicalDetail(text: string, system: string): TechnicalDetail | null {
   const field = (pattern: RegExp) => text.match(pattern)?.[1]?.trim() ?? null;
@@ -271,7 +272,7 @@ export function extractGroundedLocal(
         });
     }
   }
-  if (followUpAnswers.some((a) => a.answer.trim()))
+  if (effectiveFollowUpAnswers(followUpAnswers).some((a) => a.answer.trim()))
     review.warnings.push(
       "追加回答は根拠として保持しています。簡易抽出では自由な回答の解釈を確定できないため、本文への補足または候補の直接訂正で反映してください。",
     );

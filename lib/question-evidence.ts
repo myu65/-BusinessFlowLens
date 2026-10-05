@@ -45,7 +45,9 @@ export function referenceAnswer(question: string, reference: QuestionReference):
 // Keep every snapshot in the stored history. Only the latest use of the same
 // referenced story/question is evidence for re-reading after its source changes.
 export function effectiveFollowUpAnswers(answers: FollowUpAnswer[]) {
-  return answers.filter((answer, i) => !answer.reference || !answers.slice(i + 1).some(later =>
+  const superseded = new Set(answers.map(answer => answer.supersedes).filter(Boolean));
+  const active = answers.filter(answer => answer.kind !== "deferred" && (!answer.id || !superseded.has(answer.id)));
+  return active.filter((answer, i) => !answer.reference || !active.slice(i + 1).some(later =>
     later.question === answer.question && later.reference?.workflowId === answer.reference!.workflowId,
   ));
 }
@@ -89,7 +91,7 @@ export function scopeReferenceDataFlows<T extends ExtractionReview>(
 ): T {
   const references = effectiveFollowUpAnswers(answers).filter(a => a.reference);
   if (!references.length) return review;
-  const primary = normalizeAssetName([interview, ...answers.filter(a => !a.reference).map(a => a.answer)].join("\n"));
+  const primary = normalizeAssetName([interview, ...effectiveFollowUpAnswers(answers).filter(a => !a.reference).map(a => a.answer)].join("\n"));
   const nodes = new Map(graph.nodes.map(n => [n.id, n]));
   const matchesName = (id: string, name: string) => [nodes.get(id)?.label, ...(nodes.get(id)?.aliases ?? [])]
     .some(label => label && normalizeAssetName(label) === normalizeAssetName(name));
