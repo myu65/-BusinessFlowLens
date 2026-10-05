@@ -235,6 +235,50 @@
 .system-relationship-map .company-map-heading { scroll-margin-top: 86px; }
 @media (max-width: 700px) { .system-relationship-map .company-map-heading { scroll-margin-top: 150px; } }
 .relationship-open-work { margin: 0 0 14px; }
+.kg-view[data-focus="asset"] { max-width: 1180px; padding: 16px 24px; }
+.kg-view[data-focus="asset"] .company-page-header { margin-bottom: 8px; }
+.kg-view[data-focus="asset"] .company-heading-kicker { font-size: 11px; }
+.kg-view[data-focus="asset"] .company-page-header h1 { font-size: 24px; margin: 2px 0; }
+.kg-view[data-focus="asset"] .kg-explore-nav { margin: 8px 0; }
+.kg-view[data-focus="asset"] .kg-explore-nav button { padding: 6px 10px; font-size: 12px; }
+.kg-scope-controls { margin-bottom: 12px; font-size: 12px; }
+.kg-scope-controls > summary { padding: 8px 10px; background: #f4f6f3; border: 1px solid #d9e4dc; border-radius: 6px; cursor: pointer; }
+.asset-reading-summary > p { margin: 8px 0; font-size: 14px; }
+.asset-reading-summary > span { display: block; font-size: 12px; color: #566c5f; margin: 6px 0; }
+.asset-reading-summary > details { font-size: 12px; margin: 8px 0 14px; }
+.asset-reading-summary > details p { max-width: 90ch; }
+.asset-reading-sections { display: flex; flex-wrap: wrap; gap: 6px; border-bottom: 1px solid #d3dfd7; padding-bottom: 10px; }
+.asset-reading-sections button { display: flex; align-items: center; gap: 12px; padding: 9px 12px; font-size: 13px; }
+.asset-reading-sections button > span { font-size: 11px; opacity: .8; }
+.asset-reading-sections button[aria-pressed="true"], .asset-work-kinds button[aria-pressed="true"] { background: #365c48; border-color: #365c48; color: #fff; }
+.asset-reading-panel h3 { font-size: 15px; margin: 16px 0 10px; }
+.asset-reading-panel > section { margin-bottom: 22px; }
+.asset-role-cards, .asset-work-cards, .asset-flow-cards, .asset-process-cards, .asset-dependency-cards { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+.asset-reading-panel article { border: 1px solid #d9e4dc; border-radius: 8px; padding: 12px; background: #fff; min-width: 0; }
+.asset-reading-panel article > button { text-align: left; padding: 0; border: 0; color: #285b43; background: transparent; font-weight: 600; }
+.asset-reading-panel article p { font-size: 13px; line-height: 1.6; margin: 8px 0; overflow-wrap: anywhere; }
+.asset-reading-panel article > small { display: block; font-size: 11px; color: #586e61; margin-top: 6px; }
+.asset-reading-panel article details { font-size: 12px; margin-top: 8px; }
+.asset-reading-pages { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; color: #586e61; font-size: 11px; }
+.asset-reading-pages button { padding: 5px 8px; font-size: 11px; }
+.asset-activity-links { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; }
+.asset-activity-links button { display: grid; text-align: left; gap: 4px; padding: 9px; font-size: 13px; background: #f2f7f4; }
+.asset-activity-links small { color: #586e61; font-size: 11px; }
+.asset-work-kinds { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.asset-work-kinds button { font-size: 11px; padding: 6px 9px; }
+.asset-flow-direction { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.asset-flow-direction button { font-size: 13px; padding: 5px 8px; }
+.asset-process-cards dl { display: grid; gap: 7px; margin: 10px 0; font-size: 12px; }
+.asset-process-cards dl > div { display: grid; grid-template-columns: 80px minmax(0,1fr); gap: 6px; }
+.asset-process-cards dt { color: #586e61; }
+.asset-process-cards dd { margin: 0; overflow-wrap: anywhere; }
+.asset-reading-editor { margin-top: 18px; font-size: 12px; }
+.asset-reading-editor > summary { cursor: pointer; }
+@media (max-width: 700px) {
+  .kg-view[data-focus="asset"] { padding: 14px; }
+  .asset-role-cards, .asset-work-cards, .asset-flow-cards, .asset-process-cards, .asset-dependency-cards { grid-template-columns: 1fr; }
+  .asset-activity-links { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
 .company-map-heading h2 { font-size: 15px; }
 .company-map-heading p, .company-map-caption { font-size: 11px; margin: 4px 0 8px; }
 .company-map-caption > span { font-size: 10px; }
