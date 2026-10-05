@@ -605,7 +605,7 @@ function authHeaders(apiKey: string, mode: AIProtocol): HeadersInit {
   return headers;
 }
 
-async function structuredCall<T>(args: {
+export async function structuredCall<T>(args: {
   schemaName: string;
   schema: unknown;
   system: string;
@@ -1384,6 +1384,7 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
 
   return {
     organization: raw.organization,
+    dialogueHistory: raw.dialogueHistory,
     systemProfiles: raw.systemProfiles?.filter(
       (p) => p.name?.trim() && p.evidence?.trim(),
     ),
@@ -1441,6 +1442,8 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
       })),
     excludedSteps: raw.excludedSteps,
     excludedTransitions: raw.excludedTransitions,
+    excludedHandoffs: raw.excludedHandoffs,
+    excludedIncomingHandoffs: raw.excludedIncomingHandoffs,
     extraction: raw.extraction,
     protectedDetails: raw.protectedDetails,
     documentEvidence: raw.documentEvidence,
@@ -1658,6 +1661,8 @@ Keep the check's stable key, add a key for the stated approval, and keep every u
       })),
       excludedSteps: draft.excludedSteps,
       excludedTransitions: draft.excludedTransitions,
+      excludedHandoffs: draft.excludedHandoffs,
+      excludedIncomingHandoffs: draft.excludedIncomingHandoffs,
       protectedDetails: draft.protectedDetails,
     },
     provider: providerLabel(),

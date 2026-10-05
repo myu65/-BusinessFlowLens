@@ -44,6 +44,7 @@ test('merge preview keeps extra work, both originals, human corrections and the 
   assert.deepEqual(result.graph.knowledge!.activities[0].capabilities[0].workflowIds,['target','down']);
   assert.equal(result.graph.knowledge!.criticalWorkflows[0].workflowId,'target');
   const read=buildWorkflowReviewFromGraph(result.graph,'target');assert.equal(read.documentEvidence?.length,2);assert.equal(read.handoffs?.[0]?.fromStepKey,step.canonicalKey.split(':').at(-1));
+  assert.equal(read.summary,result.graph.workflows.find(w=>w.id==='target')!.summary);assert(read.summary.includes('二つの話をまとめた流れ'));assert(!read.summary.includes('購買担当が成績書を確認'));
   assert.ok(result.graph.edges.every(e=>result.graph.nodes.some(n=>n.id===e.source)&&result.graph.nodes.some(n=>n.id===e.target)));
 });
 

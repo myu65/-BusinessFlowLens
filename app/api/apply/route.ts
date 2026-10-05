@@ -82,12 +82,15 @@ export async function POST(request: Request) {
         followUpAnswers: body.followUpAnswers ?? [],
         excludedSteps: result.review.excludedSteps,
         excludedTransitions: result.review.excludedTransitions,
+        excludedHandoffs: result.review.excludedHandoffs,
+        excludedIncomingHandoffs: result.review.excludedIncomingHandoffs,
         extraction: result.review.extraction,
         protectedDetails: result.review.protectedDetails,
         organization: result.review.organization,
         systemProfiles: result.review.systemProfiles,
         systemDependencies: result.review.systemDependencies,
         documentEvidence: result.review.documentEvidence,
+        dialogueHistory: body.review.dialogueHistory,
       },
     };
     const connected = applyReviewConnections(

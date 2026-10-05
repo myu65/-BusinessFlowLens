@@ -3291,3 +3291,6 @@ button:disabled { cursor:not-allowed; opacity:.45; }
 .document-original-compact { display:grid; grid-template-columns:minmax(70px,.7fr) minmax(0,1fr); gap:8px; align-items:center; }
 .document-original-compact img { width:100%; max-height:100px; object-fit:contain; }.document-original-compact pre { max-height:100px; overflow:auto; font-size:10px; }
 .document-original-compact .document-original-name { overflow-wrap:anywhere; font-size:10px; }.document-original-compact button { padding:5px 6px; font-size:11px; }
+.input-operation-conversation { margin:12px 0; padding:10px; background:#f4f7f5; border:1px solid var(--line); border-radius:8px; }
+.input-operation-conversation article { margin:8px 0; }.input-operation-conversation small { color:var(--muted); font-size:.72rem; }.input-operation-conversation p { white-space:pre-wrap; font-size:.85rem; line-height:1.65; }
+.dialogue-operation-proposal { padding:12px 16px; border:1px solid #709783; border-radius:10px; background:#f0f7f3; margin:12px 0; }.dialogue-operation-proposal p { margin:6px 0; font-size:.85rem; line-height:1.6; }.dialogue-operation-proposal div { display:flex; flex-wrap:wrap; gap:8px; }

@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { canonicalNodeId } from "@/lib/graph";
+import { canonicalNodeId, canonicalDataFlowId } from "@/lib/graph";
 import type {
   Confidence,
   DataFlowAutomation,
@@ -193,17 +193,7 @@ function normalizeSnapshotGraph(graph: LensGraph): LensGraph {
       ),
     ];
 
-    const id = [
-      sourceSystemId,
-      targetSystemId,
-      flow.transferType,
-      [...dataIds].sort().join(","),
-      flow.direction,
-      flow.automation,
-      flow.frequency ?? "",
-      flow.evidence ?? "",
-      flow.status,
-    ].join("--");
+    const id = canonicalDataFlowId({...flow,sourceSystemId,targetSystemId,dataIds});
 
     const existing = flowById.get(id);
     if (existing) {

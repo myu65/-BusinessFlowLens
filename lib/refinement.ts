@@ -1,4 +1,5 @@
 import type { ExtractionReview, LensGraph, LensNode } from "./graph";
+import {canonicalDataFlowId} from './graph';
 import { preserveSystemDependencies } from "./system-dependencies";
 import { reviewFieldLabel } from "./review-copy";
 import { transitionKey } from './review-connection-edits';
@@ -42,7 +43,20 @@ export function mergeAssets(
       prior.label =
         [...new Set([prior.label, next.label].filter(Boolean))].join(" / ") ||
         undefined;
+      prior.evidence=[...new Set([prior.evidence,next.evidence].filter(Boolean))].join('\n')||undefined;
+      prior.sourceRefs=[...new Map([...(prior.sourceRefs??[]),...(next.sourceRefs??[])].map(ref=>[JSON.stringify(ref),ref])).values()];
+      prior.humanEdits=[...new Map([...(prior.humanEdits??[]),...(next.humanEdits??[])].map(edit=>[JSON.stringify(edit),edit])).values()];
+      // Confirming an asset's identity does not confirm an uncertain use of it.
+      const statuses=[prior.status,next.status].filter(Boolean);
+      prior.status=statuses.includes('unknown')?'unknown':statuses.includes('inferred')?'inferred':statuses.includes('confirmed')?'confirmed':undefined;
+      prior.sourceVariant=prior.sourceVariant??next.sourceVariant;
     } else edges.set(next.id, next);
+  }
+  const flows=new Map<string,LensGraph['dataFlows'][number]>();
+  for(const flow of graph.dataFlows){
+    const next={...flow,sourceSystemId:remap(flow.sourceSystemId),targetSystemId:remap(flow.targetSystemId),dataIds:[...new Set(flow.dataIds.map(remap))],workflowIds:[...flow.workflowIds],processIds:[...flow.processIds]};
+    next.id=canonicalDataFlowId(next);const prior=flows.get(next.id);
+    if(prior){prior.workflowIds=[...new Set([...prior.workflowIds,...next.workflowIds])];prior.processIds=[...new Set([...prior.processIds,...next.processIds])];}else flows.set(next.id,next);
   }
   return {
     ...graph,
@@ -111,6 +125,8 @@ export function mergeAssets(
                   ...(source.aliases ?? []),
                 ]),
               ].filter((label) => label !== node.label),
+              sourceRefs:[...new Map([...(node.sourceRefs??[]),...(source.sourceRefs??[])].map(ref=>[JSON.stringify(ref),ref])).values()],
+              humanEdits:[...new Map([...(node.humanEdits??[]),...(source.humanEdits??[])].map(edit=>[JSON.stringify(edit),edit])).values()],
               evidence: [
                 node.evidence,
                 `利用者が同一資産と確認: ${source.label}`,
@@ -123,12 +139,7 @@ export function mergeAssets(
       ),
     edges: [...edges.values()],
     // Keep individual transfers (including newly internal transfers) and their evidence.
-    dataFlows: graph.dataFlows.map((flow) => ({
-      ...flow,
-      sourceSystemId: remap(flow.sourceSystemId),
-      targetSystemId: remap(flow.targetSystemId),
-      dataIds: [...new Set(flow.dataIds.map(remap))],
-    })),
+    dataFlows: [...flows.values()],
   };
 }
 
@@ -379,6 +390,10 @@ export function preserveRefinements(
   if(review.transitions.some(edge=>excluded(edge)&&!excludedConnections.has(transitionKey(edge))))
     review={...review,questions:[...review.questions,{question:'人が除外した手順間に、異なる条件の矢印が提案されています。採用するつながりを図で確認してください。',reason:'条件の言い換えで、除外済みの接続を復活させないよう未確認として残しています。',target:'handoff'}]};
   const handoffs = [...(review.handoffs ?? [])];
+  const excludedHandoffs=(previous.excludedHandoffs??[]).map(h=>({...h,fromStepKey:remappedKey(h.fromStepKey)??h.fromStepKey}));
+  const excludedIncomingHandoffs=(previous.excludedIncomingHandoffs??[]).map(h=>({...h,toStepKey:remappedKey(h.toStepKey)??h.toStepKey}));
+  const excludedHandoff=(h:NonNullable<ExtractionReview['handoffs']>[number])=>excludedHandoffs.some(e=>e.fromStepKey===h.fromStepKey&&e.targetWorkflowId===h.targetWorkflowId&&(!e.targetStepKey||e.targetStepKey===h.targetStepKey));
+  const excludedIncoming=(h:NonNullable<ExtractionReview['incomingHandoffs']>[number])=>excludedIncomingHandoffs.some(e=>e.toStepKey===h.toStepKey&&e.sourceWorkflowId===h.sourceWorkflowId&&(!e.sourceStepKey||e.sourceStepKey===h.sourceStepKey));
   for (const confirmed of previous.handoffs ?? []) {
     if (
       (!confirmed.dataBindings?.length && confirmed.certainty !== "confirmed") ||
@@ -417,6 +432,7 @@ export function preserveRefinements(
     if (index >= 0) incomingHandoffs[index] = handoff;
     else incomingHandoffs.push(handoff);
   }
+  if(handoffs.some(excludedHandoff)||incomingHandoffs.some(excludedIncoming))warnings.push('人が外した業務間の受渡しを、読み直した候補でも除外しました。元の接続と取り消した理由は残っています。');
   const organization = ["human", "existing"].includes(
     previous.organization?.origin ?? "",
   )
@@ -432,9 +448,11 @@ export function preserveRefinements(
     );
   return {
     ...review,
+    excludedHandoffs,
+    excludedIncomingHandoffs,
     organization,
     systemDependencies: preserveSystemDependencies(review, previous),
-    incomingHandoffs: incomingHandoffs.filter((h) => keys.has(h.toStepKey)),
+    incomingHandoffs: incomingHandoffs.filter((h) => keys.has(h.toStepKey)&&!excludedIncoming(h)),
     steps: [...steps]
       .sort((a, b) => a.order - b.order)
       .map((s, i) => ({ ...s, order: i + 1 })),
@@ -456,7 +474,7 @@ export function preserveRefinements(
         ...f,
         relatedStepKeys: f.relatedStepKeys.filter((k) => keys.has(k)),
       })),
-    handoffs: handoffs.filter((h) => keys.has(h.fromStepKey)),
+    handoffs: handoffs.filter((h) => keys.has(h.fromStepKey)&&!excludedHandoff(h)),
     warnings: [...new Set(warnings.map((warning, i) =>
       restoredHumanField && i < review.warnings.length
         ? `人の訂正を反映する前の候補への注意：${warning}` : warning))],
