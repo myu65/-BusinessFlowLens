@@ -50,12 +50,14 @@ import {emptyLandscape} from '@/lib/landscape';
 import {FlowConnectionEditor} from './FlowConnectionEditor';
 import {InputDialogue} from './InputDialogue';
 import {appendDialogueAnswer, dialogueAnswerStatus, includePendingDialogueAnswers} from '@/lib/input-dialogue';
-import {applyDialogueReviewOperation,dialogueConnection,emptyDialoguePlan,pendingDialoguePlan,validateDialoguePlan,type DialoguePlan,type DialogueSession,type DialogueTurn} from '@/lib/dialogue-operations';
+import {applyDialogueReviewOperation,cancelDialogueTurns,dialogueConnection,emptyDialoguePlan,pendingDialoguePlan,validateDialoguePlan,type DialoguePlan,type DialogueSession,type DialogueTurn} from '@/lib/dialogue-operations';
 import {DialogueOperationPanel} from './DialogueOperationPanel';
 import {canonicalNodeId} from '@/lib/graph';
 import {reviewSlug,dialogueUndoSnapshot} from '@/lib/review-workbench';
 import {dialogueCandidate} from '@/lib/dialogue-candidate';
 import {workflowMergeChoices,mergeStepDifferences,mergeValue,type WorkflowMergeChoice} from '@/lib/workflow-merge';
+import {reviewStructureChanged,withCurrentExplanation} from '@/lib/current-understanding';
+import {ReviewUnderstandingHistory} from './ReviewUnderstandingHistory';
 
 const REVIEW_PAGE_SIZE = INPUT_CANVAS_PAGE_SIZE;
 type DialoguePreview={plan:DialoguePlan;review?:ExtractionReview;workflow?:Workflow;graph?:LensGraph;candidate?:InputDraft;choices?:WorkflowMergeChoice[];details?:string[];expectedUpdatedAt?:string;recordId?:string;recordKind?:'workflow'|'asset';evidence:string;beforeDraft:InputDraft|null};
@@ -343,6 +345,7 @@ export function InputWorkbench({
           answers: {},
         };
   const update = (nextReview: ExtractionReview) => {
+    if(review&&reviewStructureChanged(review,nextReview))nextReview=withCurrentExplanation(nextReview,review,'図の訂正','利用者が図の確認中に訂正');
     if(nextReview===currentReview&&draft?.baseline===currentReview&&memo===(savedTranscripts[key]??'')&&
       !Object.values(draft.answers).some(answer=>answer.trim())&&JSON.stringify(draft.answerHistory)===JSON.stringify(saved?.reviewContext?.followUpAnswers??[])){
       onDraft(key,null);return;
@@ -737,7 +740,10 @@ export function InputWorkbench({
       }
       prepared.candidate=candidate;prepared.review=candidate.review;prepared.workflow=candidate.workflow;
     }
-    if(['connect','disconnect','restore_connection','exclude_step','restore_step','handoff','remove_handoff','incoming_handoff','remove_incoming_handoff'].includes(plan.action))prepared.review=applyDialogueReviewOperation(baseReview!,plan,evidence);
+    if(['connect','disconnect','restore_connection','exclude_step','restore_step','handoff','remove_handoff','incoming_handoff','remove_incoming_handoff','resolve_question','reopen_question'].includes(plan.action)){
+      prepared.review=applyDialogueReviewOperation(baseReview!,plan,evidence);
+      if(reviewStructureChanged(baseReview!,prepared.review)||['resolve_question','reopen_question'].includes(plan.action))prepared.review=withCurrentExplanation(prepared.review,baseReview!,'対話から図や確認事項を訂正',evidence);
+    }
     if(plan.action==='rename_workflow'){prepared.workflow={...baseWorkflow!,name:plan.value!};prepared.review={...baseReview!,...(baseReview!.organization?{organization:{...baseReview!.organization,title:plan.value!,origin:'human',evidence}}:{})};}
     if(plan.action==='set_scenario'){prepared.workflow={...baseWorkflow!,scenario:plan.value as Workflow['scenario']};prepared.review=baseReview!;}
     if(plan.action==='merge_workflows'){
@@ -802,7 +808,7 @@ export function InputWorkbench({
     finally{if(organizeRequest.current===controller){organizeRequest.current=null;setBusy(false);}}
   }
   function cancelDialogueOperation(extraTurns?:DialogueTurn[]){
-    const turns=(extraTurns??dialogueSession.turns).map(t=>t.state==='proposed'?{...t,state:'cancelled' as const}:t);
+    const turns=cancelDialogueTurns(extraTurns??dialogueSession.turns);
     if(baseReview)onDraft(key,{...ensureDraft(baseReview),review:{...baseReview,dialogueHistory:turns},dialogueSession:{turns,plan:null}});
     setOperationPreview(null);setCorrectionText('');setOrganizeNotice('案を取り消しました。変更前の図と対話の履歴は残っています。');
   }
@@ -1378,7 +1384,8 @@ export function InputWorkbench({
   const noteEntries = [
     ...Object.entries(drafts).filter(([id]) => !graph.workflows.some(w => w.id === id)).map(([id, d]) => ({ id, name: d.workflow.name, pending: true, questions: d.review.questions.length, text: transcripts[id] ?? d.sourceNotes })),
     ...[...graph.workflows].reverse().map(w => ({ id: w.id, name: drafts[w.id]?.workflow.name ?? w.name, pending: !!drafts[w.id], questions: (drafts[w.id]?.review ?? w.reviewContext)?.questions?.length ?? 0, text: transcripts[w.id] ?? "" })),
-  ].filter(n => (memoFilter !== "drafts" || n.pending) && (memoFilter !== "questions" || n.questions > 0) && `${n.name} ${n.text}`.includes(noteQuery));
+  ].map(n=>n.id===key&&operationPreview?{...n,name:workflow?.name??n.name,questions:review?.questions.length??n.questions}:n)
+    .filter(n => (memoFilter !== "drafts" || n.pending) && (memoFilter !== "questions" || n.questions > 0) && `${n.name} ${n.text}`.includes(noteQuery));
   const notePage = Math.max(0, Math.min(memoPage, Math.ceil(noteEntries.length / 6) - 1));
   return (
     <section
@@ -1897,6 +1904,7 @@ export function InputWorkbench({
             <aside className="input-empty-structure" aria-label="分かっている話から続きを書く">
               <strong>{review.systemDependencies?.some(d => !d.rejected) ? "道具どうしの関係が分かりました" : "まだ作業の流れは決めていません"}</strong>
               <p>{review.summary}</p>
+              <ReviewUnderstandingHistory review={review}/>
               <p>全部を説明する必要はありません。知っていることをメモに足すか、下の確認事項に答えると、ここから流れが育ちます。分からないことは未確認のまま残せます。</p>
               {!draft && saved && onExplore && <button disabled={busy || stale || pendingAnswers || !!addition.trim() || !!edit}
                 onClick={() => onExplore(saved.id)}>この仕事を会社の中で見る →</button>}
@@ -1913,6 +1921,7 @@ export function InputWorkbench({
                   onClick={() => { if (draft) void refine(); else void organize(); }}>ここまでの話で確認事項を見直す</button>
                 <p className="input-growing-hint">追記した話と入力した回答も含めて見直します。流れの変更は、保存前に確認できます。</p>
                 {(edit || !!addition.trim()) && <p className="input-growing-hint">入力中の追記・訂正を反映すると、確認事項を見直せます。</p>}
+                {review.summaryBasis==='structure'&&!!review.warnings.length&&<p className="input-growing-hint">以下は読み取り時の注意です。図を更新する前の内容も含みます。現在の図と、人が確認・訂正した履歴を合わせて確かめてください。</p>}
                 {review.warnings.map((w, i) => {
                   const shared = w.match(/^共有資産の同一性を要確認: (.*?) — ([\s\S]*)$/);
                   return shared ? <div key={i}>

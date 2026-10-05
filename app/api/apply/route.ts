@@ -75,6 +75,9 @@ export async function POST(request: Request) {
       outcome: result.review.outcome,
       reviewContext: {
         summary: result.review.summary,
+        summaryBasis: result.review.summaryBasis,
+        readingHistory: result.review.readingHistory,
+        questionReviews: result.review.questionReviews,
         trigger: result.review.trigger,
         outcome: result.review.outcome,
         questions: result.review.questions,

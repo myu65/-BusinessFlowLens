@@ -2,8 +2,9 @@ import { buildExtractionContext } from './ai/context';
 import { type ExtractionReview, type ExtractionTransition, type LensGraph, type Workflow } from './graph';
 import { changeReviewConnection } from './review-connection-edits';
 import { workflowMergeProblem } from './workflow-merge';
+import { latestQuestionReviews, reviewQuestion, reviewQuestionId } from './current-understanding';
 
-export const dialogueActions = ['ask','refine','connect','disconnect','restore_connection','insert','exclude_step','restore_step','handoff','remove_handoff','incoming_handoff','remove_incoming_handoff','rename_workflow','set_scenario','merge_workflows','merge_assets','rename_asset','save','undo','show','new_story','accept','cancel'] as const;
+export const dialogueActions = ['ask','refine','connect','disconnect','restore_connection','insert','exclude_step','restore_step','handoff','remove_handoff','incoming_handoff','remove_incoming_handoff','rename_workflow','set_scenario','merge_workflows','merge_assets','rename_asset','resolve_question','reopen_question','save','undo','show','new_story','accept','cancel'] as const;
 export type DialogueAction = typeof dialogueActions[number];
 export type DialoguePlan = {
   action: DialogueAction; message: string; question: string|null;
@@ -15,6 +16,12 @@ export type DialogueTurn = {id:string;createdAt:string;role:'user'|'assistant';t
 export type DialogueSession = {turns:DialogueTurn[];plan:DialoguePlan|null;evidence?:string;preview?:import('./review-workbench').InputDraft};
 const trim=(text:string)=>text.normalize('NFKC').replace(/\s+/g,'').toLowerCase();
 export const emptyDialoguePlan=(message:string,question:string|null=null):DialoguePlan=>({action:'ask',message,question,workflowId:null,sourceId:null,targetId:null,otherWorkflowId:null,condition:null,value:null,data:[],matches:[]});
+
+/** A cancelled clarification must not become active again when its history is saved. */
+export function cancelDialogueTurns(turns:DialogueTurn[]):DialogueTurn[]{
+  const lastAssistant=turns.findLastIndex(turn=>turn.role==='assistant');
+  return turns.map((turn,index)=>turn.state==='proposed'||index===lastAssistant&&turn.state==='question'?{...turn,state:'cancelled'}:turn);
+}
 
 /** Undoing a visible, unaccepted proposal cancels that proposal, never an older saved change. */
 export function pendingDialoguePlan(plan:DialoguePlan,pending:DialoguePlan|null|undefined):DialoguePlan{
@@ -36,6 +43,7 @@ export function buildDialogueContext(graph:LensGraph,workflow:Workflow,review:Ex
   return {
     scope:{...extracted.scope,totalCompanyWorkflows:graph.workflows.length,candidateWorkflows:ids.length},
     current:{...scope(workflow),selectedStepKey,steps:review.steps.slice(0,60).map(s=>({id:s.stepKey,name:s.name,actor:s.actor,systems:s.systems.map(t=>t.name),data:s.data.map(d=>({name:d.name,operation:d.operation})),result:s.meaning?.result})),
+      questions:review.questions.slice(0,30).map(q=>({...q,id:reviewQuestionId(q)})),resolvedQuestions:latestQuestionReviews(review).filter(q=>q.state==='resolved').slice(-30),
       omittedSteps:Math.max(0,review.steps.length-60),transitions:review.transitions.slice(0,100),excludedSteps:(review.excludedSteps??[]).slice(0,30).map(s=>({id:s.stepKey,name:s.name})),excludedTransitions:(review.excludedTransitions??[]).slice(0,40),handoffs:review.handoffs?.slice(0,30),incomingHandoffs:review.incomingHandoffs?.slice(0,30),excludedHandoffs:review.excludedHandoffs?.slice(0,30),excludedIncomingHandoffs:review.excludedIncomingHandoffs?.slice(0,30)},
     workflows:ids.map(id=>{const w=graph.workflows.find(w=>w.id===id)!;return {...scope(w),summary:(w.summary??w.description??'').slice(0,250),steps:graph.nodes.filter(n=>n.kind==='process'&&n.workflowId===id).sort((a,b)=>(a.stepOrder??0)-(b.stepOrder??0)).slice(0,12).map(n=>({id:n.canonicalKey.split(':').at(-1),name:n.label,actor:n.actor,result:n.meaning?.result}))};}),
     systems:assets('system'),data:assets('data'),
@@ -52,7 +60,7 @@ const resolveConnection=(review:ExtractionReview,plan:DialoguePlan,excluded=fals
 export function validateDialoguePlan(plan:DialoguePlan,graph:LensGraph,workflow:Workflow,review:ExtractionReview):DialoguePlan{
   if(!plan||!dialogueActions.includes(plan.action)||typeof plan.message!=='string'||!Array.isArray(plan.data)||!Array.isArray(plan.matches))throw new Error('対話の操作案を読み取れませんでした。入力した言葉は残っています。');
   if(plan.action==='ask')return plan;
-  const currentActions:DialogueAction[]=['refine','connect','disconnect','restore_connection','insert','exclude_step','restore_step','handoff','remove_handoff','incoming_handoff','remove_incoming_handoff','rename_workflow','set_scenario','save'];
+  const currentActions:DialogueAction[]=['refine','connect','disconnect','restore_connection','insert','exclude_step','restore_step','handoff','remove_handoff','incoming_handoff','remove_incoming_handoff','rename_workflow','set_scenario','resolve_question','reopen_question','save'];
   if(currentActions.includes(plan.action)&&plan.workflowId!==workflow.id)throw new Error('いま開いている業務を操作します。別の業務を開いてから変更してください。');
   const step=(id:string|null,excluded=false)=>{const found=(excluded?review.excludedSteps??[]:review.steps).find(s=>s.stepKey===id);if(!found)throw new Error('対象の手順を特定できません。手順の名前を教えてください。');return found;};
   if(['connect','disconnect','restore_connection','insert'].includes(plan.action)){
@@ -87,6 +95,8 @@ export function validateDialoguePlan(plan:DialoguePlan,graph:LensGraph,workflow:
   if(plan.action==='show'&&plan.workflowId&&plan.workflowId!==workflow.id&&!graph.workflows.some(w=>w.id===plan.workflowId))throw new Error('開く業務を特定できません。業務名を教えてください。');
   if(plan.action==='show'&&plan.sourceId&&!review.steps.some(s=>s.stepKey===plan.sourceId)&&!graph.nodes.some(n=>n.id===plan.sourceId))throw new Error('開く手順やシステム・情報を特定できません。名前を教えてください。');
   if(plan.action==='refine'&&plan.sourceId)step(plan.sourceId);
+  if(plan.action==='resolve_question'&&!review.questions.some(q=>reviewQuestionId(q)===plan.sourceId))throw new Error('解決にする確認事項を一つ選んでください。');
+  if(plan.action==='reopen_question'&&!latestQuestionReviews(review).some(q=>q.id===plan.sourceId&&q.state==='resolved'))throw new Error('再確認する解決済みの質問を一つ選んでください。');
   return {...plan,message:describeDialoguePlan(plan,graph,workflow,review)};
 }
 
@@ -97,7 +107,7 @@ export function describeDialoguePlan(plan:DialoguePlan,graph:LensGraph,workflow:
   const work=(id:string|null)=>graph.workflows.find(w=>w.id===id)?.name??workflow.name;
   const arrow=`「${step(plan.sourceId)}」から「${step(plan.targetId)}」への${plan.condition?`「${plan.condition}」の`:''}矢印`;
   switch(plan.action){
-    case 'connect':return `${arrow}を追加します。${plan.value==='response'?'例外対応・戻りの流れです。':plan.value==='resume'?'停止した仕事の再開先です。':plan.value==='unknown'?'接続は未確認として残します。':''}`;
+    case 'connect':return `${arrow}を${review.transitions.some(edge=>edge.fromStepKey===plan.sourceId&&edge.toStepKey===plan.targetId&&edge.condition===plan.condition)?'更新':'追加'}します。${plan.value==='response'?'例外対応・戻りの流れです。':plan.value==='resume'?'停止した仕事の再開先です。':plan.value==='unknown'?'接続は未確認として残します。':''}`;
     case 'disconnect':return `${arrow}を外します。両方の手順は残します。`;
     case 'restore_connection':return `${arrow}を元に戻します。`;
     case 'exclude_step':return `「${step(plan.sourceId)}」を図から外し、原文と履歴に残します。前後をつなぐ矢印は追加しません。`;
@@ -113,6 +123,8 @@ export function describeDialoguePlan(plan:DialoguePlan,graph:LensGraph,workflow:
     case 'merge_assets':return `「${asset(plan.sourceId)}」を「${asset(plan.targetId)}」と同じものとしてまとめます。以前の名前を別名と履歴に残します。`;
     case 'rename_asset':return `「${asset(plan.sourceId)}」の名前を「${plan.value}」へ変え、以前の名前を別名として残します。`;
     case 'refine':return `${plan.sourceId?`「${step(plan.sourceId)}」`:'いまの仕事の流れ'}を、話した内容で補足・訂正します。元の話と人の訂正を保持します。`;
+    case 'resolve_question':return `「${review.questions.find(q=>reviewQuestionId(q)===plan.sourceId)?.question}」を確認済みにします。確認した理由と元の質問は履歴に残します。他の確認事項は残ります。`;
+    case 'reopen_question':return `「${latestQuestionReviews(review).find(q=>q.id===plan.sourceId)?.question.question}」を、もう一度確かめる質問へ戻します。以前の確認内容も履歴に残します。`;
     default:return plan.message;
   }
 }
@@ -123,7 +135,11 @@ export function dialogueConnection(review:ExtractionReview,plan:DialoguePlan):Ex
 
 /** Draft edits retain originals, exclusions and human provenance. They never save by themselves. */
 export function applyDialogueReviewOperation(review:ExtractionReview,plan:DialoguePlan,evidence:string):ExtractionReview{
-  if(plan.action==='connect')return changeReviewConnection(review,null,{fromStepKey:plan.sourceId!,toStepKey:plan.targetId!,condition:plan.condition,evidence,certainty:plan.value==='unknown'?'unknown':'confirmed',...(['response','resume'].includes(plan.value??'')?{holdEffect:plan.value as 'response'|'resume'}:{})});
+  if(plan.action==='resolve_question'||plan.action==='reopen_question')return reviewQuestion(review,plan.sourceId!,plan.action==='resolve_question'?'resolved':'reopened',evidence,new Date().toISOString());
+  if(plan.action==='connect'){
+    const previous=review.transitions.find(edge=>edge.fromStepKey===plan.sourceId&&edge.toStepKey===plan.targetId&&(edge.condition?.trim()||null)===(plan.condition?.trim()||null))??null;
+    return changeReviewConnection(review,previous,{fromStepKey:plan.sourceId!,toStepKey:plan.targetId!,condition:plan.condition,evidence,certainty:plan.value==='unknown'?'unknown':'confirmed',...(['response','resume'].includes(plan.value??'')?{holdEffect:plan.value as 'response'|'resume'}:plan.value==='unknown'&&previous?.holdEffect?{holdEffect:previous.holdEffect}:{})});
+  }
   if(plan.action==='disconnect')return changeReviewConnection(review,resolveConnection(review,plan),null);
   if(plan.action==='restore_connection')return changeReviewConnection(review,null,{...resolveConnection(review,plan,true),evidence});
   if(plan.action==='exclude_step'){

@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { ExtractionReview, FollowUpAnswer } from '@/lib/graph';
 import { dialogueAnswerStatus, dialogueQuestions } from '@/lib/input-dialogue';
 import type {DialogueSession} from '@/lib/dialogue-operations';
+import {ReviewUnderstandingHistory} from './ReviewUnderstandingHistory';
 
 type Props = {
   source: string; onSource: (text: string) => void;
@@ -52,9 +53,10 @@ export function InputDialogue(props: Props) {
       <button className="button-primary" disabled={busy || !props.source.trim()} onClick={() => void props.onStart()}>話から流れを作る</button>
       <p className="input-growing-hint">まず図で確認します。分からない箇所は、あとから一つずつ補足できます。</p>
     </> : <>
-      <div className="input-dialogue-understanding"><small>{review.extraction?.method === 'local' ? '簡易整理による候補' : 'AIの読み取り候補'}</small>
+      <div className="input-dialogue-understanding"><small>{review.summaryBasis==='structure'?'現在の図に登録されていること':review.extraction?.method === 'local' ? '簡易整理による候補' : 'AIの読み取り候補'}</small>
         <p>{review.summary}</p><span>{review.steps.length}手順 · 確認事項 {review.questions.length}件</span>
       </div>
+      <ReviewUnderstandingHistory review={review}/>
       {!!props.operationSession?.turns.length&&<div className="input-operation-conversation" aria-label="図へのお願いと返答">
         <details><summary>図へのお願い・操作履歴 · {props.operationSession.turns.filter(t=>t.role==='user').length}件</summary>{props.operationSession.turns.map(turn=><article key={turn.id}><small>{turn.role==='user'?'あなた':'図の確認'}{turn.state==='applied'?' · 反映済み':turn.state==='cancelled'?' · 取り消し':''}</small><p>{turn.text}</p></article>)}</details>
         {props.operationSession.turns.slice(-2).map(turn=><article key={turn.id}><small>{turn.role==='user'?'あなた':'図の確認'}{turn.state==='applied'?' · 反映済み':turn.state==='cancelled'?' · 取り消し':''}</small><p>{turn.text}</p></article>)}
