@@ -1,6 +1,9 @@
 /** Original document evidence is separate from business entities and AI interpretations. */
 export type SourceCell = { address: string; sourceAddress: string; text: string };
 export type SourceImage = { unitId: string; bytes: Uint8Array; mimeType: "image/jpeg"; width: number; height: number };
+/** Logical evidence identity, independent of SQLite BLOBs or a future object stage. */
+export type SourceReference = { documentId: string; unitId: string };
+export type WorkflowSourceImage = SourceImage & SourceReference & { location: string };
 export type VisualReading = {
   description: string;
   uncertainties: string[];
@@ -60,7 +63,7 @@ export const DOCUMENT_MAX_BYTES = 8 * 1024 * 1024;
 export const DOCUMENT_MAX_UNITS = 700;
 export const DOCUMENT_MAX_CHARACTERS = 90_000;
 export function documentWorkName(item: DocumentWorkItem): string {
-  return item.site ? `${item.site}：${item.title}` : item.title;
+  return item.title;
 }
 export function matchingSourceUnits(document: SourceDocument, unitIds: string[], quote: string): SourceUnit[] {
   const units=document.units.filter(unit=>unitIds.includes(unit.id));

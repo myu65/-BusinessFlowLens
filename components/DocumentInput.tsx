@@ -136,7 +136,7 @@ export function SourceUnits({document,unitIds,projectId}: {document:SourceDocume
   </section>;
 }
 
-export function DocumentSourceEvidence({projectId,evidence,focusText="",stepName=""}: {projectId:string;evidence:DocumentEvidence[];focusText?:string;stepName?:string}) {
+export function DocumentSourceEvidence({projectId,evidence,focusText="",stepName="",sourceRefs,buttonLabel="元資料のセル・ページを確認する"}: {projectId:string;evidence:DocumentEvidence[];focusText?:string;stepName?:string;sourceRefs?:import("@/lib/source-document").SourceReference[];buttonLabel?:string}) {
   const [documents,setDocuments]=useState<Record<string,SourceDocument>>({}), [error,setError]=useState("");
   const [open,setOpen]=useState(false), dialog=useRef<HTMLDialogElement>(null);
   const [all,setAll]=useState(false);
@@ -145,11 +145,11 @@ export function DocumentSourceEvidence({projectId,evidence,focusText="",stepName
     try {for(const ref of evidence){if(documents[ref.documentId])continue;const response=await fetch(sourceURL(projectId,ref.documentId));const value=await response.json();if(!response.ok)throw new Error(value.error);setDocuments(current=>({...current,[ref.documentId]:value.document}));}}
     catch(cause){setError(cause instanceof Error?cause.message:"元資料を読み込めませんでした。");}
   }
-  return <div className="document-evidence"><button className="button-secondary" onClick={()=>{setAll(false);setOpen(true);void load();}}>元資料のセル・ページを確認する</button>
+  return <div className="document-evidence"><button className="button-secondary" onClick={()=>{setAll(false);setOpen(true);void load();}}>{buttonLabel}</button>
     <dialog ref={dialog} className="document-evidence-dialog" aria-label="元資料と読み取った箇所" onCancel={()=>setOpen(false)}><header><h2>元資料と読み取った箇所</h2><button className="button-secondary" onClick={()=>setOpen(false)}>フローへ戻る</button></header>
       <p>{stepName?`今見ている手順：${stepName}。`:""}担当の空欄や注記も、そのまま残しています。</p>
       {error&&<p role="alert">{error}</p>}{evidence.map(ref=>{
-        const doc=documents[ref.documentId], matches=doc?matchingSourceUnits(doc,ref.unitIds,focusText):[];
+        const doc=documents[ref.documentId], direct=sourceRefs?.filter(source=>source.documentId===ref.documentId&&ref.unitIds.includes(source.unitId)).map(source=>source.unitId)??[], matches=doc?direct.length?doc.units.filter(unit=>direct.includes(unit.id)):matchingSourceUnits(doc,ref.unitIds,focusText):[];
         return <article key={`${ref.documentId}-${ref.itemId}`}><h3>{ref.documentName}</h3><a className="input-text-button" href={`${sourceURL(projectId,ref.documentId)}&original=1`}>元のファイルを保存</a>{doc?<>
           {!!matches.length&&<div className="document-source-selection"><strong>{all?"この仕事で読んだ全箇所":"この手順の根拠がある箇所"}</strong><button className="button-secondary" onClick={()=>setAll(!all)}>{all?"この手順の根拠に戻る":"この仕事で読んだ全箇所も見る"}</button></div>}
           {doc.lifecycle?.state==="withdrawn"&&<p className="document-source-withdrawn">この資料の使用は取り消されています。保存時の根拠として残しています。</p>}

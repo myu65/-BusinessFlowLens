@@ -861,6 +861,7 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
             boundary: node.boundary,
             meaning: node.meaning,
             humanEdits: node.humanEdits,
+            sourceRefs: node.sourceRefs,
           }),
         );
       }
@@ -874,7 +875,7 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
           edge.label ?? null,
           edge.relation,
           encodeArray(edge.workflowIds),
-          JSON.stringify({ evidence: edge.evidence, status: edge.status, holdEffect: edge.holdEffect, humanEdits: edge.humanEdits }),
+          JSON.stringify({ evidence: edge.evidence, status: edge.status, holdEffect: edge.holdEffect, humanEdits: edge.humanEdits, sourceRefs: edge.sourceRefs, sourceVariant: edge.sourceVariant }),
         );
       }
 

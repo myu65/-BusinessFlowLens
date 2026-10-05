@@ -41,6 +41,8 @@ import { createQuestionReferenceFinder, referenceAnswer } from "@/lib/question-e
 import { confirmHandoffInformation } from "@/lib/handoff-information";
 import { DocumentInput, DocumentSourceEvidence } from "./DocumentInput";
 import { documentWorkSource, documentWorkName, type DocumentEvidence, type SourceDocument, type DocumentWorkItem } from "@/lib/source-document";
+import { DocumentOriginalPane } from "./DocumentOriginalPane";
+import type { WorkflowCorrection } from "@/lib/ai/workflow-correction";
 
 const REVIEW_PAGE_SIZE = INPUT_CANVAS_PAGE_SIZE;
 
@@ -91,13 +93,15 @@ export function InputWorkbench({
 }) {
   const key = selectedId || NEW_MEMO_ID;
   const draft = drafts[key];
+  const [pendingDocument,setPendingDocument]=useState<{key:string;workflow:Workflow;evidence:DocumentEvidence}|null>(null);
   const saved = graph.workflows.find((w) => w.id === key);
   const currentReview = useMemo(
     () => (saved ? buildWorkflowReviewFromGraph(graph, key) : null),
     [graph, key, saved],
   );
   const review = draft?.review ?? currentReview;
-  const workflow = draft?.workflow ?? saved;
+  const workflow = draft?.workflow ?? saved ?? (pendingDocument?.key===key?pendingDocument.workflow:undefined);
+  const documentEvidence=review?.documentEvidence??(pendingDocument?.key===key?[pendingDocument.evidence]:undefined);
   const memo = transcripts[key] ?? "";
   const [query, setQuery] = useState("");
   const [documentInputOpen, setDocumentInputOpen] = useState(false);
@@ -107,6 +111,11 @@ export function InputWorkbench({
   const [busy, setBusy] = useState(false);
   const organizeRequest = useRef<AbortController | null>(null);
   const [organizeNotice, setOrganizeNotice] = useState("");
+  const [correctionText, setCorrectionText] = useState("");
+  const [correctionScope, setCorrectionScope] = useState("all");
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [undoCorrection,setUndoCorrection]=useState<{draft:InputDraft|null}|null>(null);
+  useEffect(()=>{setCorrectionText("");setCorrectionScope("all");setRenameOpen(false);setUndoCorrection(null);},[key]);
   const [operation, setOperation] = useState<"organize" | "addition" | "save">("organize");
   const [waitingSeconds, setWaitingSeconds] = useState(0);
   useEffect(() => {
@@ -390,6 +399,7 @@ export function InputWorkbench({
       [],
     text = memo,
     documentStart?: { workflow: Workflow; key: string; evidence: DocumentEvidence },
+    correction?: WorkflowCorrection,
   ) {
     if (!text.trim()) return;
     const w = documentStart?.workflow ?? workflow ?? {
@@ -422,6 +432,9 @@ export function InputWorkbench({
           graph: latest.current.graph,
           previousReview: before,
           followUpAnswers: answers,
+          projectId,
+          documentEvidence: documentStart ? [documentStart.evidence] : documentEvidence,
+          correction,
         }),
       });
       const payload = await response.json();
@@ -435,12 +448,12 @@ export function InputWorkbench({
         workflow: {
           ...w,
           name: reviewedWorkflowName(
-            w,
+            documentStart || (!before&&documentEvidence?.length) ? { ...w, name: `入力した話：${w.name}` } : w,
             payload.review,
             before?.organization?.title,
           ),
         },
-        review: { ...payload.review, documentEvidence: documentStart ? [documentStart.evidence] : before?.documentEvidence },
+        review: { ...payload.review, documentEvidence: documentStart ? [documentStart.evidence] : documentEvidence },
         provider: payload.provider,
         sourceNotes: text,
         baseline: before,
@@ -448,13 +461,14 @@ export function InputWorkbench({
         answerHistory: payload.followUpAnswers ?? answers,
       };
       onDraft(requestKey, next);
+      if(correction){setUndoCorrection({draft:draft??null});setCorrectionText("");setOrganizeNotice("補足・訂正を反映した候補です。色の付いた手順と変更前後を確かめてから保存してください。");}
       setMobilePane("flow");
       setWorkbenchTab("flow");
       if (requestKey === latest.current.key) {
         if (!next.review.steps.length) setQuestionsOpen(true);
         const changes = diffReviews(before, next.review);
         const focus =
-          changes.added[0] ??
+          (correction?.stepKey ? next.review.steps.find(s=>s.stepKey===correction.stepKey) : undefined) ?? changes.added[0] ??
           changes.changed[0]?.after ??
           next.review.steps.find((s) => s.stepKey === selected?.stepKey) ??
           next.review.steps[0];
@@ -486,6 +500,7 @@ export function InputWorkbench({
     setDocumentInputOpen(false);
     if (drafts[requestKey] || graph.workflows.some(w => w.id === requestKey)) { onSelect(requestKey); setMobilePane("flow"); return; }
     const text = documentWorkSource(document, item);
+    setPendingDocument({key:requestKey,workflow:{id:requestKey,name:documentWorkName(item),scenario:item.scope,scenarioLabel:item.site||undefined},evidence:{documentId:document.id,documentName:document.name,sha256:document.sha256,itemId:item.id,unitIds:[...new Set([...item.contextUnitIds,...item.unitIds])]}});
     onTranscripts({ ...latest.current.transcripts, [requestKey]: text });
     onSelect(requestKey);
     await organize([], text, { key: requestKey, workflow: { id: requestKey, name: documentWorkName(item), scenario: item.scope, scenarioLabel: item.site || undefined }, evidence: {
@@ -507,6 +522,7 @@ export function InputWorkbench({
   async function save() {
     if (pendingAnswers) { setError("入力した回答を、確認事項の見直しで流れへ反映してから保存してください。"); return; }
     if (!draft || stale || busy || addition.trim()) return;
+    if(correctionText.trim()){setError("書いた補足・訂正を流れに反映してから保存してください。");return;}
     setOperation("save");
     setBusy(true);
     setError("");
@@ -542,6 +558,7 @@ export function InputWorkbench({
       onDraft(key, null);
       onSelect(draft.workflow.id);
       setLastSavedId(draft.workflow.id);
+      setUndoCorrection(null);
       setUndoAddition(null);
       requestAnimationFrame(() =>
         stripRef.current?.scrollIntoView({
@@ -671,7 +688,7 @@ export function InputWorkbench({
   </>);
   const stepDetail = review && selected ? (<>
               <div ref={focusRef} className="input-focus-anchor">
-                {review.documentEvidence?.length ? <DocumentSourceEvidence key={key} projectId={projectId} evidence={review.documentEvidence} focusText={selected.evidence} stepName={selected.name} /> : null}
+                {review.documentEvidence?.length ? <DocumentSourceEvidence key={key} projectId={projectId} evidence={review.documentEvidence} sourceRefs={selected.sourceRefs} focusText={selected.evidence} stepName={selected.name} /> : null}
                 {!edit && <InputReviewFlow
                   review={review}
                   selected={selected}
@@ -1253,7 +1270,7 @@ export function InputWorkbench({
         <section className="input-note-pane">
           <div className="input-note-heading">
             <h2>
-              話とメモ
+              {documentEvidence?.length?"元資料と補足":"話とメモ"}
             </h2>
             {key !== NEW_MEMO_ID && (
               <button
@@ -1268,8 +1285,21 @@ export function InputWorkbench({
               </button>
             )}
           </div>
-          <button className="input-document-entry button-secondary" disabled={busy} onClick={() => { documentReturnKey.current=key;setDocumentInputOpen(true); }}>{review?.documentEvidence?.length ? "資料の別の仕事を見る" : "資料・画像から始める"}</button>
-          {!review && memoComposer}
+          {!documentEvidence?.length&&<button className="input-document-entry button-secondary" disabled={busy} onClick={() => { documentReturnKey.current=key;setDocumentInputOpen(true); }}>資料・画像から始める</button>}
+          {!review && !documentEvidence?.length && memoComposer}
+          {!!documentEvidence?.length&&<DocumentOriginalPane projectId={projectId} evidence={documentEvidence} sourceRefs={selected?.sourceRefs}/>}
+          {!review&&!!documentEvidence?.length&&<div className="input-document-organizing"><p>{busy?"原図を読み、手順と矢印を組み立てています。元資料を見ながら待てます。":"元資料は残っています。もう一度流れを作れます。"}</p>{!busy&&<button className="button-primary" onClick={()=>organize()}>この資料から流れを作る</button>}</div>}
+          {review&&<section className="input-correction" aria-label="流れを言葉で補足・訂正する">
+            <h3>違うところ・足りないところを直す</h3>
+            <label>直す範囲<select aria-label="言葉で直す範囲" value={correctionScope} onChange={event=>setCorrectionScope(event.target.value)}><option value="all">この仕事の流れ全体</option>{selected&&<option value="step">選んだ手順：{inputStepName(selected)}</option>}</select></label>
+            <textarea aria-label="流れへの補足・訂正" value={correctionText} disabled={busy} onChange={event=>setCorrectionText(event.target.value)} placeholder="例：成績書を受け取るのは品質担当ではなく、購買担当です。受取後に品質担当へ渡します。"/>
+            <button className="button-primary" disabled={busy||stale||!!edit||!correctionText.trim()} onClick={()=>{
+              const text=correctionText.trim();void organize([...(draft?.answerHistory??saved?.reviewContext?.followUpAnswers??[]),{question:correctionScope==="step"&&selected?`「${selected.name}」への補足・訂正`:"この仕事の流れへの補足・訂正",answer:text}],memo,undefined,{text,stepKey:correctionScope==="step"?selected?.stepKey:undefined});
+            }}>補足・訂正を流れに反映する</button>
+            <p>原本と元の話は残ります。変更した箇所を確認してから保存できます。</p>
+            {undoCorrection&&draft&&<button className="input-text-button" disabled={busy} onClick={()=>{onDraft(key,undoCorrection.draft);setUndoCorrection(null);setCorrectionText("");setOrganizeNotice("今回の補足・訂正を取り消し、直す前の候補に戻しました。");}}>今回の補足・訂正を取り消す</button>}
+          </section>}
+          {!!documentEvidence?.length&&<button className="input-text-button" disabled={busy} onClick={()=>{documentReturnKey.current=key;setDocumentInputOpen(true);}}>資料の別の仕事を見る</button>}
           {review && selected && <button className="input-add-work" disabled={busy || stale} onClick={() => openAddition()}>{addition.trim() ? "入力中の話を続ける" : "＋ 分かったことを足す"}</button>}
           {review && <p className="input-growing-hint">図の＋から、途中の作業も一つずつ足せます。</p>}
           <nav className="input-memo-filters" aria-label="メモの絞り込み">
@@ -1340,7 +1370,7 @@ export function InputWorkbench({
             </details>
           )}
           {review && <details className="input-original-source" open={stale}><summary>これまでの話を読む・書き直す</summary>{memoComposer}</details>}
-          {workflow && (
+          {workflow && review && (
             <details>
               <summary>業務名・表示する状態を整える（任意）</summary>
               <label className="kg-edit-field">
@@ -1412,6 +1442,7 @@ export function InputWorkbench({
               <h2>
                 {workflow?.name || "ここに、話の流れが見えます"}
               </h2>
+              {workflow&&review&&<><button className="input-text-button" disabled={busy} onClick={()=>setRenameOpen(!renameOpen)}>名前を直す</button>{renameOpen&&<label className="kg-edit-field">仕事の名前<input aria-label="仕事の名前" value={workflow.name} onChange={event=>onDraft(key,{...ensureDraft(review!),workflow:{...workflow,name:event.target.value}})}/></label>}{workflow.scenarioLabel&&<span className="input-site-badge">{workflow.scenarioLabel}</span>}</>}
               <p>
                 {review
                   ? `${steps.length ? `${steps.length}手順` : "まだ作業は決めていません"} · ${draft ? "保存前の候補" : "保存済み"}`
@@ -1426,6 +1457,7 @@ export function InputWorkbench({
                   busy ||
                   stale ||
                   !!addition.trim() ||
+                  !!correctionText.trim() ||
                   pendingAnswers ||
                   !!edit ||
                   !draft.workflow.name.trim()
@@ -1434,7 +1466,7 @@ export function InputWorkbench({
               >
                 {busy
                   ? operation === "save" ? "道具・情報を照合して保存中…" : "話を整理中…"
-                  : addition.trim() ? "追記を反映してから保存" : pendingAnswers ? "回答を反映してから保存" : edit
+                  : correctionText.trim() ? "補足・訂正を反映してから保存" : addition.trim() ? "追記を反映してから保存" : pendingAnswers ? "回答を反映してから保存" : edit
                     ? "訂正を反映してから保存"
                     : draft
                       ? review.steps.length ? "3 この流れを保存" : "3 話と確認事項を保存"
@@ -1445,6 +1477,7 @@ export function InputWorkbench({
           {review?.extraction && (
             <p className="input-extraction-origin">
               この構造の整理：
+              {!!review.extraction?.imagePages&&<span>元ページの画像{review.extraction.imagePages}枚を直接参照 · </span>}
               {review.extraction.method === "ai"
                 ? `${review.extraction.model ?? review.extraction.provider}（AI）`
                 : "簡易整理"}

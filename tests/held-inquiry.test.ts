@@ -91,7 +91,7 @@ test("the input diagram explains a held response on both the original arrow and 
   const fillers = Array.from({ length: 5 }, (_, i) => ({ ...review.steps[1], stepKey: `f${i}`, order: i + 1 }));
   const seven = { ...review, steps: [...fillers, { ...review.steps[0], order: 6 }, { ...review.steps[1], order: 7 }] };
   const html = renderToStaticMarkup(createElement(InputFlowCanvas, { review: seven, selected: seven.steps[6], page: 1, onPage: () => {}, choose: () => {}, onInsert: () => {} }));
-  assert.match(html, /ページをまたぐつながり/); assert.match(html, /data-hold-effect="response"/);
+  assert.match(html, /画面の外に続くつながり/); assert.match(html, /data-hold-effect="response"/);
   assert.match(html, /<title>停止中の対応<\/title>/); assert.match(html, /間に作業を追加 · 停止中の対応/);
   assert.ok((html.match(/class="input-canvas-step"/g) ?? []).length <= 6);
 });

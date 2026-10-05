@@ -157,6 +157,7 @@ export function previewReviewGraph(
       boundary: step.boundary,
       meaning: step.meaning,
       humanEdits: step.humanEdits,
+      sourceRefs: step.sourceRefs,
       technicalDetails: step.technicalDetails,
       detailSteps: step.detailSteps,
     });
@@ -195,6 +196,8 @@ export function previewReviewGraph(
       status: t.certainty ?? "unknown",
       holdEffect: t.holdEffect,
       humanEdits: t.humanEdits,
+      sourceRefs: t.sourceRefs,
+      sourceVariant: t.sourceVariant,
     });
   for (const f of review.dataFlows)
     patch.dataFlows.push({
