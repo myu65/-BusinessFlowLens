@@ -81,6 +81,7 @@ export async function POST(request: Request) {
         warnings: result.review.warnings,
         followUpAnswers: body.followUpAnswers ?? [],
         excludedSteps: result.review.excludedSteps,
+        excludedTransitions: result.review.excludedTransitions,
         extraction: result.review.extraction,
         protectedDetails: result.review.protectedDetails,
         organization: result.review.organization,

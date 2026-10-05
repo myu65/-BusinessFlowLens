@@ -47,6 +47,7 @@ import {WorkflowMergePanel,WorkflowMergeHistory} from './WorkflowMergePanel';
 import type {ProjectSnapshot} from '@/lib/storage/repository';
 import {workflowMergeDestination,workflowMergeSite} from '@/lib/workflow-merge';
 import {emptyLandscape} from '@/lib/landscape';
+import {FlowConnectionEditor} from './FlowConnectionEditor';
 
 const REVIEW_PAGE_SIZE = INPUT_CANVAS_PAGE_SIZE;
 
@@ -140,6 +141,7 @@ export function InputWorkbench({
   const [toolText, setToolText] = useState<string | null>(null);
   const editorRef = useRef<HTMLFieldSetElement>(null);
   const focusRef = useRef<HTMLDivElement>(null);
+  const connectionEditorRef=useRef<HTMLDivElement>(null);
   const stripRef = useRef<HTMLElement>(null);
   const [lastSavedId, setLastSavedId] = useState("");
   const [advanced, setAdvanced] = useState(false);
@@ -318,6 +320,10 @@ export function InputWorkbench({
           answers: {},
         };
   const update = (nextReview: ExtractionReview) => {
+    if(nextReview===currentReview&&draft?.baseline===currentReview&&memo===(savedTranscripts[key]??'')&&
+      !Object.values(draft.answers).some(answer=>answer.trim())&&JSON.stringify(draft.answerHistory)===JSON.stringify(saved?.reviewContext?.followUpAnswers??[])){
+      onDraft(key,null);return;
+    }
     const next = ensureDraft(nextReview);
     next.workflow = {
       ...next.workflow,
@@ -728,6 +734,7 @@ export function InputWorkbench({
                     setEdit(structuredClone(selected));
                     setToolText(null);
                   }}
+                  onEditConnections={()=>connectionEditorRef.current?.scrollIntoView({behavior:'smooth',block:'start'})}
                   onExclude={removeStep}
                   onConfirmIncomingData={(handoff, name, dataId) => update({
                     ...review,
@@ -749,6 +756,7 @@ export function InputWorkbench({
                     onSelect(inputKeyForWorkflow(drafts, id));
                   }}
                 />}
+                {!edit&&<div ref={connectionEditorRef}><FlowConnectionEditor key={`${key}:${selected.stepKey}`} review={review} selected={selected} disabled={busy||stale||!!correctionText.trim()||!!addition.trim()||pendingAnswers} onChange={update}/></div>}
                 {selectedChange && selectedChange.details.length > 0 && (
                   <details className="input-review-changes" key={selectedChange.after.stepKey}>
                     <summary>この手順はどう変わったか · {selectedChange.details.length}項目</summary>

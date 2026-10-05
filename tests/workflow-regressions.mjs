@@ -161,6 +161,12 @@ const candidateInput={projectId:mergeProject,sourceId:candidateWorkflow.id,targe
 const candidatePreview=await api('/api/workflow-merge','POST',{...candidateInput,mode:'preview'});
 const candidateMerge=await api('/api/workflow-merge','POST',{...candidateInput,mode:'apply',expectedUpdatedAt:candidatePreview.body.expectedUpdatedAt});
 check('workflow_merge_accepts_an_unsaved_candidate_without_extra_registration',candidatePreview.status===200&&candidateMerge.status===200&&candidateMerge.body.project.transcripts['merge-target'].includes('保存前の原文C')&&!candidateMerge.body.project.graph.workflows.some(w=>w.id==='merge-draft')&&candidateMerge.body.project.graph.workflows.find(w=>w.id==='merge-target').reviewContext.followUpAnswers.some(a=>a.answer==='購買担当'));
+const connectionReview={...review,transitions:[{fromStepKey:'step-4',toStepKey:'step-0',condition:'作り直した後',holdEffect:'response',certainty:'confirmed',evidence:'担当者が図の上で確認',humanEdits:[{field:'connection',before:null,after:{fromStepKey:'step-4',toStepKey:'step-0',holdEffect:'response'},evidence:'担当者が戻り先を確認'}]}],excludedTransitions:[{fromStepKey:'step-0',toStepKey:'step-1',condition:null,certainty:'inferred',evidence:'除外前の原図の矢印'}]};
+const connectionSaved=await api('/api/apply','POST',{projectId:'connection-regression',workflow,graph:empty,review:connectionReview,transcripts:{[workflow.id]:'原文を保持'},sourceNotes:'原文を保持'});
+const connectionReloaded=(await api('/api/project?projectId=connection-regression')).body.project,connectionRoundtrip=graphLib.buildWorkflowReviewFromGraph(connectionReloaded.graph,workflow.id);
+check('human_connections_and_excluded_arrows_survive_apply_and_reload',connectionSaved.status===200&&connectionRoundtrip.excludedTransitions[0].evidence==='除外前の原図の矢印'&&connectionRoundtrip.transitions[0].holdEffect==='response'&&connectionRoundtrip.transitions[0].humanEdits[0].evidence==='担当者が戻り先を確認'&&connectionReloaded.transcripts[workflow.id]==='原文を保持');
+const connectionRevision=await api('/api/workflow-revisions?projectId=connection-regression&revisionId='+connectionSaved.body.revision.id);
+check('revision_keeps_connection_exclusions_and_confirmation_evidence',connectionRevision.body.revision.review.excludedTransitions.length===1&&connectionRevision.body.revision.review.transitions[0].humanEdits[0].evidence==='担当者が戻り先を確認');
 await fs.writeFile('.data/review-remaining-results.json',JSON.stringify(cases,null,2));
 console.log(JSON.stringify(cases,null,2));
 if (cases.some(item => !item.ok)) process.exitCode = 1;

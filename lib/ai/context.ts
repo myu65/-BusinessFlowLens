@@ -19,6 +19,7 @@ export function buildPreviousReviewContext(review: ExtractionReview) {
     protectedDetails: review.protectedDetails,
     transitions: review.transitions,
     excludedSteps: review.excludedSteps?.map(step => ({ stepKey: step.stepKey, name: step.name, evidence: step.evidence })),
+    excludedTransitions: review.excludedTransitions,
     handoffs: review.handoffs?.filter(h => h.origin === "human" || (!review.extraction && h.certainty === "confirmed")),
     incomingHandoffs: review.incomingHandoffs?.filter(h => h.origin === "human"),
   };

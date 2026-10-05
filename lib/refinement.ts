@@ -1,6 +1,7 @@
 import type { ExtractionReview, LensGraph, LensNode } from "./graph";
 import { preserveSystemDependencies } from "./system-dependencies";
 import { reviewFieldLabel } from "./review-copy";
+import { transitionKey } from './review-connection-edits';
 
 export { normalizeAssetName, findConfirmedAsset } from "./asset-identity";
 
@@ -366,6 +367,17 @@ export function preserveRefinements(
       transitions.push(transition);
   }
   const keys = new Set(steps.map((s) => s.stepKey));
+  const excludedTransitions=(previous.excludedTransitions??[]).map(edge=>({...edge,
+    fromStepKey:remappedKey(edge.fromStepKey)??edge.fromStepKey,toStepKey:remappedKey(edge.toStepKey)??edge.toStepKey}));
+  const excludedConnections=new Set(excludedTransitions.map(transitionKey));
+  const pair=(edge:ExtractionReview['transitions'][number])=>JSON.stringify([edge.fromStepKey,edge.toStepKey]);
+  const excludedPairs=new Set(excludedTransitions.map(pair));
+  const allowedConnections=new Set(previous.transitions.map(edge=>({...edge,fromStepKey:remappedKey(edge.fromStepKey)??edge.fromStepKey,toStepKey:remappedKey(edge.toStepKey)??edge.toStepKey})).map(transitionKey));
+  const excluded=(edge:ExtractionReview['transitions'][number])=>excludedConnections.has(transitionKey(edge))||excludedPairs.has(pair(edge))&&!allowedConnections.has(transitionKey(edge));
+  if(review.transitions.some(excluded))
+    warnings.push('読み直した候補に、人が除外した矢印が含まれていました。除外を保持しました。');
+  if(review.transitions.some(edge=>excluded(edge)&&!excludedConnections.has(transitionKey(edge))))
+    review={...review,questions:[...review.questions,{question:'人が除外した手順間に、異なる条件の矢印が提案されています。採用するつながりを図で確認してください。',reason:'条件の言い換えで、除外済みの接続を復活させないよう未確認として残しています。',target:'handoff'}]};
   const handoffs = [...(review.handoffs ?? [])];
   for (const confirmed of previous.handoffs ?? []) {
     if (
@@ -427,11 +439,12 @@ export function preserveRefinements(
       .sort((a, b) => a.order - b.order)
       .map((s, i) => ({ ...s, order: i + 1 })),
     excludedSteps,
+    excludedTransitions,
     protectedDetails: [...protectedDetails]
       .filter(([stepKey]) => keys.has(stepKey))
       .map(([stepKey, fields]) => ({ stepKey, fields })),
     transitions: transitions.filter(
-      (t) => keys.has(t.fromStepKey) && keys.has(t.toStepKey),
+      (t) => keys.has(t.fromStepKey) && keys.has(t.toStepKey)&&!excluded(t),
     ),
     dataFlows: review.dataFlows
       .filter(
