@@ -28,7 +28,7 @@ import { SystemRelationshipMap } from "./SystemRelationshipMap";
 import { ActivityRelationshipMap } from "./ActivityRelationshipMap";
 import { readingPage } from "@/lib/overview-reading";
 import { KnowledgeReportPreview } from "./KnowledgeReportPreview";
-import type { ActivityReadingPosition, CompanyReadingPosition, ExplorationFocus as Focus, ExplorationPosition, KnowledgeExploration } from "@/lib/exploration";
+import type { ActivityReadingPosition, CompanyReadingPosition, SystemReadingPosition, ExplorationFocus as Focus, ExplorationPosition, KnowledgeExploration } from "@/lib/exploration";
 export type { KnowledgeExploration } from "@/lib/exploration";
 
 const mode = {
@@ -85,15 +85,17 @@ export function KnowledgeExplorer({
   const [readLens, setReadLens] = useState<FlowReadingPosition["lens"]>(exploration?.lens ?? (exploration?.dataId ? "data" : "work"));
   const [activityReading, setActivityReading] = useState<ActivityReadingPosition | undefined>(exploration?.activityReading);
   const [companyReading, setCompanyReading] = useState<CompanyReadingPosition | undefined>(exploration?.companyReading);
+  const [systemReading, setSystemReading] = useState<SystemReadingPosition | undefined>(exploration?.systemReading);
   const rememberCompany = useCallback((position: CompanyReadingPosition) => setCompanyReading(position), []);
+  const rememberSystem = useCallback((position: SystemReadingPosition) => setSystemReading(position), []);
   const rememberActivity = useCallback((position: ActivityReadingPosition) => setActivityReading(position), []);
   const rememberReading = useCallback((position: FlowReadingPosition) => {
     setReadStep(position.stepId); setReadData(position.dataId);
     setReadDepth(position.depth); setReadLens(position.lens); setReaderJourney(position.journey);
   }, []);
   useEffect(() => {
-    onExplorationChange?.({ focus, history, scope, query, department, category, stepId: readStepId, dataId: readDataId, depth: readDepth, lens: readLens, journey: readerJourney, activityReading, companyReading, listPage: page });
-  }, [focus, history, scope, query, department, category, readStepId, readDataId, readDepth, readLens, readerJourney, activityReading, companyReading, page, onExplorationChange]);
+    onExplorationChange?.({ focus, history, scope, query, department, category, stepId: readStepId, dataId: readDataId, depth: readDepth, lens: readLens, journey: readerJourney, activityReading, companyReading, systemReading, listPage: page });
+  }, [focus, history, scope, query, department, category, readStepId, readDataId, readDepth, readLens, readerJourney, activityReading, companyReading, systemReading, page, onExplorationChange]);
   const [editingStep, setEditingStep] = useState("");
   const [categoryName, setCategoryName] = useState("");
   const [dependencyId, setDependencyId] = useState("");
@@ -105,7 +107,7 @@ export function KnowledgeExplorer({
     [graph, scope, query, department],
   );
   const go = (next: Focus) => {
-    setHistory((h) => [...h, { focus, scope, query, department, category, stepId: readStepId, dataId: readDataId, depth: readDepth, lens: readLens, journey: readerJourney, activityReading, companyReading, listPage: page }]);
+    setHistory((h) => [...h, { focus, scope, query, department, category, stepId: readStepId, dataId: readDataId, depth: readDepth, lens: readLens, journey: readerJourney, activityReading, companyReading, systemReading, listPage: page }]);
     setFocus(next);
     if (next.kind === "process") { setReadDepth("detail"); setReadLens("work"); setReadData(""); }
     setPage(0);
@@ -349,6 +351,7 @@ export function KnowledgeExplorer({
               setQuery("");
               setDepartment("");
               setCategory("");
+              setSystemReading(undefined);
             }}
           >
             会社全体
@@ -381,6 +384,7 @@ export function KnowledgeExplorer({
               setReaderJourney(previous.journey);
               setActivityReading(previous.activityReading);
               setCompanyReading(previous.companyReading);
+              setSystemReading(previous.systemReading);
               setHistory((h) => h.slice(0, -1));
               setPage(previous.listPage ?? 0);
               window.scrollTo({ top: 0, behavior: "instant" });
@@ -403,6 +407,7 @@ export function KnowledgeExplorer({
             onChange={(e) => {
               setScope(e.target.value as KnowledgeScope);
               setCompanyReading(undefined);
+              setSystemReading(undefined);
               if (focus.kind !== "asset" && focus.kind !== "systems") setFocus({ kind: "company" });
               setHistory([]);
               setPage(0);
@@ -419,6 +424,7 @@ export function KnowledgeExplorer({
             value={department}
             onChange={(e) => {
               setDepartment(e.target.value);
+              setSystemReading(undefined);
               setPage(0);
             }}
           >
@@ -435,6 +441,7 @@ export function KnowledgeExplorer({
             placeholder="業務名・部署・システム・情報・工場"
             onChange={(e) => {
               setQuery(e.target.value);
+              setSystemReading(undefined);
               setPage(0);
             }}
           />
@@ -446,6 +453,7 @@ export function KnowledgeExplorer({
           onClick={() => {
             setQuery("");
             setDepartment("");
+            setSystemReading(undefined);
             setPage(0);
           }}
         >
@@ -862,6 +870,7 @@ export function KnowledgeExplorer({
               value={category}
               onChange={(e) => {
                 setCategory(e.target.value);
+                setSystemReading(undefined);
                 setPage(0);
               }}
             >
@@ -873,12 +882,13 @@ export function KnowledgeExplorer({
               ))}
             </select>
           </label>
-          <SystemRelationshipMap graph={graph} scope={scope} systems={systems} view={view}
+          <SystemRelationshipMap key={JSON.stringify([scope,query,department,category])} graph={graph} scope={scope} systems={systems} view={view}
+            position={systemReading} onPositionChange={rememberSystem}
             onSelect={id => go({ kind: "asset", id })} onActivity={id => go({ kind: "activity", id })}
             onWorkflow={(id, stepId) => {
               setReadStep(stepId ?? ""); setReaderJourney(undefined); setReadData(""); setReadDepth("step"); setReadLens("work");
               go({ kind: "workflow", id });
-              if (!view.rows.some(r => r.workflow.id === id)) { setQuery(""); setDepartment(""); }
+              if (!view.rows.some(r => r.workflow.id === id)) { setQuery(""); setDepartment(""); setSystemReading(undefined); }
             }} />
           <details><summary>登録された道具の一覧から探す（{systems.length}件・この範囲の利用0件も含む）</summary>
             <SystemLandscapeCards graph={graph} systems={systems} view={view} page={page} onPage={setPage} onSelect={id => go({kind: "asset", id})} />

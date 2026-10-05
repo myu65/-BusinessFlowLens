@@ -1,21 +1,26 @@
 "use client";
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { LensGraph, LensNode } from "@/lib/graph";
 import type { knowledgeIndex, KnowledgeScope } from "@/lib/knowledge";
 import { groupRelationships, overviewWindow, systemRelationships, type OverviewNode } from "@/lib/relationship-overview";
 import { RelationshipDiagram, RelationshipEvidence } from "./RelationshipDiagram";
 import { termExplanation } from "@/lib/knowledge-guide";
+import type { SystemReadingPosition } from "@/lib/exploration";
 
-export function SystemRelationshipMap({ graph, scope, systems, view, onSelect, onActivity, onWorkflow }: {
+export function SystemRelationshipMap({ graph, scope, systems, view, onSelect, onActivity, onWorkflow, position, onPositionChange }: {
   graph: LensGraph; scope: KnowledgeScope; systems: LensNode[]; view: ReturnType<typeof knowledgeIndex>;
   onSelect: (id: string) => void; onActivity: (id: string) => void; onWorkflow: (id: string, stepId?: string) => void;
+  position?: SystemReadingPosition; onPositionChange?: (position: SystemReadingPosition) => void;
 }) {
-  const [categoryId, setCategory] = useState("");
-  const [systemId, setSystem] = useState("");
-  const [page, setPage] = useState(0);
-  const [relationId, setRelation] = useState("");
-  const [relationPage, setRelationPage] = useState(0);
-  const [relationKind, setRelationKind] = useState<"transfer" | "dependency">("transfer");
+  const [categoryId, setCategory] = useState(position?.categoryId ?? "");
+  const [systemId, setSystem] = useState(position?.systemId ?? "");
+  const [page, setPage] = useState(position?.page ?? 0);
+  const [relationId, setRelation] = useState(position?.relationId ?? "");
+  const [relationPage, setRelationPage] = useState(position?.relationPage ?? 0);
+  const [relationKind, setRelationKind] = useState<"transfer" | "dependency">(position?.relationKind === "dependency" ? "dependency" : "transfer");
+  const heading = useRef<HTMLDivElement>(null);
+  useEffect(() => onPositionChange?.({categoryId, systemId, page, relationId, relationPage, relationKind}),
+    [categoryId, systemId, page, relationId, relationPage, relationKind, onPositionChange]);
   const ranked = useMemo(() => systems.map(node => ({ node, related: view.systemProfile(node.id) }))
     .filter(s => s.related.direct.length || s.related.indirect.length)
     .sort((a, b) => b.related.direct.length + b.related.indirect.length - a.related.direct.length - a.related.indirect.length
@@ -59,10 +64,13 @@ export function SystemRelationshipMap({ graph, scope, systems, view, onSelect, o
     if (ranked.some(s => s.node.id === id)) { setSystem(id); setPage(0); }
     else if (id === selectedCategory?.id) setPage(memberPage === lastMemberPage ? 0 : memberPage + 1);
     else { setCategory(id); setSystem(""); setPage(0); }
+    requestAnimationFrame(() => heading.current?.scrollIntoView({block:"start",behavior:"instant"}));
   };
   return <section className="system-relationship-map" aria-label="システムの鳥瞰図">
-    <div className="company-map-heading"><div><h2>会社を支える道具は、どうつながる？</h2>
-      <p>まず役割ごとのまとまりを見渡します。まとまりを開き、道具を選ぶと仕事と情報へ辿れます。</p></div><span>{ranked.length}道具</span></div>
+    <div ref={heading} className="company-map-heading"><div><h2>会社を支える道具は、どうつながる？</h2>
+      <p>まず役割ごとのまとまりを見渡します。まとまりを開き、道具を選ぶと仕事と情報へ辿れます。</p></div><div className="company-map-heading-actions"><span>{ranked.length}道具</span>
+        {selectedSystem && <button className="kg-primary" onClick={() => onSelect(selectedSystem.node.id)}>{selectedSystem.node.label}の仕事・情報を開く →</button>}
+      </div></div>
     <nav className="relationship-layer-control" aria-label="図で読む関係">
       <button aria-pressed={relationKind === "transfer"} onClick={() => { setRelationKind("transfer"); setRelation(""); setPage(0); setRelationPage(0); }}>情報の受渡し</button>
       <button aria-pressed={relationKind === "dependency"} onClick={() => { setRelationKind("dependency"); setRelation(""); setPage(0); setRelationPage(0); }}>稼働の依存</button>
@@ -93,7 +101,6 @@ export function SystemRelationshipMap({ graph, scope, systems, view, onSelect, o
           .slice(0, 5).map(a => <button key={a.id} onClick={() => onActivity(a.id)}>{a.name} →</button>)}
       </div>
       <h4>関わる仕事の例</h4><div className="company-system-chips">{selectedSystem.related.direct.slice(0, 3).map(r => <button key={r.workflow.id} onClick={() => onWorkflow(r.workflow.id)}>{r.workflow.name} →</button>)}</div>
-      <button className="kg-primary" onClick={() => onSelect(selectedSystem.node.id)}>この道具の業務・情報・自動処理を詳しく見る →</button>
     </aside>}
     {!ranked.length && <p>この範囲で使う道具はまだ登録されていません。</p>}
     <details><summary>まとまりと業務数は、何を表している？</summary><p>まとまりは編集できる道具の分類です。業務数は、表示する状態・部署・検索に合う業務を重複なく数え、直接利用と登録された基盤依存による間接影響を含めます。分類は入力からの整理案を含みます。依存の根拠は同じ状態の別部署の話にもあります。</p></details>

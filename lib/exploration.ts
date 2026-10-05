@@ -6,6 +6,7 @@ export type ExplorationFocus = { kind: "company" | "systems" }
   | { kind: "activity" | "capability" | "workflow" | "process" | "asset"; id: string };
 export type ActivityReadingPosition = { activityId: string; capabilityId: string; page: number; relationPage: number; systemPage: number };
 export type CompanyReadingPosition = { activityId: string; page: number; relationPage: number; relationId: string };
+export type SystemReadingPosition = { categoryId: string; systemId: string; page: number; relationId: string; relationPage: number; relationKind: "transfer" | "dependency" };
 export type ExplorationPosition = Partial<FlowReadingPosition> & {
   focus: ExplorationFocus;
   scope: KnowledgeScope;
@@ -14,6 +15,7 @@ export type ExplorationPosition = Partial<FlowReadingPosition> & {
   category: string;
   activityReading?: ActivityReadingPosition;
   companyReading?: CompanyReadingPosition;
+  systemReading?: SystemReadingPosition;
   listPage?: number;
 };
 export type KnowledgeExploration = ExplorationPosition & { history: ExplorationPosition[] };
