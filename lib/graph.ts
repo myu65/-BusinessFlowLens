@@ -59,7 +59,7 @@ export type Workflow = {
   landscape?: WorkflowLandscape;
   reviewContext?: Pick<
     ExtractionReview,
-    "summary" | "trigger" | "outcome" | "questions" | "warnings" | "excludedSteps" | "excludedTransitions" | "extraction" | "protectedDetails" | "organization" | "systemProfiles" | "systemDependencies" | "documentEvidence"
+    "summary" | "trigger" | "outcome" | "questions" | "warnings" | "excludedSteps" | "excludedTransitions" | "excludedHandoffs" | "excludedIncomingHandoffs" | "extraction" | "protectedDetails" | "organization" | "systemProfiles" | "systemDependencies" | "documentEvidence" | "dialogueHistory"
   > & {
     followUpAnswers?: FollowUpAnswer[];
   };
@@ -220,6 +220,9 @@ export type SystemDataFlow = {
   workflowIds: string[];
   processIds: string[];
 };
+export function canonicalDataFlowId(flow:Pick<SystemDataFlow,'sourceSystemId'|'targetSystemId'|'dataIds'|'transferType'|'direction'|'automation'|'frequency'|'evidence'|'status'>){
+  return [flow.sourceSystemId,flow.targetSystemId,flow.transferType,[...flow.dataIds].sort().join(','),flow.direction,flow.automation,flow.frequency??'',flow.evidence??'',flow.status].join('--');
+}
 
 export type LensGraph = {
   workflows: Workflow[];
@@ -230,6 +233,7 @@ export type LensGraph = {
 };
 
 export type CompanyKnowledge = {
+  assetMutations?: import("./asset-merge").AssetMutationRecord[];
   workflowMerges?: import("./workflow-merge").WorkflowMergeRecord[];
   name: string;
   description: string;
@@ -373,6 +377,9 @@ export type ExtractionTransition = {
 };
 
 export type ExtractionReview = {
+  dialogueHistory?: import("./dialogue-operations").DialogueTurn[];
+  excludedHandoffs?: Array<ReviewHandoff & {excludedBy:string}>;
+  excludedIncomingHandoffs?: Array<ReviewIncomingHandoff & {excludedBy:string}>;
   documentEvidence?: DocumentEvidence[];
   organization?: ReviewOrganization | null;
   systemProfiles?: ReviewSystemProfile[];
@@ -650,17 +657,7 @@ export function replaceWorkflowGraph(
       })
       .filter((id): id is string => Boolean(id));
 
-    const id = [
-      source.id,
-      target.id,
-      patchFlow.transferType,
-      [...dataIds].sort().join(","),
-      patchFlow.direction,
-      patchFlow.automation,
-      patchFlow.frequency ?? "",
-      patchFlow.evidence ?? "",
-      patchFlow.status,
-    ].join("--");
+    const id = canonicalDataFlowId({...patchFlow,sourceSystemId:source.id,targetSystemId:target.id,dataIds,frequency:patchFlow.frequency??undefined,evidence:patchFlow.evidence??undefined});
 
     const existing = dataFlows.find((flow) => flow.id === id);
     if (existing) {
@@ -1575,12 +1572,15 @@ export function buildWorkflowReviewFromGraph(
     warnings: workflow?.reviewContext?.warnings ?? [],
     excludedSteps: workflow?.reviewContext?.excludedSteps,
     excludedTransitions: workflow?.reviewContext?.excludedTransitions,
+    excludedHandoffs: workflow?.reviewContext?.excludedHandoffs,
+    excludedIncomingHandoffs: workflow?.reviewContext?.excludedIncomingHandoffs,
     extraction: workflow?.reviewContext?.extraction,
     protectedDetails: workflow?.reviewContext?.protectedDetails,
     organization: workflow?.reviewContext?.organization,
     systemProfiles: workflow?.reviewContext?.systemProfiles,
     systemDependencies: workflow?.reviewContext?.systemDependencies,
     documentEvidence: workflow?.reviewContext?.documentEvidence,
+    dialogueHistory: workflow?.reviewContext?.dialogueHistory,
     incomingHandoffs: (graph.knowledge?.handoffs ?? []).filter(h => h.targetWorkflowId === workflowId && h.reviewedWorkflowId === workflowId && h.targetProcessId).map(h => ({
       sourceWorkflowId: h.sourceWorkflowId,
       sourceStepKey: byId.get(h.sourceProcessId ?? "")?.canonicalKey.split(":").at(-1),

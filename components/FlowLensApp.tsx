@@ -2376,6 +2376,7 @@ function Workspace() {
 
       {section === "interviews" && hydrated && draftHydrated ? (
         <InputWorkbench
+          onNavigate={(view,id,focus)=>{if(id)setSelectedWorkflowId(inputKeyForWorkflow(drafts,id));if(view==='company')setKnowledgeExploration(id?exploreSavedStory(graph,id,focus):{focus:{kind:'company'},scope:'current',department:'',query:'',category:'',history:[]});if(view==='assets'&&focus)setAssetExploration({id:focus,scope:graph.workflows.find(w=>w.id===id)?.scenario??'current',department:''});if(id&&focus&&view!=='assets')setFocusedSteps(s=>({...s,[id]:focus}));navigateSection(view as Section);}}
           onExplore={(id, stepId) => { setKnowledgeExploration(exploreSavedStory(graph, id, stepId)); navigateSection("company"); }}
           focusedStepId={focusedSteps[visibleWorkflowId]} onFocusStep={(id,step)=>setFocusedSteps(s=>({...s,[id]:step}))}
           projectId={projectId}

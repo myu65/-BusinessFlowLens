@@ -79,6 +79,8 @@ export function notesAfterSave(previous:Record<string,string>,saved:Record<strin
   return next;
 }
 export type InputDraft = {
+  dialogueSession?: import("./dialogue-operations").DialogueSession;
+  dialogueUndo?: {draft:Omit<InputDraft,'dialogueUndo'>|null;memo:string};
   workflow: Workflow;
   review: ExtractionReview;
   provider: string;
@@ -87,6 +89,11 @@ export type InputDraft = {
   answerHistory: import("./graph").FollowUpAnswer[];
   baseline: ExtractionReview | null;
 };
+export function dialogueUndoSnapshot(draft:InputDraft|null,memo:string):NonNullable<InputDraft['dialogueUndo']>{
+  if(!draft)return {draft:null,memo};
+  const {dialogueUndo:prior,...snapshot}=draft;
+  return {draft:snapshot,memo};
+}
 
 // Navigation can read other unsaved candidates without making them saved
 // context for extraction or publishing them when a different story is saved.
@@ -241,12 +248,15 @@ export function previewReviewGraph(
         warnings: review.warnings,
         excludedSteps: review.excludedSteps,
         excludedTransitions: review.excludedTransitions,
+        excludedHandoffs: review.excludedHandoffs,
+        excludedIncomingHandoffs: review.excludedIncomingHandoffs,
         extraction: review.extraction,
         protectedDetails: review.protectedDetails,
         organization: review.organization,
         systemProfiles: review.systemProfiles,
         systemDependencies: review.systemDependencies,
         documentEvidence: review.documentEvidence,
+        dialogueHistory: review.dialogueHistory,
       },
     },
     patch,

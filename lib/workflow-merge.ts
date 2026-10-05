@@ -103,7 +103,7 @@ export function previewWorkflowMerge(input: MergeInput): {graph: LensGraph; tran
     const humanEdits=unique([...(original.humanEdits??[]),...(existing.humanEdits??[])]);
     for(const field of ['name','action','actor','department','responsiblePerson','executionMode','meaning','executionContext','boundary','technicalDetails','detailSteps'] as const){
       const nodeField=field==='name'?'label':field;
-      if(mergeValue(original[nodeField])!==mergeValue(existing[nodeField]))humanEdits.push({field,before:choice.keep==='source'?existing[nodeField]:original[nodeField],after:selected[nodeField],evidence:`「${source!.name}」と「${target!.name}」を同じ手順として確認し、${choice.keep==='source'?'こちら':'統合先'}の内容を採用`});
+      if(mergeValue(original[nodeField])!==mergeValue(existing[nodeField]))humanEdits.push({field,before:choice.keep==='source'?existing[nodeField]:original[nodeField],after:selected[nodeField],evidence:`「${source!.name}」と「${target!.name}」を同じ手順として確認し、「${choice.keep==='source'?source!.name:target!.name}」の内容を採用`});
     }
     const merged={...selected,id:existing.id,canonicalKey:existing.canonicalKey,workflowId:targetId,stepOrder:existing.stepOrder,
       sourceRefs:unique([...(existing.sourceRefs??[]),...(original.sourceRefs??[])]),humanEdits,evidence:joinEvidence(existing.evidence,original.evidence)};
@@ -149,12 +149,17 @@ export function previewWorkflowMerge(input: MergeInput): {graph: LensGraph; tran
   const stepKey=(id:string)=>graph.nodes.find(n=>n.id===id)?.canonicalKey.split(':').at(-1);
   const mappedStepKey=(key:string)=>{const old=sourceSteps.find(n=>stepKey(n.id)===key);return old?[...replacements.values(),...additions].find(n=>n.id===mapping.get(old.id))?.canonicalKey.split(':').at(-1)??key:key;};
   const landscape=target!.landscape??source!.landscape;
-  const mergedWorkflow:Workflow={...target!,reviewContext:{...context,summary:context?.summary??target!.summary??'',trigger:context?.trigger??target!.trigger??null,outcome:context?.outcome??target!.outcome??null,
+  const finalSteps=[...targetSteps.map(n=>replacements.get(n.id)??n),...additions];
+  const summary=`${target!.name}について、二つの話をまとめた流れです。${finalSteps.slice(0,3).map(n=>n.label).join('、')}などの${finalSteps.length}手順があります。入力資料の違いと採用内容は履歴から確認できます。`;
+  const mergedWorkflow:Workflow={...target!,summary,reviewContext:{...context,summary,trigger:context?.trigger??target!.trigger??null,outcome:context?.outcome??target!.outcome??null,
     questions:unique([...(context?.questions??[]),...(other?.questions??[]),...(differingConnections?[{question:'二つの原文で違う手順のつながりは、どちらの運用を採用しますか？',reason:'統合先にない追加の接続は、原文の記載差として未確認で残しています。人が加えた手順や接続も保持しています。',target:'handoff' as const}]:[])]),warnings:unique([...(context?.warnings??[]),...(other?.warnings??[])]),
     documentEvidence:unique([...(context?.documentEvidence??[]),...(other?.documentEvidence??[])]),
     followUpAnswers:unique([...(context?.followUpAnswers??[]),...(other?.followUpAnswers??[])]),
+    dialogueHistory:unique([...(context?.dialogueHistory??[]),...(other?.dialogueHistory??[])]),
     excludedSteps:unique([...(context?.excludedSteps??[]),...(other?.excludedSteps??[]).map(s=>({...s,stepKey:`merged-${encodeURIComponent(sourceId)}-${s.stepKey}`}))]),
     excludedTransitions:unique([...(context?.excludedTransitions??[]),...(other?.excludedTransitions??[]).map(t=>({...t,fromStepKey:mappedStepKey(t.fromStepKey),toStepKey:mappedStepKey(t.toStepKey)}))]),
+    excludedHandoffs:unique([...(context?.excludedHandoffs??[]),...(other?.excludedHandoffs??[]).map(h=>({...h,fromStepKey:mappedStepKey(h.fromStepKey),targetWorkflowId:workflowId(h.targetWorkflowId)}))]),
+    excludedIncomingHandoffs:unique([...(context?.excludedIncomingHandoffs??[]),...(other?.excludedIncomingHandoffs??[]).map(h=>({...h,toStepKey:mappedStepKey(h.toStepKey),sourceWorkflowId:workflowId(h.sourceWorkflowId)}))]),
     protectedDetails:unique([...(context?.protectedDetails??[]),...(other?.protectedDetails??[]).map(p=>({...p,stepKey:mappedStepKey(p.stepKey)}))]),
     systemProfiles:unique([...(context?.systemProfiles??[]),...(other?.systemProfiles??[])]),systemDependencies:unique([...(context?.systemDependencies??[]),...(other?.systemDependencies??[])])},
     ...(landscape?{landscape:{...landscape,domains:ids([...(target!.landscape?.domains??[]),...(source!.landscape?.domains??[])]),materialHandoffs:unique([...(target!.landscape?.materialHandoffs??[]),...(source!.landscape?.materialHandoffs??[])])}}:{})};

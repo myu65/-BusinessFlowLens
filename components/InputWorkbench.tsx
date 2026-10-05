@@ -50,8 +50,15 @@ import {emptyLandscape} from '@/lib/landscape';
 import {FlowConnectionEditor} from './FlowConnectionEditor';
 import {InputDialogue} from './InputDialogue';
 import {appendDialogueAnswer, dialogueAnswerStatus, includePendingDialogueAnswers} from '@/lib/input-dialogue';
+import {applyDialogueReviewOperation,dialogueConnection,emptyDialoguePlan,pendingDialoguePlan,validateDialoguePlan,type DialoguePlan,type DialogueSession,type DialogueTurn} from '@/lib/dialogue-operations';
+import {DialogueOperationPanel} from './DialogueOperationPanel';
+import {canonicalNodeId} from '@/lib/graph';
+import {reviewSlug,dialogueUndoSnapshot} from '@/lib/review-workbench';
+import {dialogueCandidate} from '@/lib/dialogue-candidate';
+import {workflowMergeChoices,mergeStepDifferences,mergeValue,type WorkflowMergeChoice} from '@/lib/workflow-merge';
 
 const REVIEW_PAGE_SIZE = INPUT_CANVAS_PAGE_SIZE;
+type DialoguePreview={plan:DialoguePlan;review?:ExtractionReview;workflow?:Workflow;graph?:LensGraph;candidate?:InputDraft;choices?:WorkflowMergeChoice[];details?:string[];expectedUpdatedAt?:string;recordId?:string;recordKind?:'workflow'|'asset';evidence:string;beforeDraft:InputDraft|null};
 
 type AdvancedActions = {
   draft: InputDraft;
@@ -77,6 +84,7 @@ export function InputWorkbench({
   focusedStepId,
   onFocusStep,
   onExplore,
+  onNavigate,
 }: {
   projectId: string;
   graph: LensGraph;
@@ -97,17 +105,22 @@ export function InputWorkbench({
   focusedStepId?: string;
   onFocusStep?: (workflowId: string, stepId: string) => void;
   onExplore?: (workflowId: string, stepId?: string) => void;
+  onNavigate?: (view:string,workflowId?:string,focusId?:string) => void;
 }) {
   const key = selectedId || NEW_MEMO_ID;
   const draft = drafts[key];
+  const [operationPreview,setOperationPreview]=useState<DialoguePreview|null>(null);
+  const [undoDialogue,setUndoDialogue]=useState<{draft:InputDraft|null;memo:string}|null>(null);
   const [pendingDocument,setPendingDocument]=useState<{key:string;workflow:Workflow;evidence:DocumentEvidence}|null>(null);
   const saved = graph.workflows.find((w) => w.id === key);
   const currentReview = useMemo(
     () => (saved ? buildWorkflowReviewFromGraph(graph, key) : null),
     [graph, key, saved],
   );
-  const review = draft?.review ?? currentReview;
-  const workflow = draft?.workflow ?? saved ?? (pendingDocument?.key===key?pendingDocument.workflow:undefined);
+  const baseReview = draft?.review ?? currentReview;
+  const baseWorkflow = draft?.workflow ?? saved ?? (pendingDocument?.key===key?pendingDocument.workflow:undefined);
+  const review = operationPreview?.review ?? baseReview;
+  const workflow = operationPreview?.workflow ?? baseWorkflow;
   const documentEvidence=review?.documentEvidence??(pendingDocument?.key===key?[pendingDocument.evidence]:undefined);
   const memo = transcripts[key] ?? "";
   const [query, setQuery] = useState("");
@@ -115,7 +128,8 @@ export function InputWorkbench({
   const documentReturnKey = useRef(key);
   const [stepKey, setStepKey] = useState("");
   const [stepPage, setStepPage] = useState(0);
-  const [busy, setBusy] = useState(false);
+  const [working, setBusy] = useState(false);
+  const busy=working||!!operationPreview;
   const organizeRequest = useRef<AbortController | null>(null);
   const [organizeNotice, setOrganizeNotice] = useState("");
   const [correctionText, setCorrectionText] = useState("");
@@ -127,16 +141,16 @@ export function InputWorkbench({
   const [renameOpen, setRenameOpen] = useState(false);
   const [mergeOpen,setMergeOpen]=useState(false);
   const [undoCorrection,setUndoCorrection]=useState<{draft:InputDraft|null}|null>(null);
-  useEffect(()=>{setCorrectionText("");setCorrectionScope("all");setCorrectAnswerIndex(undefined);setRenameOpen(false);setMergeOpen(false);setUndoCorrection(null);},[key]);
-  const [operation, setOperation] = useState<"organize" | "addition" | "save">("organize");
+  useEffect(()=>{setCorrectionText("");setCorrectionScope("all");setCorrectAnswerIndex(undefined);setRenameOpen(false);setMergeOpen(false);setUndoCorrection(null);setOperationPreview(null);setUndoDialogue(null);},[key]);
+  const [operation, setOperation] = useState<"organize" | "addition" | "save" | "dialogue">("organize");
   const [waitingSeconds, setWaitingSeconds] = useState(0);
   useEffect(() => {
-    if (!busy) return;
+    if (!working) return;
     setWaitingSeconds(0);
     const started = Date.now();
     const timer = setInterval(() => setWaitingSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
     return () => clearInterval(timer);
-  }, [busy]);
+  }, [working]);
   const [error, setError] = useState("");
   const [aiConfig, setAIConfig] = useState<AIConfigurationStatus | null>(null);
   const [aiResponse, setAIResponse] = useState<
@@ -159,6 +173,9 @@ export function InputWorkbench({
   const [memoFilter, setMemoFilter] = useState<"all" | "drafts" | "questions">("all");
   const [memoPage, setMemoPage] = useState(0);
   const detailPaneRef = useRef<HTMLElement>(null);
+  const notePaneRef = useRef<HTMLElement>(null);
+  const structurePaneRef = useRef<HTMLElement>(null);
+  useEffect(()=>{if(operationPreview){notePaneRef.current?.scrollTo({top:0});structurePaneRef.current?.scrollTo({top:0});}},[operationPreview]);
   const [noteQuery, setNoteQuery] = useState("");
   const [addition, setAddition] = useState("");
   const [insertion, setInsertion] = useState<ReviewInsertion | null>(null);
@@ -288,14 +305,14 @@ export function InputWorkbench({
   },[graph,draft]);
   const preview = useMemo(
     () =>
-      workflow && review ? previewReviewGraph(navigationGraph, workflow, review) : navigationGraph,
-    [navigationGraph, workflow, review],
+      workflow && review ? previewReviewGraph(operationPreview?.graph??navigationGraph, workflow, review) : navigationGraph,
+    [navigationGraph, workflow, review,operationPreview],
   );
   const steps = [...(review?.steps ?? [])].sort((a, b) => a.order - b.order);
   const selected = steps.find((s) => s.stepKey === stepKey) ?? steps[0];
   const diff = useMemo(() => review
-    ? diffReviews(draft?.baseline ?? currentReview, review, graph)
-    : null, [draft?.baseline, currentReview, review, graph]);
+    ? diffReviews(operationPreview?(operationPreview.plan.action==='merge_workflows'||operationPreview.workflow&&operationPreview.workflow.id!==baseWorkflow?.id?buildWorkflowReviewFromGraph(graph,operationPreview.workflow!.id):baseReview):draft?.baseline ?? currentReview, review, graph)
+    : null, [draft?.baseline, currentReview, review, graph,operationPreview]);
   const selectedChange = draft ? diff?.changed.find(c => c.after.stepKey === selected?.stepKey) : undefined;
   const pendingAnswers = !!review?.questions.some(q => draft?.answers[q.question]?.trim());
   const stale = draft
@@ -422,6 +439,7 @@ export function InputWorkbench({
     text = memo,
     documentStart?: { workflow: Workflow; key: string; evidence: DocumentEvidence },
     correction?: WorkflowCorrection,
+    dialogueTurns?:DialogueTurn[],
   ) {
     if (!text.trim()) return false;
     if(!documentStart)answers=includePendingDialogueAnswers(answers,draft?.answers??{});
@@ -476,7 +494,9 @@ export function InputWorkbench({
             before?.organization?.title,
           ),
         },
-        review: { ...payload.review, documentEvidence: documentStart ? [documentStart.evidence] : documentEvidence },
+        review: { ...payload.review, documentEvidence: documentStart ? [documentStart.evidence] : documentEvidence,dialogueHistory:dialogueTurns??before?.dialogueHistory },
+        dialogueSession:draft?.dialogueSession?{turns:dialogueTurns??draft.dialogueSession.turns,plan:null}:undefined,
+        dialogueUndo:dialogueTurns&&operationPreview?dialogueUndoSnapshot(operationPreview.beforeDraft,memo):draft?.dialogueUndo,
         provider: payload.provider,
         sourceNotes: text,
         baseline: before,
@@ -548,18 +568,19 @@ export function InputWorkbench({
     if (keys.includes(key)) onSelect(keys.includes(documentReturnKey.current) ? NEW_MEMO_ID : documentReturnKey.current);
   }
 
-  async function save() {
+  async function save(candidate?:InputDraft) {
+    const savingDraft=candidate??draft;
     if (pendingAnswers) { setError("入力した回答を、確認事項の見直しで流れへ反映してから保存してください。"); return; }
-    if (!draft || stale || busy || addition.trim()) return;
-    if(correctionText.trim()){setError("書いた補足・訂正を流れに反映してから保存してください。");return;}
+    if (!savingDraft || stale || working || (operationPreview&&!candidate) || addition.trim()) return false;
+    if(correctionText.trim()&&!candidate){setError("書いた補足・訂正を流れに反映してから保存してください。");return;}
     setOperation("save");
     setBusy(true);
     setError("");
     try {
       const allTranscripts = transcriptsForSave(
         latest.current.savedTranscripts,
-        draft.workflow.id,
-        draft.sourceNotes,
+        savingDraft.workflow.id,
+        savingDraft.sourceNotes,
       );
       const response = await fetch("/api/apply", {
         method: "POST",
@@ -568,11 +589,11 @@ export function InputWorkbench({
           projectId,
           projectName: "BusinessFlowLens",
           graph: latest.current.graph,
-          workflow: draft.workflow,
-          review: draft.review,
+          workflow: savingDraft.workflow,
+          review: savingDraft.review,
           transcripts: allTranscripts,
-          sourceNotes: draft.sourceNotes,
-          followUpAnswers: draft.answerHistory,
+          sourceNotes: savingDraft.sourceNotes,
+          followUpAnswers: savingDraft.answerHistory,
         }),
       });
       const payload = await response.json();
@@ -585,18 +606,21 @@ export function InputWorkbench({
         onTranscripts(payload.transcripts ?? allTranscripts);
       }
       onDraft(key, null);
-      onSelect(draft.workflow.id);
-      setLastSavedId(draft.workflow.id);
+      onSelect(savingDraft.workflow.id);
+      setLastSavedId(savingDraft.workflow.id);
       setUndoCorrection(null);
       setUndoAddition(null);
+      setUndoDialogue(null);setOperationPreview(null);
       requestAnimationFrame(() =>
         stripRef.current?.scrollIntoView({
           behavior: "smooth",
           block: "start",
         }),
       );
+      return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "保存に失敗しました。");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -684,6 +708,7 @@ export function InputWorkbench({
   const answerHistory=draft?.answerHistory??saved?.reviewContext?.followUpAnswers??[];
   const newDialogue=answerHistory.slice(saved?.reviewContext?.followUpAnswers?.length??0);
   async function correctFromDialogue(text:string,correctIndex=correctAnswerIndex){
+    if(correctIndex===undefined)return requestDialogueOperation(text);
     const scope=correctIndex===undefined&&correctionScope==='step'?selected?.stepKey:undefined;
     const question=correctIndex===undefined?(scope&&selected?`「${selected.name}」への補足・訂正`:'この仕事の流れへの補足・訂正'):answerHistory[correctIndex]?.question??'';
     const history=appendDialogueAnswer(answerHistory,question,text,'correction',correctIndex);
@@ -691,6 +716,147 @@ export function InputWorkbench({
     if(applied)setCorrectAnswerIndex(undefined);
     return applied;
   }
+  const dialogueSession:DialogueSession=draft?.dialogueSession??{turns:baseReview?.dialogueHistory??[],plan:baseReview?.dialogueHistory?.at(-1)?.state==='question'?baseReview.dialogueHistory.at(-1)!.plan??null:null};
+  const dialogueTurn=(role:DialogueTurn['role'],text:string,state?:DialogueTurn['state'],plan?:DialoguePlan):DialogueTurn=>({id:crypto.randomUUID(),createdAt:new Date().toISOString(),role,text,...(state?{state}:{}),...(plan?{plan}:{})});
+  const hasBusinessDraft=(value:InputDraft|null|undefined)=>!!value&&(!saved||mergeValue({...value.workflow,reviewContext:undefined})!==mergeValue({...saved,reviewContext:undefined})||value.sourceNotes!==(savedTranscripts[key]??'')||mergeValue({...value.review,dialogueHistory:undefined})!==mergeValue({...currentReview,dialogueHistory:undefined}));
+  const operationWords=(turns:DialogueTurn[])=>{
+    const start=turns.findLastIndex(t=>t.state==='applied'||t.state==='cancelled');return turns.slice(start+1).filter(t=>t.role==='user').map(t=>t.text).join('\n').slice(-4000);
+  };
+  async function dialogueRequest(url:string,body:unknown,signal?:AbortSignal){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal});const p=await r.json();if(!r.ok)throw new Error(p.error??'操作案を確認できませんでした。');return p;}
+  async function prepareDialogueOperation(plan:DialoguePlan,evidence:string,beforeDraft:InputDraft|null,storedCandidate?:InputDraft,signal?:AbortSignal){
+    const prepared:NonNullable<typeof operationPreview>={plan,evidence,beforeDraft};
+    if(plan.action==='refine'||plan.action==='insert'){
+      let candidate=storedCandidate;
+      if(candidate&&(candidate.workflow.id!==baseWorkflow!.id||mergeValue({...candidate.baseline,dialogueHistory:undefined})!==mergeValue({...baseReview,dialogueHistory:undefined})))throw new Error('変更前の流れが変わっています。いまの図から、補足・訂正する内容をもう一度教えてください。');
+      if(!candidate){
+        const correction={text:evidence,stepKey:plan.sourceId??(correctionScope==='step'?selected?.stepKey:undefined)};
+        const answers=plan.action==='refine'?appendDialogueAnswer(answerHistory,'対話で補足・訂正した内容',evidence,'correction'):answerHistory;
+        const placement={afterStepKey:plan.sourceId!,...(plan.targetId?{transition:dialogueConnection(baseReview!,plan)}:{})};
+        const payload=await dialogueRequest('/api/extract',plan.action==='refine'?{interview:memo,workflow:baseWorkflow,graph,previousReview:baseReview,followUpAnswers:answers,projectId,documentEvidence:baseReview!.documentEvidence,correction}:{interview:evidence,workflow:baseWorkflow,graph:mergeGraph,previousReview:null,followUpAnswers:[],additionContext:reviewAdditionContext(baseReview!,placement)},signal);
+        candidate=dialogueCandidate({action:plan.action,workflow:baseWorkflow!,before:baseReview!,source:memo,evidence,answers,placement,noteId:crypto.randomUUID(),extracted:payload});
+      }
+      prepared.candidate=candidate;prepared.review=candidate.review;prepared.workflow=candidate.workflow;
+    }
+    if(['connect','disconnect','restore_connection','exclude_step','restore_step','handoff','remove_handoff','incoming_handoff','remove_incoming_handoff'].includes(plan.action))prepared.review=applyDialogueReviewOperation(baseReview!,plan,evidence);
+    if(plan.action==='rename_workflow'){prepared.workflow={...baseWorkflow!,name:plan.value!};prepared.review={...baseReview!,...(baseReview!.organization?{organization:{...baseReview!.organization,title:plan.value!,origin:'human',evidence}}:{})};}
+    if(plan.action==='set_scenario'){prepared.workflow={...baseWorkflow!,scenario:plan.value as Workflow['scenario']};prepared.review=baseReview!;}
+    if(plan.action==='merge_workflows'){
+      if(Object.values(drafts).some(d=>d.workflow.id!==baseWorkflow!.id&&[plan.sourceId,plan.targetId].includes(d.workflow.id)))throw new Error('まとめる相手に保存前の変更があります。先にその業務を保存するか取り消してください。');
+      const candidate=mergeGraph;
+      const choices:WorkflowMergeChoice[]=plan.matches.length?plan.matches.map(m=>({sourceProcessId:canonicalNodeId(`process:${plan.sourceId}:${reviewSlug(m.sourceStepKey)}`),...(m.targetStepKey?{targetProcessId:canonicalNodeId(`process:${plan.targetId}:${reviewSlug(m.targetStepKey)}`),keep:m.keep??undefined}:{})})):workflowMergeChoices(candidate,plan.sourceId!,plan.targetId!);
+      for(const choice of choices)if(choice.targetProcessId&&!choice.keep){
+        if(plan.value==='source'||plan.value==='target')choice.keep=plan.value;
+        else{const a=candidate.nodes.find(n=>n.id===choice.sourceProcessId)!,b=candidate.nodes.find(n=>n.id===choice.targetProcessId)!;const differences=a&&b?mergeStepDifferences(a,b,candidate):[];
+          if(!differences.length)choice.keep='target';else throw new Error(`「${a.label}」の${differences.join('・')}が違います。元の業務（担当：${a.actor??'未確認'}）と統合先（担当：${b.actor??'未確認'}）の、どちらの手順の内容を採用しますか？`);}
+      }
+      const result=await dialogueRequest('/api/workflow-merge',{projectId,mode:'preview',sourceId:plan.sourceId,targetId:plan.targetId,choices,draft:hasBusinessDraft(draft)?draft:undefined});
+      prepared.graph=result.graph;prepared.workflow=result.graph.workflows.find((w:Workflow)=>w.id===plan.targetId);prepared.review=buildWorkflowReviewFromGraph(result.graph,plan.targetId!);prepared.choices=choices;prepared.expectedUpdatedAt=result.expectedUpdatedAt;
+      prepared.details=choices.map(c=>{const a=candidate.nodes.find(n=>n.id===c.sourceProcessId)!,b=candidate.nodes.find(n=>n.id===c.targetProcessId),chosen=c.keep==='source'?a:b,owner=candidate.workflows.find(w=>w.id===(c.keep==='source'?plan.sourceId:plan.targetId))?.name;return b?`${a?.label} → ${b.label}：同じ手順として「${owner}」の内容を採用。担当は${chosen?.actor??'未確認'}、道具は${candidate.edges.filter(e=>['uses','executes'].includes(e.relation)&&(e.source===chosen?.id||e.target===chosen?.id)).map(e=>candidate.nodes.find(n=>n.id===(e.source===chosen?.id?e.target:e.source))?.label).filter(Boolean).join('・')||'未確認'}`:`${a?.label}：別の手順として残す`;});
+    }
+    if(plan.action==='merge_assets'||plan.action==='rename_asset'){
+      if(hasBusinessDraft(draft))throw new Error('いまの流れに保存前の変更があります。先に保存してから、システムや情報をまとめますか？');
+      const result=await dialogueRequest('/api/asset-mutation',{projectId,mode:'preview',sourceId:plan.sourceId,targetId:plan.action==='merge_assets'?plan.targetId:undefined,name:plan.action==='rename_asset'?plan.value:undefined,evidence,acceptTargetProfile:plan.value==='target'});
+      prepared.graph=result.graph;prepared.expectedUpdatedAt=result.expectedUpdatedAt;prepared.review=buildWorkflowReviewFromGraph(result.graph,baseWorkflow!.id);
+      prepared.details=[`${result.sourceName} → ${result.targetName}${plan.action==='merge_assets'?'：以前の名前は別名として残す':'：同じIDを保って名前を変える'}`,`手順・情報の流れ・受渡しで直接つながる登録済みの業務は${result.affectedWorkflows.length}件。現行・将来案を含みます。原文と変更前の内容を履歴に残します。`];
+    }
+    if(plan.action==='undo'&&(undoDialogue||draft?.dialogueUndo)){
+      const prior=(undoDialogue??draft?.dialogueUndo)!;prepared.review=prior.draft?.review??currentReview!;prepared.workflow=prior.draft?.workflow??saved!;
+      prepared.candidate={...(prior.draft??{workflow:saved!,review:currentReview!,sourceNotes:savedTranscripts[key]??'',provider:'human-edit',baseline:currentReview,answers:{},answerHistory:saved?.reviewContext?.followUpAnswers??[]}),dialogueSession:undefined,dialogueUndo:undefined};
+    }
+    if(plan.action==='undo'&&!undoDialogue&&!draft?.dialogueUndo){
+      if(hasBusinessDraft(draft))throw new Error('保存前の変更をまとめて取り消すか、特定の手順だけ戻すかを教えてください。');
+      const records=[...(graph.knowledge?.workflowMerges??[]).filter(r=>r.state==='merged').map(r=>({id:r.id,kind:'workflow' as const,at:r.createdAt})),...(graph.knowledge?.assetMutations??[]).filter(r=>r.state==='applied').map(r=>({id:r.id,kind:'asset' as const,at:r.createdAt}))].sort((a,b)=>b.at.localeCompare(a.at));
+      if(!records.length)throw new Error('直前の対話操作や、元に戻せる保存済みの統合が見つかりません。どの内容へ戻したいか教えてください。');
+      prepared.recordId=records[0].id;prepared.recordKind=records[0].kind;
+      const result=await dialogueRequest(records[0].kind==='workflow'?'/api/workflow-merge':'/api/asset-mutation',{projectId,mode:'preview-undo',recordId:records[0].id});
+      prepared.expectedUpdatedAt=result.expectedUpdatedAt;prepared.graph=result.project.graph;prepared.workflow=result.project.graph.workflows.find((w:Workflow)=>w.id===(result.restoredId??baseWorkflow!.id));if(prepared.workflow)prepared.review=buildWorkflowReviewFromGraph(result.project.graph,prepared.workflow.id);
+      if(prepared.workflow&&prepared.review)prepared.candidate={workflow:prepared.workflow,review:prepared.review,sourceNotes:result.project.transcripts[prepared.workflow.id]??'',provider:'human-edit',baseline:buildWorkflowReviewFromGraph(graph,prepared.workflow.id),answers:{},answerHistory:prepared.workflow.reviewContext?.followUpAnswers??[]};
+    }
+    return prepared;
+  }
+  async function requestDialogueOperation(text:string){
+    if(!baseReview||!baseWorkflow||working||stale||edit||addition.trim())return false;
+    setOperation('dialogue');setBusy(true);setError('');const requestKey=key,controller=new AbortController();organizeRequest.current=controller;
+    const user=dialogueTurn('user',text.trim()),priorTurns=dialogueSession.turns,turns=[...priorTurns,user];
+    try{
+      const response=await dialogueRequest('/api/dialogue',{graph,workflow:baseWorkflow,review:baseReview,text:text.trim(),turns:priorTurns.slice(-10),selectedStepKey:selected?.stepKey},controller.signal);
+      if(controller.signal.aborted||organizeRequest.current!==controller)return false;
+      let plan=pendingDialoguePlan(validateDialoguePlan(response.plan,mergeGraph,baseWorkflow,baseReview),operationPreview?.plan),prepared:DialoguePreview|null=null;
+      if(plan.action==='accept'&&operationPreview)return await acceptDialogueOperation([...turns,dialogueTurn('assistant',plan.message,'applied',plan)]);
+      if(plan.action==='save'&&operationPreview)return await acceptDialogueOperation([...turns,dialogueTurn('assistant','表示している変更案を反映して保存します。','applied',plan)],true);
+      if(plan.action==='cancel'){cancelDialogueOperation([...turns,dialogueTurn('assistant','案を取り消しました。変更前の図はそのままです。','cancelled',plan)]);return true;}
+      if(plan.action==='accept')plan=emptyDialoguePlan('確認する操作案が見つかりません。','どの変更を反映したいか、名前や内容を教えてください。');
+      if(['show','new_story','save'].includes(plan.action)){
+        const history=[...turns,dialogueTurn('assistant',plan.action==='save'?'この流れを保存しました。元の話と変更の履歴も残っています。':plan.message,'applied',plan)],next={...ensureDraft(baseReview),review:{...baseReview,dialogueHistory:history},dialogueSession:{turns:history,plan:null}};
+        if(plan.action==='save'){const result=await save(next);if(result)setCorrectionText('');return !!result;}
+        if(operationPreview){onDraft(key,{...next,dialogueSession:{turns:history,plan:operationPreview.plan,evidence:operationPreview.evidence,preview:operationPreview.candidate}});setCorrectionText('');navigateDialoguePlan(plan);return true;}
+        onDraft(key,next);setCorrectionText('');setOperationPreview(null);navigateDialoguePlan(plan);return true;
+      }
+      if(plan.action!=='ask')try{prepared=await prepareDialogueOperation(plan,plan.action==='refine'?text.trim():operationWords(turns),draft??null,undefined,controller.signal);}catch(error){plan=emptyDialoguePlan('変更する前に、一つ確かめます。',error instanceof Error?error.message:'どの内容を採用しますか？');}
+      if(controller.signal.aborted||organizeRequest.current!==controller)return false;
+      const history=[...turns.map(t=>operationPreview&&t.state==='proposed'?{...t,state:'cancelled' as const}:t),dialogueTurn('assistant',plan.question??plan.message,plan.action==='ask'?'question':'proposed',plan)];
+      onDraft(requestKey,{...ensureDraft(baseReview),review:{...baseReview,dialogueHistory:history},dialogueSession:{turns:history,plan,evidence:prepared?.evidence,preview:prepared?.candidate}});
+      if(latest.current.key===requestKey){setCorrectionText('');setOperationPreview(prepared);setMobilePane('flow');if(prepared?.review){setStepKey(prepared.review.steps.find(s=>s.stepKey===plan.sourceId)?.stepKey??prepared.review.steps[0]?.stepKey??'');setStepPage(0);}setOrganizeNotice(plan.action==='ask'?'対話で対象や内容を確かめています。図は変更していません。':'対話からの変更案を図に表示しています。確認してから反映できます。');}
+      return true;
+    }catch(error){if(controller.signal.aborted||organizeRequest.current!==controller)return false;onDraft(requestKey,{...ensureDraft(baseReview),review:{...baseReview,dialogueHistory:turns},dialogueSession:{turns,plan:null}});setError(error instanceof Error?error.message:'操作案を作れませんでした。');return false;}
+    finally{if(organizeRequest.current===controller){organizeRequest.current=null;setBusy(false);}}
+  }
+  function cancelDialogueOperation(extraTurns?:DialogueTurn[]){
+    const turns=(extraTurns??dialogueSession.turns).map(t=>t.state==='proposed'?{...t,state:'cancelled' as const}:t);
+    if(baseReview)onDraft(key,{...ensureDraft(baseReview),review:{...baseReview,dialogueHistory:turns},dialogueSession:{turns,plan:null}});
+    setOperationPreview(null);setCorrectionText('');setOrganizeNotice('案を取り消しました。変更前の図と対話の履歴は残っています。');
+  }
+  function navigateDialoguePlan(plan:DialoguePlan){
+    if(plan.action==='new_story'){onSelect(NEW_MEMO_ID);return;}
+    if(['flow','information','systems','history'].includes(plan.value!)){setWorkbenchTab(plan.value as typeof workbenchTab);if(plan.sourceId){const s=baseReview!.steps.find(s=>s.stepKey===plan.sourceId);if(s)choose(s);}}
+    else{const id=plan.workflowId??(plan.value==='assets'?baseWorkflow!.id:undefined),focus=plan.sourceId&&baseReview!.steps.some(s=>s.stepKey===plan.sourceId)?canonicalNodeId(`process:${id??baseWorkflow!.id}:${reviewSlug(plan.sourceId)}`):plan.sourceId??undefined;onNavigate?.(plan.value!,id,focus);}
+  }
+  async function acceptDialogueOperation(extraTurns?:DialogueTurn[],saveAfter=false){
+    const proposed=operationPreview;if(!proposed||!baseReview||!baseWorkflow||working)return false;
+    try{
+      const plan=validateDialoguePlan(proposed.plan,mergeGraph,baseWorkflow,baseReview);
+      const sourceTurns=extraTurns??dialogueSession.turns,lastProposal=sourceTurns.findLastIndex(t=>t.state==='proposed');
+      const turns=sourceTurns.map((t,i)=>i===lastProposal?{...t,state:'applied' as const}:t),session={turns,plan:null};
+      const accepted={...ensureDraft(proposed.review??baseReview),workflow:proposed.workflow??baseWorkflow,review:{...(proposed.review??baseReview),dialogueHistory:turns},dialogueSession:session};
+      if(plan.action==='save')return !!await save(accepted);
+      if(plan.action==='refine'||plan.action==='insert'){
+        if(!proposed.candidate)throw new Error('話を反映した案が見つかりません。もう一度、補足・訂正する内容を教えてください。');
+        if(saveAfter){const result=await save({...proposed.candidate,review:{...proposed.candidate.review,dialogueHistory:turns},dialogueSession:session});if(result){setOperationPreview(null);setCorrectionText('');}return !!result;}
+        onDraft(key,{...proposed.candidate,review:{...proposed.candidate.review,dialogueHistory:turns},dialogueSession:session,dialogueUndo:dialogueUndoSnapshot(proposed.beforeDraft,memo)});onTranscripts({...transcripts,[key]:proposed.candidate.sourceNotes});setUndoDialogue({draft:proposed.beforeDraft,memo});setOperationPreview(null);setCorrectionText('');setOrganizeNotice('話を反映した候補です。変更前後を確認してから保存できます。');return true;
+      }
+      if(plan.action==='merge_workflows'||plan.action==='merge_assets'||plan.action==='rename_asset'){
+        setBusy(true);const historyDraft={...ensureDraft(baseReview),review:{...baseReview,dialogueHistory:turns},dialogueSession:session};
+        const payload=plan.action==='merge_workflows'?await dialogueRequest('/api/workflow-merge',{projectId,mode:'apply',sourceId:plan.sourceId,targetId:plan.targetId,choices:proposed.choices,expectedUpdatedAt:proposed.expectedUpdatedAt,draft:historyDraft}):await dialogueRequest('/api/asset-mutation',{projectId,mode:'apply',sourceId:plan.sourceId,targetId:plan.action==='merge_assets'?plan.targetId:undefined,name:plan.action==='rename_asset'?plan.value:undefined,evidence:proposed.evidence,acceptTargetProfile:plan.value==='target',expectedUpdatedAt:proposed.expectedUpdatedAt,dialogue:{workflowId:baseWorkflow.id,turns}});
+        receiveMerge(payload.project,plan.action==='merge_workflows'?plan.targetId!:baseWorkflow.id);setOperationPreview(null);setUndoDialogue(null);return true;
+      }
+      if(plan.action==='undo'){
+        const undo=undoDialogue??draft?.dialogueUndo;
+        if(undo&&saveAfter){const restored=undo.draft??{workflow:saved!,review:currentReview!,sourceNotes:savedTranscripts[key]??'',provider:'human-edit',baseline:currentReview,answers:{},answerHistory:saved?.reviewContext?.followUpAnswers??[]};const result=await save({...restored,sourceNotes:undo.memo,review:{...restored.review,dialogueHistory:turns},dialogueSession:session,dialogueUndo:undefined});if(result){setOperationPreview(null);setUndoDialogue(null);}return !!result;}
+        if(undo){const restored=undo.draft??{workflow:saved!,review:currentReview!,sourceNotes:savedTranscripts[key]??'',provider:'human-edit',baseline:currentReview,answers:{},answerHistory:saved?.reviewContext?.followUpAnswers??[]};onDraft(key,{...restored,review:{...restored.review,dialogueHistory:turns},dialogueSession:session,dialogueUndo:undefined});onTranscripts({...transcripts,[key]:undo.memo});setUndoDialogue(null);}
+        else{setBusy(true);const payload=await dialogueRequest(proposed.recordKind==='workflow'?'/api/workflow-merge':'/api/asset-mutation',{projectId,mode:'undo',recordId:proposed.recordId,expectedUpdatedAt:proposed.expectedUpdatedAt,dialogue:{workflowId:baseWorkflow.id,turns}});receiveMerge(payload.project,payload.restoredId??baseWorkflow.id);}
+        setOperationPreview(null);return true;
+      }
+      if(plan.action==='show'||plan.action==='new_story'){
+        onDraft(key,{...ensureDraft(baseReview),review:{...baseReview,dialogueHistory:turns},dialogueSession:session});setOperationPreview(null);
+        navigateDialoguePlan(plan);
+        return true;
+      }
+      if(saveAfter){const result=await save(accepted);if(result)setOperationPreview(null);return !!result;}
+      onDraft(key,{...accepted,dialogueUndo:dialogueUndoSnapshot(proposed.beforeDraft,memo)});setUndoDialogue({draft:proposed.beforeDraft,memo});setOperationPreview(null);setOrganizeNotice('対話の案を候補へ反映しました。変更箇所を確認してから保存できます。');return true;
+    }catch(error){setError(error instanceof Error?error.message:'操作を反映できませんでした。');return false;}
+    finally{setBusy(false);}
+  }
+  useEffect(()=>{
+    const plan=draft?.dialogueSession?.plan;
+    if(!plan||plan.action==='ask'||operationPreview||working||!baseReview||!baseWorkflow)return;
+    let cancelled=false;setOperation('dialogue');setBusy(true);
+    const turns=draft!.dialogueSession!.turns;
+    Promise.resolve().then(()=>prepareDialogueOperation(validateDialoguePlan(plan,mergeGraph,baseWorkflow,baseReview),draft?.dialogueSession?.evidence??operationWords(turns),draft??null,draft?.dialogueSession?.preview))
+      .then(prepared=>{if(!cancelled){setOperationPreview(prepared);if(prepared.review){setStepKey(prepared.review.steps.find(s=>s.stepKey===plan.sourceId)?.stepKey??prepared.review.steps[0]?.stepKey??'');setStepPage(0);}if(prepared.candidate&&!draft?.dialogueSession?.preview)onDraft(key,{...draft!,dialogueSession:{...draft!.dialogueSession!,preview:prepared.candidate}});setOrganizeNotice('保存前の対話案を、最新の構造と照合して開きました。');}})
+      .catch(error=>{if(!cancelled){const question=emptyDialoguePlan('操作案をもう一度確かめます。',error instanceof Error?error.message:'対象を確認してください。');const history=[...turns,dialogueTurn('assistant',question.question!,'question',question)];onDraft(key,{...draft!,review:{...baseReview,dialogueHistory:history},dialogueSession:{turns:history,plan:question}});}})
+      .finally(()=>{if(!cancelled)setBusy(false);});
+    return()=>{cancelled=true;};
+  },[key,draft?.dialogueSession?.plan]);
   const memoComposer = (<>
           <label className="kg-edit-field input-main-note">
             仕事についてのメモ
@@ -1219,6 +1385,7 @@ export function InputWorkbench({
       className="input-workbench"
       aria-label="話を入力して構造を育てる"
       data-pane={mobilePane}
+      data-operation-preview={!!operationPreview}
     >
       <div className="input-workbench-heading">
       <header className="page-header">
@@ -1277,16 +1444,16 @@ export function InputWorkbench({
         </details>
       </aside>
       </div>
-      {busy && (
+      {working && (
         <aside className="input-processing" role="status">
           <strong>
             {operation === "save"
               ? "道具・情報を既存の構造と照合して保存しています"
-              : operation === "addition" ? "追加した話だけを読み取っています" : "話を読み取り、人・道具・情報の流れを整理しています"}
+              : operation === "addition" ? "追加した話だけを読み取っています" : operation === 'dialogue' ? 'お願いの内容と、変更する対象を確かめています' : "話を読み取り、人・道具・情報の流れを整理しています"}
           </strong>
           <span aria-hidden="true"> · {waitingSeconds}秒</span>
           <p>メモと前の候補を保ったまま、結果を待っています。</p>
-          {operation === "organize" && <button className="button-secondary" onClick={() => {
+          {(operation === "organize"||operation==='dialogue') && <button className="button-secondary" onClick={() => {
             organizeRequest.current?.abort();organizeRequest.current=null;setBusy(false);
             setOrganizeNotice("整理をやめました。入力した話と、前の候補は残っています。");
           }}>この整理をやめる</button>}
@@ -1313,7 +1480,7 @@ export function InputWorkbench({
       </nav>
       <div hidden={!documentInputOpen}><DocumentInput projectId={projectId} busy={busy} completed={new Set([...Object.keys(drafts), ...graph.workflows.map(w => w.id)])} savedIds={new Set([...graph.workflows.map(w=>w.id),...(graph.knowledge?.workflowMerges??[]).filter(r=>r.state==='merged'&&graph.workflows.some(w=>w.id===workflowMergeDestination(graph,r.sourceWorkflowId))).map(r=>r.sourceWorkflowId)])} activeDocumentId={review?.documentEvidence?.[0]?.documentId} onClose={() => setDocumentInputOpen(false)} onStart={startDocumentWork} onWithdraw={withdrawDocumentCandidates} onAIResponse={() => setAIResponse("success")} /></div>
       <div className="input-workbench-grid" hidden={documentInputOpen}>
-        <section className="input-note-pane">
+        <section ref={notePaneRef} className="input-note-pane">
           <div className="input-note-heading">
             <h2>
               {documentEvidence?.length?"元資料と補足":inputMode==='dialogue'?"図を見ながら話す":"話とメモ"}
@@ -1332,12 +1499,13 @@ export function InputWorkbench({
             )}
           </div>
           <nav className="input-mode-switch" aria-label="話の入力方法"><button aria-pressed={inputMode==='dialogue'} onClick={()=>changeInputMode('dialogue')}>対話で整理</button><button aria-pressed={inputMode==='summary'} onClick={()=>changeInputMode('summary')}>まとめて書く</button></nav>
+          <DialogueOperationPanel session={dialogueSession} details={operationPreview?.details} busy={working} onAccept={acceptDialogueOperation} onCancel={cancelDialogueOperation} onReply={requestDialogueOperation}/>
           {!documentEvidence?.length&&<button className="input-document-entry button-secondary" disabled={busy} onClick={() => { documentReturnKey.current=key;setDocumentInputOpen(true); }}>資料・画像から始める</button>}
           {!review && !documentEvidence?.length && <div hidden={inputMode!=='summary'}>{memoComposer}</div>}
           {!!documentEvidence?.length&&<DocumentOriginalPane projectId={projectId} evidence={documentEvidence} sourceRefs={selected?.sourceRefs} compact={inputMode==='dialogue'}/>}
-          {(review||!documentEvidence?.length)&&<div hidden={inputMode!=='dialogue'}><InputDialogue key={key} source={memo} onSource={text=>onTranscripts({...transcripts,[key]:text})}
-            review={review} history={answerHistory} answers={draft?.answers??{}} busy={busy}
-            blockedReason={stale?'本文の変更を先に流れへ反映してください。':edit?'編集中の手順を先に反映してください。':addition.trim()?'入力中の追記を先に図へ反映してください。':''}
+          {(review||!documentEvidence?.length)&&<div hidden={inputMode!=='dialogue'}><InputDialogue key={key} source={operationPreview?.candidate?.sourceNotes??memo} onSource={text=>onTranscripts({...transcripts,[key]:text})}
+            review={review} history={operationPreview?.candidate?.answerHistory??answerHistory} answers={draft?.answers??{}} busy={working} operationSession={draft?.dialogueSession??{turns:review?.dialogueHistory??[],plan:null}}
+            blockedReason={operationPreview?'図に出ている操作案を、先に確認するか取り消してください。':stale?'本文の変更を先に流れへ反映してください。':edit?'編集中の手順を先に反映してください。':addition.trim()?'入力中の追記を先に図へ反映してください。':''}
             onStart={()=>organize()}
             onAnswerText={(question,text)=>onDraft(key,{...ensureDraft(review!),answers:{...(draft?.answers??{}),[question]:text}})}
             onAnswer={(question,text)=>organize(appendDialogueAnswer(answerHistory,question,text))}
@@ -1498,7 +1666,7 @@ export function InputWorkbench({
           )}
 
         </section>
-        <section className="input-structure-pane">
+        <section ref={structurePaneRef} className="input-structure-pane">
           <div className="input-structure-header">
             <div>
               <h2>
@@ -1524,9 +1692,9 @@ export function InputWorkbench({
                   !!edit ||
                   !draft.workflow.name.trim()
                 }
-                onClick={save}
+                onClick={()=>void save()}
               >
-                {busy
+                {operationPreview?'対話の案を確認してください':working
                   ? operation === "save" ? "道具・情報を照合して保存中…" : "話を整理中…"
                   : correctionText.trim() ? "補足・訂正を反映してから保存" : addition.trim() ? "追記を反映してから保存" : pendingAnswers ? "回答を反映してから保存" : edit
                     ? "訂正を反映してから保存"
@@ -1536,6 +1704,7 @@ export function InputWorkbench({
               </button>
             )}
           </div>
+          {draft&&!!baseReview?.dialogueHistory?.length&&<p className="input-dialogue-change">図へのお願いと返答も履歴に残しています。操作の言葉は、業務の事実として読み取りません。</p>}
           {draft&&!!newDialogue.length&&<p className="input-dialogue-change" role="status">保存前の対話：回答・補足 {newDialogue.filter(a=>a.kind!=='deferred'&&a.kind!=='correction').length}件 · 回答の訂正 {newDialogue.filter(a=>a.kind==='correction').length}件 · 未確認のまま残した内容 {newDialogue.filter(a=>a.kind==='deferred').length}件</p>}
           {workflow&&review&&graph.workflows.some(w=>w.id!==workflow.id)&&<button className="input-text-button" disabled={busy||stale||!!edit||!!addition.trim()||!!correctionText.trim()||pendingAnswers} onClick={()=>setMergeOpen(true)}>同じ業務とまとめる</button>}
           {mergeOpen&&workflow&&review&&<WorkflowMergePanel projectId={projectId} sourceId={workflow.id}
