@@ -13,6 +13,10 @@ export type ProjectSnapshot = {
   updatedAt: string;
 };
 
+export class ProjectChangedError extends Error {
+  constructor() { super("保存済みの内容が変わりました。最新の業務を読み直して、統合を確認してください。"); }
+}
+
 export type WorkflowRevisionSummary = {
   id: number;
   projectId: string;
@@ -63,7 +67,7 @@ export interface BusinessFlowRepository {
   getSourceDocument(projectId: string, documentId: string): Promise<{ document: SourceDocument; bytes: Uint8Array } | null>;
   findSourceDocument(projectId: string, sha256: string): Promise<SourceDocument | null>;
   loadProject(projectId: string): Promise<ProjectSnapshot | null>;
-  saveProject(snapshot: ProjectSnapshot): Promise<void>;
+  saveProject(snapshot: ProjectSnapshot, expectedUpdatedAt?: string): Promise<void>;
 
   appendWorkflowRevision(
     revision: NewWorkflowRevision,

@@ -230,6 +230,7 @@ export type LensGraph = {
 };
 
 export type CompanyKnowledge = {
+  workflowMerges?: import("./workflow-merge").WorkflowMergeRecord[];
   name: string;
   description: string;
   activities: Array<{ id: string; name: string; description: string;
