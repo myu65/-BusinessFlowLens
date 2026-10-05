@@ -145,3 +145,50 @@ test("a negated result handoff cannot make a held step proceed", () => {
     assert.equal(checked.transitions.length, 0, verb);
   }
 });
+
+function incidentDraft(quote = "EAMへ異常を記録します。", action = "EAMへ配管異常を記録する", text = "配管が違う場合は投入せず" + quote) {
+  const r = inquiryDraft(action, quote, text);
+  r.steps[0] = { ...r.steps[0], name: "配管が違う場合は投入しない", action: "配管が違う場合は投入しない",
+    evidence: "配管が違う場合は投入せず",
+    meaning: { purpose: "", basis: "", result: "投入しない", next: "", condition: "配管が違う場合", halt: true, certainty: "confirmed", evidence: "配管が違う場合は投入せず" } };
+  return r;
+}
+
+test("recording a literal incident in the same stopped clause preserves the hold, endpoints and unknown actor", () => {
+  const source = "配管が違う場合は投入せずEAMへ異常を記録します。";
+  for (const evidence of [source, "投入せずEAMへ異常を記録します。"]) {
+    const r = incidentDraft();
+    r.transitions[0].evidence = evidence;
+    const offered = JSON.stringify(r), checked = validateAITransitions(r, source);
+    assert.equal(checked.transitions[0]?.holdEffect, "response");
+    assert.deepEqual(checked.steps, r.steps);
+    assert.equal(JSON.stringify(r), offered);
+    assert.equal(checked.steps[1].actor, null);
+    assert.equal(checked.steps[1].executionMode, "unknown");
+    assert.equal(validateAITransitions({ ...r, transitions: [] }, source).transitions.length, 0);
+    const workflow = { id: "charge", name: "原料投入" };
+    const graph = previewReviewGraph({ workflows: [], nodes: [], edges: [], dataFlows: [] }, workflow, checked);
+    const target = graph.nodes.find(n => n.kind === "process" && n.stepOrder === 2)!;
+    const html = renderToStaticMarkup(createElement(WorkflowReading, { graph, workflowId: workflow.id, initialStepId: target.id, onDetail: () => {} }));
+    assert.match(html, /停止・保留を続けています/);
+    assert.doesNotMatch(html, /再開 ·/);
+  }
+});
+
+test("an incident record cannot continue a hold using negated, unknown, unrelated or release work", () => {
+  for (const [quote, action, text] of [
+    ["EAMへ異常を記録しません。", "EAMへ異常を記録する", "配管が違う場合は投入せずEAMへ異常を記録しません。"],
+    ["EAMへ異常を記録するかは未確認です。", "EAMへ異常を記録する", "配管が違う場合は投入せずEAMへ異常を記録するかは未確認です。"],
+    ["EAMへ異常を記録します。", "EAMへ障害を記録する", "配管が違う場合は投入せずEAMへ異常を記録します。"],
+    ["EAMへ異常を記録します。", "EAMへ異常を記録して投入を再開する", "配管が違う場合は投入せずEAMへ異常を記録します。"],
+    ["EAMへ異常を記録します。", "EAMへ異常を記録して投入を開始する", "配管が違う場合は投入せずEAMへ異常を記録します。"],
+    ["EAMへ異常を記録します。", "EAMへ異常を記録する", "配管が違う場合は投入せず待機します。別の設備でEAMへ異常を記録します。"],
+    ["SAPへ数量を記録します。", "SAPへ数量を記録する", "配管が違う場合は投入せずSAPへ数量を記録します。"],
+  ]) {
+    const checked = validateAITransitions(incidentDraft(quote, action, text), text);
+    assert.equal(checked.transitions.length, 0, quote + action);
+  }
+  const r = incidentDraft();
+  r.transitions[0].evidence = "EAMへ異常を記録します。";
+  assert.equal(validateAITransitions(r, "配管が違う場合は投入せずEAMへ異常を記録します。").transitions.length, 0);
+});

@@ -279,9 +279,27 @@ export function validateAITransitions<T extends ExtractionReview>(
     const exceptionResponse = (sameHeldEpisode && ((evidence && original.includes(evidence) && repair(evidence)) || quotedResponse) || explicitWhileHeld) &&
       targetEvidence && repair(compact(targetEvidence)) && repair(target?.action ?? "") &&
       !completion.test(target?.action ?? "");
+    // Recording the incident in the same stopped clause is response work,
+    // not a release. Require literal quotes for both endpoints and an offered
+    // edge spanning them; a later, unrelated record must not continue a hold.
+    const stopAction = /保留|停止|止め|(?:投入|開始|供給|起動|出荷)(?:せず|しない|しません)/;
+    const incident = targetEvidence?.match(/異常|不適合|逸脱|不具合|障害/)?.[0];
+    const edgeAt = evidence ? original.indexOf(evidence) : -1;
+    const heldIncidentRecord = step && target && sourceStepEvidence && targetEvidence && incident &&
+      stopAction.test(compact(sourceStepEvidence)) && stopAction.test(evidence) &&
+      /記録(?:する|します)/.test(target.action) && target.action.includes(incident) &&
+      /記録(?:する|します)/.test(compact(targetEvidence)) &&
+      !/記録(?:しない|しません|していない|していません|するか)|不明|分から|未確認|未定/.test(targetEvidence) &&
+      !completion.test(target.action) && !completion.test(targetEvidence) &&
+      !/(?:投入|供給|起動)(?:する|します)|(?:投入|供給|起動)を(?:開始|再開)/.test(target.action) &&
+      sourceAt >= 0 && targetAt >= sourceAt + compact(sourceStepEvidence).length &&
+      !/[。！？]/.test(original.slice(sourceAt + compact(sourceStepEvidence).length, targetAt)) &&
+      edgeAt >= sourceAt && edgeAt < sourceAt + compact(sourceStepEvidence).length &&
+      edgeAt + evidence.length >= targetAt + compact(targetEvidence).length &&
+      review.steps.filter(s => s.meaning?.halt && sourceEvidence(source, s.evidence) === sourceStepEvidence).length === 1;
     // A conditional check may have a normal path and a hold inside it. A step
     // executed only on the hold condition needs an explicit release to proceed.
-    if (step?.meaning?.halt && step.meaning.condition && !restart && !statedContinuation && !continuedHold && !handover && !exceptionResponse && !scopedResponse && !heldInquiry) {
+    if (step?.meaning?.halt && step.meaning.condition && !restart && !statedContinuation && !continuedHold && !handover && !exceptionResponse && !scopedResponse && !heldInquiry && !heldIncidentRecord) {
       warnings.push(`${step.name}：停止・保留の解除を原文で確認できないため、その先へ進む線を保留しました。`);
       questions.push({
         question: `${step.name}の後は、どの条件・判断で再開し、どの手順へ進みますか？`,
@@ -291,7 +309,7 @@ export function validateAITransitions<T extends ExtractionReview>(
       return false;
     }
     if (step?.meaning?.halt && step.meaning.condition) {
-      t.holdEffect = scopedResponse ? "response" : restart || statedContinuation ? "resume" : continuedHold || handover || exceptionResponse || heldInquiry ? "response" : undefined;
+      t.holdEffect = scopedResponse ? "response" : restart || statedContinuation ? "resume" : continuedHold || handover || exceptionResponse || heldInquiry || heldIncidentRecord ? "response" : undefined;
       if (scopedResponse) t.evidence = `「${sourceEvidence(source, step.evidence)}」「${targetEvidence}」`;
       if (scopedResponse || ((quotedResponse || explicitWhileHeld) && exceptionResponse)) t.certainty = "inferred";
     } else if (restart && sourceStepEvidence && targetEvidence && /再開|resume|restart/i.test(evidence)) {
