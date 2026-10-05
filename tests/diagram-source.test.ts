@@ -95,7 +95,7 @@ test("a selected-step correction cannot rename other actions, change connections
   const proposed=structuredClone(previous);
   proposed.steps.forEach(step=>{step.name='AIが書き直した名前';step.action='無関係な書き直し';step.evidence='別の説明';});
   proposed.steps[0].actor='営業事務担当';proposed.steps[1].actor='勝手に変えた担当';proposed.transitions=[];
-  proposed.dataFlows=[{sourceSystem:'Outlook',targetSystem:'LIMS',data:['成績書'],transferType:'manual',direction:'one_way',automation:'manual',frequency:'都度',evidence:'勝手な書き直し',relatedStepKeys:[target.stepKey],certainty:'inferred'}];
+  proposed.dataFlows=[{sourceSystem:'Outlook',targetSystem:'LIMS',data:['成績書'],transferType:'manual',direction:'push',automation:'manual',frequency:'都度',evidence:'勝手な書き直し',relatedStepKeys:[target.stepKey],certainty:'inferred'}];
   const correction={text:'受取担当だけ営業事務担当に直す',stepKey:target.stepKey};
   const fields=[{stepKey:target.stepKey,field:'actor'},{stepKey:previous.steps[1].stepKey,field:'actor'}];
   const candidate=correctionCandidate(previous,proposed,correction,fields);
