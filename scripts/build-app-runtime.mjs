@@ -6,7 +6,9 @@ const result=spawnSync(process.execPath,['node_modules/next/dist/bin/next','buil
 if(result.status!==0)process.exit(result.status??1);
 const standalone=join(dist,'standalone');
 await cp('public',join(standalone,'public'),{recursive:true});
+await cp('assets/pdf-fonts',join(standalone,'assets/pdf-fonts'),{recursive:true});
 await cp(join(dist,'static'),join(standalone,dist,'static'),{recursive:true});
 await access(join(standalone,'server.js'));
 await access(join(standalone,'node_modules/snowflake-sdk/dist/index.js'));
-console.log('App Runtime package: server, static files, public files and Snowflake driver are ready.');
+await access(join(standalone,'assets/pdf-fonts/NotoSerifJP.ttf'));
+console.log('App Runtime package: server, static files, public files, Japanese PDF fonts and Snowflake driver are ready.');

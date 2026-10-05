@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import ExcelJS from "exceljs";
 import JSZip from "jszip";
 import { dirname, join } from "node:path";
-import { DOCUMENT_MAX_BYTES, DOCUMENT_MAX_CHARACTERS, DOCUMENT_MAX_UNITS, type SourceDocument, type SourceUnit, type SourceImage } from "./source-document";
+import { DOCUMENT_MAX_BYTES, DOCUMENT_MAX_CHARACTERS, DOCUMENT_MAX_UNITS, PDF_RENDER_VERSION, type SourceDocument, type SourceUnit, type SourceImage } from "./source-document";
 import { normalizeSourceImage, OfficeRenderError, renderOfficePDF, VISUAL_DOCUMENT_MAX_PAGES } from "./document-renderer";
 
 /** Check declared expansion before a workbook library decompresses it. ZIP64 is intentionally unsupported. */
@@ -114,6 +114,7 @@ export async function parseSourceDocument(name: string, bytes: Buffer, options?:
     }
     if (rendering?.status !== "unavailable") {
     if (pdfBytes.subarray(0,5).toString() !== "%PDF-") throw new Error("PDFファイルを読み取れません。");
+    if (options) await (await import("./pdf-fonts")).ensurePdfFonts();
     const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
     // Use the native module at runtime; a bundler's require.resolve returns a module ID.
     const nativeRequire = process.getBuiltinModule("module").createRequire(join(process.cwd(), "package.json"));
@@ -159,5 +160,7 @@ export async function parseSourceDocument(name: string, bytes: Buffer, options?:
     }
   }
   if (!units.length && rendering?.status !== "unavailable") throw new Error("読み取れる文字がありません。画像を含めた読取りを試してください。");
-  return { ...metadata, units, warnings, rendering: rendering ?? { status: "ready" } };
+  const finalRendering: NonNullable<SourceDocument["rendering"]> = rendering ?? { status: "ready" };
+  if (format === "pdf" && options && finalRendering.status === "ready") finalRendering.version = PDF_RENDER_VERSION;
+  return { ...metadata, units, warnings, rendering: finalRendering };
 }

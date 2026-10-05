@@ -62,5 +62,17 @@ export async function storageContract(t:TestContext,first:BusinessFlowRepository
     const revisions=await second.listWorkflowRevisions(projectId,revision.workflowId);assert.deepEqual(revisions.map(r=>r.revisionNumber),[2,1]);
     for(const item of saved){const restored=await first.getWorkflowRevision(projectId,item.id);assert.deepEqual(restored?.review,JSON.parse(JSON.stringify(review)));assert.equal(restored?.sourceNotes,revision.sourceNotes);assert.equal(await first.getWorkflowRevision(projectId+'-other',item.id),null);}
   });
+  await t.test('a page rendition refresh rejects stale publication and cannot reactivate a concurrent withdrawal',async()=>{
+    const prior=(await first.getSourceDocument(projectId,doc.id))!.document;
+    const generation=prior.lifecycle?.generation??0;
+    const refreshed=await first.setSourceDocumentState(projectId,doc.id,'active',generation);
+    assert.equal(refreshed?.lifecycle?.generation,generation+1);
+    await assert.rejects(()=>second.saveSourceDocument(projectId,prior,png),/取り消/);
+    const withdrawn=await second.setSourceDocumentState(projectId,doc.id,'withdrawn');
+    await assert.rejects(()=>first.setSourceDocumentState(projectId,doc.id,'active',withdrawn!.lifecycle!.generation),/資料の状態/);
+    assert.equal((await second.getSourceDocument(projectId,doc.id))!.document.lifecycle?.state,'withdrawn');
+    assert.deepEqual(Buffer.from((await first.getSourceDocument(projectId,doc.id))!.bytes),png);
+    await second.setSourceDocumentState(projectId,doc.id,'active');
+  });
   return {projectId,graph:normalizeSnapshotGraph(graph),document:doc,image};
 }

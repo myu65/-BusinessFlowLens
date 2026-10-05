@@ -4,6 +4,7 @@ import {readFile,access,mkdir,writeFile,mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {spawn} from 'node:child_process';
 import {join,resolve} from 'node:path';
+import {japaneseGlyphPDF,assertJapaneseGlyphImage} from '../tests/pdf-glyph-fixture.mjs';
 
 const packageOnly=process.argv.includes('--package-only');
 const testAI=process.argv.includes('--ai');
@@ -40,7 +41,7 @@ async function waitForServer(){
 }
 try {
   if(packageOnly){
-    for(const path of ['server.js','node_modules/snowflake-sdk/dist/index.js','node_modules/pdfjs-dist/legacy/build/pdf.mjs','node_modules/pdfjs-dist/standard_fonts/LiberationSans-Regular.ttf','node_modules/pdfjs-dist/cmaps/UniJIS-UTF16-H.bcmap','public/examples/manufacturing-audit.pdf'])await access(join(dist,'standalone',path));
+    for(const path of ['server.js','node_modules/snowflake-sdk/dist/index.js','node_modules/pdfjs-dist/legacy/build/pdf.mjs','node_modules/pdfjs-dist/standard_fonts/LiberationSans-Regular.ttf','node_modules/pdfjs-dist/cmaps/UniJIS-UTF16-H.bcmap','public/examples/manufacturing-audit.pdf','assets/pdf-fonts/NotoSansJP.ttf','assets/pdf-fonts/NotoSerifJP.ttf'])await access(join(dist,'standalone',path));
     server=spawn(process.execPath,['scripts/start-app-runtime.mjs'],{windowsHide:true,stdio:'inherit',env:{...process.env,BUSINESS_FLOW_STORAGE:'snowflake',SNOWFLAKE_HOST:'unconfigured.snowflakecomputing.com',SNOWFLAKE_DATABASE:'BFL_TEST',SNOWFLAKE_SCHEMA:'APP',SNOWFLAKE_WAREHOUSE:'COMPUTE_WH',SNOWFLAKE_PAT:'package-test-not-a-credential',SNOWFLAKE_STORAGE_AUTH:'pat',SNOWFLAKE_TOKEN_FILE:'',AI_RUNTIME:'',AI_MODEL:'',PORT:url.port,HOSTNAME:'127.0.0.1'}});
     await waitForServer();
   }
@@ -52,7 +53,7 @@ try {
   if(packageOnly){
     // CI verifies the actual packaged PDF/native renderer with an isolated SQLite file, without Snowflake credentials.
     await stopServer();temporary=await mkdtemp(join(tmpdir(),'bfl-runtime-package-'));
-    server=spawn(process.execPath,[resolve(dist,'standalone','server.js')],{windowsHide:true,stdio:'inherit',env:{...process.env,BUSINESS_FLOW_STORAGE:'sqlite',BUSINESS_FLOW_SQLITE_PATH:join(temporary,'package.sqlite'),AI_RUNTIME:'',AI_MODEL:'',PORT:url.port,HOSTNAME:'127.0.0.1'}});
+    server=spawn(process.execPath,[resolve(dist,'standalone','server.js')],{windowsHide:true,stdio:'inherit',env:{...process.env,BUSINESS_FLOW_STORAGE:'sqlite',BUSINESS_FLOW_SQLITE_PATH:join(temporary,'package.sqlite'),AI_RUNTIME:'',AI_MODEL:'',DISABLE_SYSTEM_FONTS_LOAD:'1',PORT:url.port,HOSTNAME:'127.0.0.1'}});
     await waitForServer();
   }
   {
@@ -74,14 +75,14 @@ try {
     const history=await api(`/api/workflow-revisions?projectId=${encodeURIComponent(projectId)}&workflowId=${workflow.id}`);assert.equal(history.revisions.length,1);
     const revision=await api(`/api/workflow-revisions?projectId=${encodeURIComponent(projectId)}&revisionId=${history.revisions[0].id}`);assert.equal(revision.revision.sourceNotes,source);assert.ok(revision.revision.review.questions.length>0);
     const files=[];
-    for(const name of ['vendor-inspection.png','manufacturing-audit.pdf']){
-      const bytes=await readFile(join('public/examples',name)),form=new FormData();form.set('projectId',projectId);form.set('stage','1');form.set('file',new File([bytes],name));
+    for(const name of ['vendor-inspection.png','manufacturing-audit.pdf','japanese-glyph.pdf']){
+      const bytes=name==='japanese-glyph.pdf'?japaneseGlyphPDF():await readFile(join('public/examples',name)),form=new FormData();form.set('projectId',projectId);form.set('stage','1');form.set('file',new File([bytes],name));
       const upload=await request('/api/source-document',{method:'POST',body:form});assert.equal(upload.status,200);const {document}=await upload.json();assert.equal(document.rendering.status,'pending');
       const base=`/api/source-document?projectId=${encodeURIComponent(projectId)}&id=${encodeURIComponent(document.id)}`;
       const original=await request(base+'&original=1');assert.equal(original.status,200);assert.equal(createHash('sha256').update(Buffer.from(await original.arrayBuffer())).digest('hex'),document.sha256);
       const prepared=await api('/api/source-document/prepare','POST',{projectId,documentId:document.id});assert.equal(prepared.document.rendering.status,'ready');assert.ok(prepared.document.units.length>0);assert.ok(prepared.document.units.every(u=>u.image));
-      for(const unit of prepared.document.units){const image=await request(base+'&image='+encodeURIComponent(unit.id));assert.equal(image.status,200);assert.equal(image.headers.get('Content-Type'),'image/jpeg');assert.ok((await image.arrayBuffer()).byteLength>100);}
-      if(testAI){const analyzed=await api('/api/source-document/analyze','POST',{projectId,documentId:document.id});assert.equal(analyzed.document.analysis.method,'ai');assert.equal(analyzed.document.analysis.model,health.ai.model);assert.ok(analyzed.document.units.some(u=>u.visualReading?.method==='ai'),'Rendered page images must actually be read by AI.');assert.ok(analyzed.document.workItems.length>0);}
+      for(const unit of prepared.document.units){const image=await request(base+'&image='+encodeURIComponent(unit.id));assert.equal(image.status,200);assert.equal(image.headers.get('Content-Type'),'image/jpeg');const imageBytes=new Uint8Array(await image.arrayBuffer());assert.ok(imageBytes.byteLength>100);if(name==='japanese-glyph.pdf')await assertJapaneseGlyphImage(imageBytes);}
+      if(testAI&&name!=='japanese-glyph.pdf'){const analyzed=await api('/api/source-document/analyze','POST',{projectId,documentId:document.id});assert.equal(analyzed.document.analysis.method,'ai');assert.equal(analyzed.document.analysis.model,health.ai.model);assert.ok(analyzed.document.units.some(u=>u.visualReading?.method==='ai'),'Rendered page images must actually be read by AI.');assert.ok(analyzed.document.workItems.length>0);}
       await api('/api/source-document/state','POST',{projectId,documentId:document.id,state:'withdrawn'});
       const rejected=await request('/api/source-document/prepare',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({projectId,documentId:document.id})});assert.equal(rejected.status,409);
       assert.equal((await request(base+'&original=1')).status,200,'Withdrawing interpretation must retain the original.');

@@ -3,7 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { SourceDocument, SourceImage } from "@/lib/source-document";
 import { DOCUMENT_MAX_BYTES } from "@/lib/source-document";
-import { ProjectChangedError, type BusinessFlowRepository, type NewWorkflowRevision, type ProjectSnapshot, type WorkflowRevision, type WorkflowRevisionSummary } from "./repository";
+import { ProjectChangedError, SourceDocumentChangedError, type BusinessFlowRepository, type NewWorkflowRevision, type ProjectSnapshot, type WorkflowRevision, type WorkflowRevisionSummary } from "./repository";
 import { normalizeSnapshotGraph } from "./normalize";
 import { SnowflakeClient, snowflakeStorageConfig, type SnowflakeSession, type SnowflakeStorageConfig } from "./snowflake-client";
 import { snowflakeObjects, snowflakeSetupStatements } from "./snowflake-schema";
@@ -143,9 +143,10 @@ export class SnowflakeBusinessFlowRepository implements BusinessFlowRepository {
   async getSourceImage(projectId: string, documentId: string, unitId: string): Promise<SourceImage | null> {
     return this.read(async session => { const row = await this.source(session,projectId,documentId), image = row?.IMAGES[unitId]; return image ? {unitId,mimeType:"image/jpeg",width:image.width,height:image.height,bytes:await this.get(session,image.path,image.sha256,image.byteSize)} : null; });
   }
-  async setSourceDocumentState(projectId: string, documentId: string, state: "active" | "withdrawn"): Promise<SourceDocument | null> {
+  async setSourceDocumentState(projectId: string, documentId: string, state: "active" | "withdrawn", expectedActiveGeneration?: number): Promise<SourceDocument | null> {
     return this.write(async session => {
       const row = await this.source(session,projectId,documentId); if (!row) return null;
+      if (expectedActiveGeneration !== undefined && (row.DOCUMENT.lifecycle?.state === "withdrawn" || (row.DOCUMENT.lifecycle?.generation ?? 0) !== expectedActiveGeneration)) throw new SourceDocumentChangedError();
       const document: SourceDocument = {...row.DOCUMENT,lifecycle:{state,generation:(row.DOCUMENT.lifecycle?.generation ?? 0)+1,changedAt:new Date().toISOString()}};
       await session.query(`UPDATE ${this.object("SOURCE_DOCUMENTS")} SET DOCUMENT=PARSE_JSON(?) WHERE PROJECT_ID=? AND DOCUMENT_ID=?`, [JSON.stringify(document),projectId,documentId]);
       return document;

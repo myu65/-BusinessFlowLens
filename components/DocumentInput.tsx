@@ -1,6 +1,6 @@
 "use client";
 import React, { useEffect, useRef, useState } from "react";
-import { DOCUMENT_MAX_BYTES, matchingSourceUnits, type SourceDocument, type DocumentWorkItem, type DocumentEvidence } from "@/lib/source-document";
+import { DOCUMENT_MAX_BYTES, matchingSourceUnits, needsSourceRendering, type SourceDocument, type DocumentWorkItem, type DocumentEvidence } from "@/lib/source-document";
 
 function sourceURL(projectId: string, documentId: string) {
   return `/api/source-document?projectId=${encodeURIComponent(projectId)}&id=${encodeURIComponent(documentId)}`;
@@ -30,7 +30,7 @@ export function DocumentInput({projectId, busy, onClose, onStart, completed, sav
   async function analyze(doc:SourceDocument,controller=begin()) {
     setWorking(true);setStatus("資料のページを読み込んでいます…");setError("");
     try {
-      if(doc.rendering?.status==="pending"||doc.rendering?.status==="unavailable") {
+      if(needsSourceRendering(doc)) {
         const prepared=await post("/api/source-document/prepare",doc,controller);if(!active(controller))return;doc=prepared.document;remember(doc);
         if(doc.rendering?.status==="unavailable")throw new Error(doc.rendering.message??"ページを画像にできませんでした。元資料は保存されています。");
       }
@@ -61,7 +61,13 @@ export function DocumentInput({projectId, busy, onClose, onStart, completed, sav
   }
   async function open(id:string) {
     const controller=begin();setWorking(true);setError("");setStatus("元資料を開いています…");remember(null);
-    try {const response=await fetch(sourceURL(projectId,id),{signal:controller.signal});const value=await response.json();if(!active(controller))return;if(!response.ok)throw new Error(value.error);remember(value.document);setPage(0);setRaw(false);setSourceIds(undefined);setStatus("");}
+    try {const response=await fetch(sourceURL(projectId,id),{signal:controller.signal});const value=await response.json();if(!active(controller))return;if(!response.ok)throw new Error(value.error);
+      let doc=value.document as SourceDocument;
+      if(doc.format==="pdf"&&doc.lifecycle?.state!=="withdrawn"&&needsSourceRendering(doc)) {
+        setStatus("文字が欠けないよう、ページを作り直しています…");
+        const prepared=await post("/api/source-document/prepare",doc,controller);if(!active(controller))return;doc=prepared.document;
+      }
+      remember(doc);setPage(0);setRaw(false);setSourceIds(undefined);setStatus("");}
     catch(cause){if(active(controller)){setError(cause instanceof Error?cause.message:"資料を開けませんでした。");setStatus("");}}finally{if(active(controller)){setWorking(false);request.current=null;}}
   }
   async function withdraw() {
@@ -98,6 +104,7 @@ export function DocumentInput({projectId, busy, onClose, onStart, completed, sav
     {document&&<>
       {withdrawn&&<div className="document-withdrawn" role="status"><h3>この資料の使用を取り消しました</h3><p>保存前の候補は取り消しています。{savedCount?`保存した${savedCount}件の仕事と、その根拠は残っています。`:"会社の構造に仕事は追加していません。"}元資料と読めたページは残しているので、必要なときに続きから再開できます。</p><button className="button-secondary" disabled={disabled} onClick={()=>void resume()}>この資料の読取りを再開する</button><button className="button-primary" onClick={onClose}>話の入力へ戻る</button></div>}
       <div className="document-reading-heading"><h3>{document.name}</h3><small>元資料を保存済み{document.units.length?` · ${document.units.length}箇所を読み込み`:""}{document.analysis&&" · 仕事の分け方はAIの候補"}</small></div>
+      {!!document.analysisHistory?.length&&<details className="document-limitations"><summary>ページを作り直す前の読取り · {document.analysisHistory.length}回</summary><p>以前の画像から作った候補は、履歴に残しています。保存した仕事や、人が直した内容はそのままです。新しい画像の読取り結果は、もう一度確認してください。</p>{document.analysisHistory.map((snapshot,index)=><article key={snapshot.archivedAt+index}><h4>{index+1}回目の読取り</h4>{snapshot.workItems?.map(item=><p key={item.id}>{item.title} · {item.note}</p>)}<p>ページごとの読取りは「元資料と読取りを見比べる」で確認できます。</p></article>)}</details>}
       <details className="document-limitations"><summary>読み取った範囲・読み取れない内容を確認</summary>{document.warnings.map((text,i)=><p key={i}>{text}</p>)}</details>
       {!items.length&&!working&&!withdrawn&&<button className="button-secondary" disabled={disabled} onClick={()=>void analyze(document)}>{document.analysis?"資料の仕事をもう一度確認する":"続きから資料を読み取る"}</button>}
       {!!document.findings?.length&&!withdrawn&&<details className="document-findings" aria-label="ページ間の照合"><summary>ページの照合 · {document.findings.length}件{document.findings.some(f=>f.kind==="conflict")&&` · 食い違い${document.findings.filter(f=>f.kind==="conflict").length}件`}</summary>{document.findings.map((finding,i)=><article key={i} data-kind={finding.kind}><strong>{{duplicate:"同じ説明",conflict:"食い違い・要確認",scope_difference:"対象・版の違い",unknown:"資料だけでは未確認"}[finding.kind]}</strong><p>{finding.description}</p><button className="input-text-button" onClick={()=>{setSourceIds(finding.unitIds);setRaw(true);}}>{finding.unitIds.map(id=>document.units.find(unit=>unit.id===id)?.location).join(" / ")}を確かめる</button></article>)}</details>}
@@ -129,7 +136,8 @@ export function SourceUnits({document,unitIds,projectId}: {document:SourceDocume
   const pagination=count>1?<nav className="document-pagination" aria-label="元資料のページ切替"><button disabled={!current} onClick={()=>{setPage(current-1);setZoomed(false);}}>{perPage===1?"前のページ":"前の12箇所"}</button><span>{current*perPage+1}{perPage>1?`–${Math.min(units.length,(current+1)*perPage)}`:""} / {units.length}</span><button disabled={current+1>=count} onClick={()=>{setPage(current+1);setZoomed(false);}}>{perPage===1?"次のページ":"次の12箇所"}</button></nav>:null;
   return <section className="document-source-units" aria-label="元資料のセルとページ">
     {pagination}
-    {units.slice(current*perPage,(current+1)*perPage).map(unit=><article key={unit.id}><h4>{unit.location}</h4>{unit.image&&projectId?<div className="document-page-comparison"><figure data-zoomed={zoomed}><button className="document-page-image" aria-label={`${unit.location}の画像を${zoomed?"ページ全体に戻す":"大きく見る"}`} onClick={()=>setZoomed(!zoomed)}><img src={`${sourceURL(projectId,document.id)}&image=${encodeURIComponent(unit.id)}`} width={unit.image.width} height={unit.image.height} alt={`${document.name}の${unit.location}`} /></button><figcaption>元資料を画像にした表示 · {zoomed?"クリックでページ全体に戻す":"クリックで大きく見る"}</figcaption></figure><div><h5>AIが画像から読んだ内容 · 要確認</h5>{unit.visualReading?<><p>{unit.visualReading.description}</p>{!!unit.visualReading.uncertainties.length&&<details open><summary>画像だけでは確かめられないこと</summary>{unit.visualReading.uncertainties.map((text,i)=><p key={i}>{text}</p>)}</details>}</>:<p>このページはまだAIが読んでいません。元の図や文字は、ここで確認できます。</p>}{!!unit.text&&<details><summary>文字として取り出した内容</summary><pre>{unit.text}</pre></details>}</div></div>:unit.cells?<dl className="document-cell-grid">{unit.cells.filter((cell,i,cells)=>cells.findIndex(c=>c.sourceAddress===cell.sourceAddress)===i).map(cell=>{
+    {units.some(unit=>unit.image)&&<div className="document-page-tools"><button className="button-secondary" onClick={()=>setZoomed(!zoomed)}>{zoomed?"ページ全体に戻す":"図と文字を拡大する"}</button>{zoomed&&<small>画像内を上下・左右にスクロールして確認できます。</small>}</div>}
+    {units.slice(current*perPage,(current+1)*perPage).map(unit=><article key={unit.id}><h4>{unit.location}</h4>{unit.image&&projectId?<div className="document-page-comparison"><figure data-zoomed={zoomed}><button className="document-page-image" aria-label={`${unit.location}の画像を${zoomed?"ページ全体に戻す":"大きく見る"}`} onClick={()=>setZoomed(!zoomed)}><img src={`${sourceURL(projectId,document.id)}&image=${encodeURIComponent(unit.id)}`} width={unit.image.width} height={unit.image.height} alt={`${document.name}の${unit.location}`} /></button><figcaption>元資料を画像にした表示 · {zoomed?"クリックでページ全体に戻す":"クリックで大きく見る"}</figcaption></figure><div><h5>AIが画像から読んだ内容 · 要確認</h5>{unit.visualReading?<><p>{unit.visualReading.description}</p>{!!unit.visualReading.uncertainties.length&&<details open><summary>画像だけでは確かめられないこと</summary>{unit.visualReading.uncertainties.map((text,i)=><p key={i}>{text}</p>)}</details>}</>:<p>このページはまだAIが読んでいません。元の図や文字は、ここで確認できます。</p>}{document.analysisHistory?.some(snapshot=>snapshot.units.some(prior=>prior.id===unit.id))&&<details><summary>ページを作り直す前の読取り</summary><p>以前の画像から読んだ内容です。現在のページの確認には使っていません。</p>{document.analysisHistory.flatMap((snapshot,index)=>snapshot.units.filter(prior=>prior.id===unit.id).map(prior=><article key={snapshot.archivedAt+index}><p>{prior.visualReading.description}</p>{prior.visualReading.uncertainties.map((text,i)=><p key={i}>未確認：{text}</p>)}</article>))}</details>}{!!unit.text&&<details><summary>文字として取り出した内容</summary><pre>{unit.text}</pre></details>}</div></div>:unit.cells?<dl className="document-cell-grid">{unit.cells.filter((cell,i,cells)=>cells.findIndex(c=>c.sourceAddress===cell.sourceAddress)===i).map(cell=>{
       const same=unit.cells!.filter(c=>c.sourceAddress===cell.sourceAddress), location=same.length>1?`${same[0].address}:${same.at(-1)!.address}`:cell.address;
       return <div key={cell.address}><dt>{location}{cell.sourceAddress!==cell.address&&<small>結合元{cell.sourceAddress}</small>}</dt><dd>{cell.text||<span className="input-unconfirmed">空欄・未確認</span>}</dd></div>;
     })}</dl>:<pre>{unit.text}</pre>}</article>)}
@@ -142,7 +150,9 @@ export function DocumentSourceEvidence({projectId,evidence,focusText="",stepName
   const [all,setAll]=useState(false);
   useEffect(()=>{if(open&&!dialog.current?.open)dialog.current?.showModal();else if(!open&&dialog.current?.open)dialog.current.close();},[open]);
   async function load() {
-    try {for(const ref of evidence){if(documents[ref.documentId])continue;const response=await fetch(sourceURL(projectId,ref.documentId));const value=await response.json();if(!response.ok)throw new Error(value.error);setDocuments(current=>({...current,[ref.documentId]:value.document}));}}
+    try {for(const ref of evidence){if(documents[ref.documentId])continue;const response=await fetch(sourceURL(projectId,ref.documentId));const value=await response.json();if(!response.ok)throw new Error(value.error);let doc=value.document as SourceDocument;
+      if(doc.format==="pdf"&&doc.lifecycle?.state!=="withdrawn"&&needsSourceRendering(doc)){const prepared=await fetch("/api/source-document/prepare",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({projectId,documentId:doc.id})});const refreshed=await prepared.json();if(!prepared.ok)throw new Error(refreshed.error);doc=refreshed.document;}
+      setDocuments(current=>({...current,[ref.documentId]:doc}));}}
     catch(cause){setError(cause instanceof Error?cause.message:"元資料を読み込めませんでした。");}
   }
   return <div className="document-evidence"><button className="button-secondary" onClick={()=>{setAll(false);setOpen(true);void load();}}>{buttonLabel}</button>
