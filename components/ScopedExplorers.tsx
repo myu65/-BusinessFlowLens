@@ -1,7 +1,6 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  getProcessAssetLinks,
   type LensGraph,
   type LensNode,
   type WorkflowScenario,
@@ -9,9 +8,11 @@ import {
 import { knowledgeIndex } from "@/lib/knowledge";
 import { AssetMergePanel } from "./ProgressiveWorkflow";
 import { WorkflowReading } from "./WorkflowReading";
+import { AssetReading } from "./AssetReading";
+import type { AssetReadingPosition } from "@/lib/exploration";
+import { USAGE_DEFINITION } from "@/lib/usage-definition";
 
-export const USAGE_DEFINITION =
-  "直接関連＝手順での利用・自動実行、System間の連携、System/Data間の記録済み関係のいずれかがある業務の重複なし件数。間接影響＝登録された基盤依存を介して支える業務。";
+export { USAGE_DEFINITION } from "@/lib/usage-definition";
 function ScopeControl({
   scope,
   onChange,
@@ -33,17 +34,20 @@ function ScopeControl({
     </label>
   );
 }
-export type AssetExploration = { id: string; scope: WorkflowScenario; department: string };
+type AssetSelectionPosition = { id: string; readingPosition?: AssetReadingPosition; query: string; kind: string; page: number };
+export type AssetExploration = { id: string; scope: WorkflowScenario; department: string; readingPosition?: AssetReadingPosition; trail?: AssetSelectionPosition[] };
 export function AssetExplorer({
   graph,
   onGraphApply,
   onEdit,
+  onActivity,
   exploration,
   onExplorationChange,
 }: {
   graph: LensGraph;
   onGraphApply: (graph: LensGraph) => void;
   onEdit: (id: string) => void;
+  onActivity?: (id: string) => void;
   exploration?: AssetExploration;
   onExplorationChange?: (value: AssetExploration) => void;
 }) {
@@ -52,12 +56,15 @@ export function AssetExplorer({
     [kind, setKind] = useState("all"),
     [department, setDepartment] = useState(exploration?.department ?? "");
   const [selectedId, setSelectedId] = useState(exploration?.id ?? ""),
-    [page, setPage] = useState(0),
+    [assetReading, setAssetReading] = useState(exploration?.readingPosition),
     [assetPage, setAssetPage] = useState(0),
     [reading, setReading] = useState<{
       workflowId: string;
       stepId?: string;
+      dataId?: string;
     } | null>(null);
+  const [trail, setTrail] = useState(exploration?.trail ?? []);
+  const detail = useRef<HTMLElement>(null);
   const view = useMemo(
     () => knowledgeIndex(graph, scope, "", department),
     [graph, scope, department],
@@ -83,15 +90,26 @@ export function AssetExplorer({
   const selected = selectedNode ? { node: selectedNode, impact: view.systemProfile(selectedNode.id) } : assets[0];
   const activeId = selected?.node.id ?? "";
   useEffect(() => {
-    if (activeId) onExplorationChange?.({ id: activeId, scope, department });
-  }, [activeId, scope, department, onExplorationChange]);
+    if (activeId) onExplorationChange?.({ id: activeId, scope, department, readingPosition: assetReading, trail });
+  }, [activeId, scope, department, assetReading, trail, onExplorationChange]);
   const impact = selected?.impact;
   const activeRows = impact?.direct ?? [];
   function reset() {
-    setPage(0);
+    setAssetReading(undefined);
     setAssetPage(0);
     setReading(null);
+    setTrail([]);
   }
+  const showDetail = () => requestAnimationFrame(() => detail.current?.scrollIntoView({ block: "start", behavior: "instant" }));
+  const openWork = (value: NonNullable<typeof reading>) => { setReading(value); showDetail(); };
+  const chooseAsset = (id: string, related = false) => {
+    if (id !== activeId) {
+      setTrail(t => [...t, { id: activeId, readingPosition: assetReading, query, kind, page: assetPage }]);
+      setSelectedId(id); setAssetReading(undefined);
+      if (related) { setQuery(""); setKind("all"); setAssetPage(0); }
+    }
+    setReading(null); showDetail();
+  };
   return (
     <section className="page-view kg-view asset-explorer">
       <header className="page-header">
@@ -109,20 +127,19 @@ export function AssetExplorer({
           }}
         />
       </header>
-      <p className="kg-context">
-        {USAGE_DEFINITION} 現在は
+      <details className="asset-scope-definition"><summary>表示範囲：
         {scope === "current"
           ? "現行"
           : scope === "future"
             ? "将来案"
             : "別の案"}
         の{view.rows.length}
-        業務。部署を選ぶと、その部署が関わる業務全体を対象にします。
-      </p>
+        業務 · {department || "すべての部署"} — 集計の意味を確認する
+      </summary><p>{USAGE_DEFINITION} 部署を選ぶと、その部署が関わる業務全体を対象にします。道具・情報の検索は左の一覧だけを絞ります。</p></details>
       <div className="assets-layout">
         <aside className="asset-list-panel">
           <label className="kg-edit-field">
-            System・Dataを検索
+            道具・情報を検索
             <input
               value={query}
               onChange={(e) => {
@@ -165,11 +182,7 @@ export function AssetExplorer({
               <button
                 key={a.node.id}
                 aria-pressed={a.node.id === selected?.node.id}
-                onClick={() => {
-                  setSelectedId(a.node.id);
-                  setPage(0);
-                  setReading(null);
-                }}
+                onClick={() => chooseAsset(a.node.id)}
               >
                 <strong>{a.node.label}</strong>
                 <small>
@@ -184,160 +197,47 @@ export function AssetExplorer({
               disabled={!assetPage}
               onClick={() => setAssetPage((p) => p - 1)}
             >
-              前の12資産
+              前の12件
             </button>
-            <span>{assets.length}資産</span>
+            <span>{assets.length}件</span>
             <button
               disabled={(assetPage + 1) * 12 >= assets.length}
               onClick={() => setAssetPage((p) => p + 1)}
             >
-              次の12資産
+              次の12件
             </button>
           </div>
         </aside>
-        <main className="impact-panel">
+        <main ref={detail} className="impact-panel">
           {selected && impact ? (
             <>
               <h2>{selected.node.label}</h2>
+              {!reading && trail.length > 0 && <button className="asset-return-action" onClick={() => {
+                const previous = trail[trail.length - 1];
+                setSelectedId(previous.id); setAssetReading(previous.readingPosition); setQuery(previous.query); setKind(previous.kind); setAssetPage(previous.page);
+                setTrail(t => t.slice(0, -1)); showDetail();
+              }}>ひとつ前の道具・情報へ戻る</button>}
               {!activeRows.length && <p className="kg-context">この表示範囲で直接関連する仕事はありません。状態・部署を変えて同じ道具を調べられます。</p>}
-              <p>{impact.profile?.sourceWorkflowId ? "入力で分かった役割の一例：" : ""}{impact.profile?.purpose ?? selected.node.description}</p>
-              <p className="kg-context" aria-label="集計の内訳">
-                直接関連 {impact.direct.length}業務（手順で利用{" "}
-                {impact.stepUse.length} / 連携で関連 {impact.flowUse.length} ·
-                重複あり） / 間接影響 {impact.indirect.length}業務
-              </p>
-              <AssetMergePanel
-                graph={graph}
-                source={selected.node}
-                onApply={onGraphApply}
-              />
-              <h3>変えると、どの仕事の結果に関わるか</h3>
-              <p>
-                登録された関係から見る確認対象です。変更後の結果が同じになるかは、ルールと例外も確認します。
-              </p>
-              {activeRows.slice(page * 5, (page + 1) * 5).map((row) => {
-                const processIds = new Set(
-                  row.flows
-                    .filter((f) =>
-                      [
-                        f.sourceSystemId,
-                        f.targetSystemId,
-                        ...f.dataIds,
-                      ].includes(selected.node.id),
-                    )
-                    .flatMap((f) => f.processIds),
-                );
-                const processes = row.processes.filter(
-                  (p) =>
-                    processIds.has(p.id) ||
-                    getProcessAssetLinks(graph, p.id).some(
-                      (l) => l.asset.id === selected.node.id,
-                    ),
-                );
-                return (
-                  <article key={row.workflow.id} className="flow-decision">
-                    <h4>{row.workflow.name}</h4>
-                    <p>
-                      {row.capabilities
-                        .map((c) => `${c.activity.name} → ${c.capability.name}`)
-                        .join(" / ") || "活動との所属は未分類"}{" "}
-                      · {row.departments.join("、")}
-                    </p>
-                    {processes.slice(0, 3).map((p) => (
-                      <div key={p.id}>
-                        <button
-                          onClick={() =>
-                            setReading({
-                              workflowId: row.workflow.id,
-                              stepId: p.id,
-                            })
-                          }
-                        >
-                          {p.stepOrder}. {p.label} を読む →
-                        </button>
-                        <p>
-                          根拠：{p.meaning?.basis || "未確認"} → 結果：
-                          {p.meaning?.result || "未確認"} → 次の仕事：
-                          {p.meaning?.next || "未確認"}
-                        </p>
-                        {p.meaning?.purpose && (
-                          <p>必要な理由：{p.meaning.purpose}</p>
-                        )}
-                      </div>
-                    ))}
-                    {!processes.length && (
-                      <p>
-                        連携先として関連しています。担当する手順は未確認です。
-                      </p>
-                    )}
-                    <button onClick={() => onEdit(row.workflow.id)}>
-                      この業務の話を補足・訂正する
-                    </button>
-                  </article>
-                );
-              })}
-              <div className="kg-pagination">
-                <button
-                  disabled={!page}
-                  onClick={() => {
-                    setPage((p) => p - 1);
-                    setReading(null);
-                  }}
-                >
-                  前の5業務
-                </button>
-                <span>
-                  {activeRows.length}業務のうち{" "}
-                  {activeRows.length ? page * 5 + 1 : 0}–
-                  {Math.min(activeRows.length, (page + 1) * 5)}
-                </span>
-                <button
-                  disabled={(page + 1) * 5 >= activeRows.length}
-                  onClick={() => {
-                    setPage((p) => p + 1);
-                    setReading(null);
-                  }}
-                >
-                  次の5業務
-                </button>
-              </div>
-              {reading && (
-                <WorkflowReading
-                  key={`${selected.node.id}:${reading.workflowId}:${reading.stepId}`}
-                  graph={graph}
-                  workflowId={reading.workflowId}
-                  initialStepId={reading.stepId}
-                  initialDepth="detail"
-                  onDetail={() => onEdit(reading.workflowId)}
-                  onGraphApply={onGraphApply}
-                />
-              )}
-              <details>
-                <summary>連携経路と基盤依存の根拠を確認する</summary>
-                {impact.flows.slice(0, 12).map((f) => (
-                  <p key={f.id}>
-                    {view.nodeById.get(f.sourceSystemId)?.label} →{" "}
-                    {view.nodeById.get(f.targetSystemId)?.label}：
-                    {f.dataIds
-                      .map((id) => view.nodeById.get(id)?.label)
-                      .join("、")}{" "}
-                    · {f.automation} · {f.evidence || "根拠未確認"}
-                  </p>
-                ))}
-                <p>
-                  {impact.flows.length}
-                  件のうち最初の12件。詳しい経路はデータフローから業務を選んで辿れます。
-                </p>
-                {impact.indirect.slice(0, 8).map((r) => (
-                  <p key={r.workflow.id}>基盤依存：{r.workflow.name}</p>
-                ))}
-                {(impact.profile?.dependsOn ?? []).map(d => <p key={d.systemId}>必要な仕組み：{view.nodeById.get(d.systemId)?.label} · {d.reason}{d.evidence ? ` · 根拠：${d.evidence}` : ""}{d.sourceWorkflowId && <button onClick={() => onEdit(d.sourceWorkflowId!)}>この話で依存を確認・訂正する</button>}</p>)}
-                {impact.dependents.length > 0 && <p>この仕組みを必要とする道具：{impact.dependents.map(n => n.label).join("、")}</p>}
-                {impact.declarations.slice(0, 8).map(d => <p key={`${d.sourceWorkflowId}:${d.systemId}:${d.prerequisiteId}`}>依存を説明した話：<button onClick={() => onEdit(d.sourceWorkflowId)}>{d.sourceWorkflowName}</button> · 根拠：{d.evidence}</p>)}
-              </details>
+              {reading ? <section className="asset-open-work" aria-label="道具から開いた業務">
+                <button className="asset-return-action" onClick={() => { setReading(null); showDetail(); }}>{selected.node.label}の詳細へ戻る →</button>
+                {!view.rows.some(r => r.workflow.id === reading.workflowId) && <p>この業務は、表示範囲外の根拠として開いています。</p>}
+                <WorkflowReading key={`${selected.node.id}:${reading.workflowId}:${reading.stepId}`}
+                  graph={graph} workflowId={reading.workflowId} initialStepId={reading.stepId}
+                  initialDataId={reading.dataId} initialDepth="step" compactControls initialLens={reading.dataId ? "data" : "work"}
+                  onDetail={() => onEdit(reading.workflowId)} onGraphApply={onGraphApply} />
+              </section> : <AssetReading key={JSON.stringify([selected.node.id, scope, department])}
+                graph={graph} view={view} asset={selected.node} impact={impact}
+                position={assetReading} onPositionChange={setAssetReading} initialSection="impact"
+                onActivity={id => onActivity?.(id)}
+                onWorkflow={id => openWork({ workflowId: id })}
+                onAsset={id => chooseAsset(id, true)}
+                onProcess={id => { const process = view.nodeById.get(id); if (process?.workflowId) openWork({ workflowId: process.workflowId, stepId: id }); }}
+                onReadData={() => { if (impact.direct[0]) openWork({ workflowId: impact.direct[0].workflow.id, dataId: selected.node.id }); }}
+                onInput={onEdit} standaloneEditor editor={<AssetMergePanel graph={graph} source={selected.node} onApply={onGraphApply} />} />}
+
             </>
           ) : (
-            <p>対象の資産はありません。</p>
+            <p>この範囲の道具・情報はまだ登録されていません。</p>
           )}
         </main>
       </div>
@@ -421,7 +321,7 @@ export function CrossBusinessOverview({
         </select>
       </label>
       <p className="kg-context">
-        対象 {view.rows.length}業務 / {assets.length}資産。{USAGE_DEFINITION}{" "}
+        対象 {view.rows.length}業務 / {assets.length}件。{USAGE_DEFINITION}{" "}
         未登録は依存がないことを意味しません。
       </p>
       <div className="overview-stats">

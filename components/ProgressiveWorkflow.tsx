@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import React, { useEffect, useState, type ReactNode } from "react";
 import {
   getProcessAssetLinks,
   getWorkflowProcesses,

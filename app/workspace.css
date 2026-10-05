@@ -253,7 +253,7 @@
 .asset-reading-sections button[aria-pressed="true"], .asset-work-kinds button[aria-pressed="true"] { background: #365c48; border-color: #365c48; color: #fff; }
 .asset-reading-panel h3 { font-size: 15px; margin: 16px 0 10px; }
 .asset-reading-panel > section { margin-bottom: 22px; }
-.asset-role-cards, .asset-work-cards, .asset-flow-cards, .asset-process-cards, .asset-dependency-cards { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+.asset-role-cards, .asset-work-cards, .asset-flow-cards, .asset-process-cards, .asset-dependency-cards, .asset-impact-cards { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
 .asset-reading-panel article { border: 1px solid #d9e4dc; border-radius: 8px; padding: 12px; background: #fff; min-width: 0; }
 .asset-reading-panel article > button { text-align: left; padding: 0; border: 0; color: #285b43; background: transparent; font-weight: 600; }
 .asset-reading-panel article p { font-size: 13px; line-height: 1.6; margin: 8px 0; overflow-wrap: anywhere; }
@@ -268,16 +268,41 @@
 .asset-work-kinds button { font-size: 11px; padding: 6px 9px; }
 .asset-flow-direction { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .asset-flow-direction button { font-size: 13px; padding: 5px 8px; }
-.asset-process-cards dl { display: grid; gap: 7px; margin: 10px 0; font-size: 12px; }
-.asset-process-cards dl > div { display: grid; grid-template-columns: 80px minmax(0,1fr); gap: 6px; }
-.asset-process-cards dt { color: #586e61; }
-.asset-process-cards dd { margin: 0; overflow-wrap: anywhere; }
+.asset-process-cards dl, .asset-impact-cards dl { display: grid; gap: 7px; margin: 10px 0; font-size: 12px; }
+.asset-process-cards dl > div, .asset-impact-cards dl > div { display: grid; grid-template-columns: 80px minmax(0,1fr); gap: 6px; }
+.asset-process-cards dt, .asset-impact-cards dt { color: #586e61; }
+.asset-process-cards dd, .asset-impact-cards dd { margin: 0; overflow-wrap: anywhere; }
+.asset-impact-step { padding: 10px 0; border-bottom: 1px solid #e3ebe6; }
+.asset-impact-step > button { font-size: 12px; padding: 5px 8px; text-align: left; }
+.asset-impact-note { font-size: 12px; color: #586e61; }
+.asset-explorer .page-header { margin: 0 0 10px; }
+.asset-explorer .page-header h1 { font-size: 22px; margin: 4px 0; }
+.asset-explorer .page-header p { font-size: 12px; margin: 4px 0; }
+.asset-explorer .asset-scope-definition { margin-bottom: 12px; font-size: 12px; }
+.asset-explorer .asset-scope-definition p { padding: 10px; background: #f2f7f4; }
+.asset-explorer .assets-layout { gap: 16px; grid-template-columns: minmax(220px,270px) minmax(0,1fr); }
+.asset-explorer .asset-list-panel { top: 148px; max-height: calc(100dvh - 166px); padding: 12px; }
+.asset-explorer .kg-edit-field { margin-bottom: 10px; font-size: 12px; }
+.asset-explorer .kg-edit-field input, .asset-explorer .kg-edit-field select { padding: 6px 8px; }
+.asset-explorer .impact-panel { padding: 14px; scroll-margin-top: 148px; }
+.asset-explorer .impact-panel > h2 { font-size: 20px; margin-bottom: 10px; }
+.asset-explorer .asset-reading-summary > p { font-size: 13px; }
+.asset-explorer .asset-reading-sections button { font-size: 12px; gap: 8px; padding: 8px 10px; }
+.asset-explorer .asset-return-action { margin: 4px 0 10px; font-size: 12px; padding: 6px 9px; }
+.continuous-reader--compact .flow-anchor { padding: 8px 10px; margin: 8px 0; }
+.continuous-reader--compact > .flow-depth { margin: 8px 0; }
+.continuous-reader--compact .flow-step-context { margin: 8px 0; font-size: 12px; }
+.continuous-reader--compact .kg-step-focus { padding: 12px; }
+.continuous-reader--compact .kg-step-focus > h3 { margin-top: 0; }
+.continuous-reader--compact .flow-decision { padding: 12px; }
 .asset-reading-editor { margin-top: 18px; font-size: 12px; }
 .asset-reading-editor > summary { cursor: pointer; }
 @media (max-width: 700px) {
   .kg-view[data-focus="asset"] { padding: 14px; }
-  .asset-role-cards, .asset-work-cards, .asset-flow-cards, .asset-process-cards, .asset-dependency-cards { grid-template-columns: 1fr; }
+  .asset-role-cards, .asset-work-cards, .asset-flow-cards, .asset-process-cards, .asset-dependency-cards, .asset-impact-cards { grid-template-columns: 1fr; }
   .asset-activity-links { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .asset-explorer .assets-layout { grid-template-columns: minmax(0,1fr); }
+  .asset-explorer .asset-list-panel { position: static; max-height: 230px; }
 }
 .company-map-heading h2 { font-size: 15px; }
 .company-map-heading p, .company-map-caption { font-size: 11px; margin: 4px 0 8px; }
