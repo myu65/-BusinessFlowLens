@@ -4,6 +4,7 @@ import type { LensGraph } from "@/lib/graph";
 import { CompanyMap } from "./CompanyMap";
 import type { KnowledgeScope } from "@/lib/knowledge";
 import type { knowledgeIndex } from "@/lib/knowledge";
+import type { CompanyReadingPosition } from "@/lib/exploration";
 
 export function CompanyOrientation({
   graph,
@@ -15,6 +16,8 @@ export function CompanyOrientation({
   onActivity,
   onSystem,
   onInput,
+  position,
+  onPositionChange,
 }: {
   graph: LensGraph;
   scope: KnowledgeScope;
@@ -25,6 +28,8 @@ export function CompanyOrientation({
   onActivity: (id: string) => void;
   onSystem: (id: string) => void;
   onInput?: () => void;
+  position?: CompanyReadingPosition;
+  onPositionChange?: (position: CompanyReadingPosition) => void;
 }) {
   const visible = new Set(workflowIds);
   const hasActivities = graph.knowledge?.activities.some((a) =>
@@ -38,12 +43,15 @@ export function CompanyOrientation({
     <section className="company-orientation" aria-label="はじめての会社案内">
       {hasActivities ? (
         <CompanyMap
+          key={scope}
           graph={graph}
           scope={scope}
           workflowIds={workflowIds}
           onWorkflow={onWorkflow}
           onActivity={onActivity}
           onSystem={onSystem}
+          position={position}
+          onPositionChange={onPositionChange}
         />
       ) : rows.length ? (
         <section

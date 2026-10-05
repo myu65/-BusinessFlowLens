@@ -229,6 +229,10 @@
   .kg-view[data-focus="systems"] > .company-filters { grid-column: 1; grid-row: auto; flex-wrap: wrap; }
 }
 .company-map-heading { margin-bottom: 6px; }
+.company-map-heading-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.company-map-heading-actions > span { white-space: nowrap; color: #4e6d51; font-size: 12px; }
+.company-map-heading-actions .kg-primary { white-space: normal; }
+.relationship-open-work { margin: 0 0 14px; }
 .company-map-heading h2 { font-size: 15px; }
 .company-map-heading p, .company-map-caption { font-size: 11px; margin: 4px 0 8px; }
 .company-map-caption > span { font-size: 10px; }

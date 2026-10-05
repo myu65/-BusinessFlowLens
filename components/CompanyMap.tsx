@@ -1,10 +1,11 @@
 "use client";
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { LensGraph } from "@/lib/graph";
 import { knowledgeIndex, type KnowledgeScope } from "@/lib/knowledge";
 import { companyConnections } from "@/lib/knowledge-guide";
 import { activityRelationships, overviewWindow } from "@/lib/relationship-overview";
 import { RelationshipDiagram, RelationshipEvidence } from "./RelationshipDiagram";
+import type { CompanyReadingPosition } from "@/lib/exploration";
 
 export function CompanyMap({
   graph,
@@ -13,6 +14,8 @@ export function CompanyMap({
   onWorkflow,
   onActivity,
   onSystem,
+  position,
+  onPositionChange,
 }: {
   graph: LensGraph;
   scope?: KnowledgeScope;
@@ -20,16 +23,20 @@ export function CompanyMap({
   onWorkflow: (id: string, stepId?: string) => void;
   onActivity?: (id: string) => void;
   onSystem?: (id: string) => void;
+  position?: CompanyReadingPosition;
+  onPositionChange?: (position: CompanyReadingPosition) => void;
 }) {
   const index = useMemo(() => knowledgeIndex(graph, scope), [graph, scope]);
   const visible = new Set(workflowIds);
   const activities = index.activities.filter((a) =>
     a.rows.some((r) => visible.has(r.workflow.id)),
   );
-  const [chosenId, setSelected] = useState("");
-  const [relationId, setRelation] = useState("");
-  const [mapPage, setMapPage] = useState(0);
-  const [relationPage, setRelationPage] = useState(0);
+  const [chosenId, setSelected] = useState(position?.activityId ?? "");
+  const [relationId, setRelation] = useState(position?.relationId ?? "");
+  const [mapPage, setMapPage] = useState(position?.page ?? 0);
+  const [relationPage, setRelationPage] = useState(position?.relationPage ?? 0);
+  useEffect(() => onPositionChange?.({ activityId: chosenId, page: mapPage, relationPage, relationId }),
+    [chosenId, mapPage, relationPage, relationId, onPositionChange]);
   const detail = useRef<HTMLDivElement>(null);
   const connections = useMemo(
     () => companyConnections(graph, workflowIds),
@@ -127,7 +134,9 @@ export function CompanyMap({
           <h2>仕事は、どうつながっている？</h2>
           <p>まず活動のまとまりを見渡します。選ぶと、前後の活動と、その中の仕事を開けます。</p>
         </div>
-        <span>{activities.length}の活動</span>
+        <div className="company-map-heading-actions"><span>{activities.length}の活動</span>
+          {selected && onActivity && <button className="kg-primary" onClick={() => onActivity(selected.id)}>この活動の仕事を見る →</button>}
+        </div>
       </div>
       <p className="relationship-caption">{selectedId ? "選んだ活動と、直接つながる活動" : "会社の活動と、登録された受渡し・参照"}。線を選ぶと根拠を読めます。点線は推定・未確認を含みます。</p>
       <RelationshipDiagram nodes={map.nodes} edges={map.edges} layoutEdges={map.layoutEdges} selectedId={selectedId}
@@ -207,14 +216,6 @@ export function CompanyMap({
                 }
                 種類の仕事
               </p>
-              {onActivity && (
-                <button
-                  className="kg-primary"
-                  onClick={() => onActivity(selected.id)}
-                >
-                  この活動の仕事を見る →
-                </button>
-              )}
               {!onActivity &&
                 rows.slice(0, 3).map((r) => (
                   <button
