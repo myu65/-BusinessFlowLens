@@ -253,6 +253,16 @@ export function preserveRefinements(
       ).values()) {
         // Position is a human graph operation, not an AI-extracted task field.
         if (edit.field === "placement") continue;
+        if (edit.field.startsWith("boundary.")) {
+          const field = edit.field.slice("boundary.".length);
+          const boundary = { scope: "unknown" as const, party: "", visibility: "unknown" as const, incoming: [], outgoing: [], unknowns: [], certainty: "unknown" as const, evidence: "", ...edited.boundary };
+          if (JSON.stringify(boundary[field as keyof typeof boundary]) !== JSON.stringify(edit.after)) {
+            restoredHumanField = true;
+            warnings.push(`${step.name}：読み直した内容は、利用者が訂正した「${reviewFieldLabel(edit.field)}」と異なります。利用者の訂正を保持しました。`);
+          }
+          edited.boundary = { ...boundary, [field]: edit.after, certainty: "confirmed", evidence: prior.boundary?.evidence ?? "利用者が構造の確認中に補足" };
+          continue;
+        }
         if (edit.field.startsWith("meaning.")) {
           const field = edit.field.slice("meaning.".length);
           const meaning = {

@@ -158,6 +158,7 @@ function WorkflowStepCard({ data, selected }: NodeProps<WorkflowStepNode>) {
       </div>
 
       <h3>{step.label}</h3>
+      {step.boundary?.scope === "external" && <span className="work-boundary-badge">社外 · {step.boundary.visibility === "unavailable" ? "内部は見えない" : "進め方を確認"}</span>}
       <p>{step.action ?? step.description}</p>
 
       <div className="step-ownership">

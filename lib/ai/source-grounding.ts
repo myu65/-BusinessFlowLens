@@ -13,6 +13,12 @@ export function groundStepEvidence<T extends ExtractionReview>(review: T, source
     let interpreted = false;
     const quote = (evidence: string | undefined, label: string, required = true) => {
       const proposal = typeof evidence === "string" ? evidence : "";
+      // A model may label its quote with the source block's visual marker.
+      // Strip that wrapper only for an exact match inside the AI interpretation,
+      // and keep the evidence inferred even if the same phrase occurs in text.
+      const labeledVisual = /^\[AI画像解釈[^\]]*\]/.test(proposal);
+      const visualQuote = proposal.replace(/^\[AI画像解釈[^\]]*\]\s*/, "").replace(/\s*\[\/AI画像解釈\]$/, "");
+      if (labeledVisual && interpretations.some(text => sourceEvidence(text, visualQuote))) { interpreted = true; return visualQuote; }
       const literal = sourceEvidence(literalSource, proposal);
       if (literal) return literal;
       if (interpretations.some(text=>sourceEvidence(text,proposal))) { interpreted = true; return proposal; }
@@ -20,6 +26,9 @@ export function groundStepEvidence<T extends ExtractionReview>(review: T, source
       return "";
     };
     const evidence = quote(step.evidence, "作業", step.certainty === "explicit");
+    const boundaryEvidence = step.boundary && quote(step.boundary.evidence, "社内・社外の範囲", step.boundary.certainty === "confirmed");
+    const boundary = step.boundary && { ...step.boundary, evidence: boundaryEvidence || "",
+      certainty: (!boundaryEvidence || interpreted) && step.boundary.certainty === "confirmed" ? "inferred" as const : step.boundary.certainty };
     const meaningEvidence = step.meaning && quote(step.meaning.evidence ?? "", "結果",
       step.meaning.certainty === "confirmed");
     const meaning = step.meaning && { ...step.meaning,
@@ -42,7 +51,7 @@ export function groundStepEvidence<T extends ExtractionReview>(review: T, source
     if (unmatched.length) warnings.push(
       `「${step.name}」のAIの引用を原文で確認できませんでした。${[...new Set(unmatched)].join(" / ")}。一致しない引用は原文として使わず、推定として残しました。原文と見比べて訂正できます。`,
     );
-    return { ...step, evidence, meaning, systems, data, technicalDetails, detailSteps,
+    return { ...step, evidence, meaning, boundary, systems, data, technicalDetails, detailSteps,
       certainty: unmatched.length || interpreted ? "inferred" as const : step.certainty,
     };
   });

@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import { WorkBoundaryReading } from "./WorkBoundaryReading";
 
 import type {
   ExtractionReview,
@@ -157,6 +158,7 @@ export function InputReviewFlow({
         <span>
           <strong>担当</strong>{" "}
           {selected.actor ||
+            selected.boundary?.party ||
             (selected.executionMode === "automatic" && selected.executingSystem
               ? selected.executingSystem
               : "まだ分かっていません")}
@@ -197,6 +199,7 @@ export function InputReviewFlow({
           <span className="input-unconfirmed">まだ分かっていません</span>
         )}
       </div>
+      <WorkBoundaryReading boundary={selected.boundary} />
       {heldInputs.length > 0 && (
         <section className="input-incoming" aria-label="停止・保留からの対応">
           <h4>停止・保留からの対応</h4>

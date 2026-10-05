@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { buildExtractionContext, buildPreviousReviewContext } from "./context";
 import { preApprovalRepair, approvalDenialRepair, retainSplitCheckKeys } from "./draft-quality";
 import { groundStepEvidence, groundVisualRelations } from "./source-grounding";
+import { normalizeWorkBoundary, separateWorkParties } from "../work-boundary";
 import { buildAssetResolutionContext, scopedAssetNodes } from "./asset-context";
 import type { AIConfigurationStatus } from "./status";
 import { AIProviderError } from "./errors";
@@ -130,6 +131,20 @@ const WORKFLOW_DRAFT_SCHEMA = {
             enum: ["manual", "automatic", "mixed", "unknown"],
           },
           executingSystem: { type: ["string", "null"] },
+          boundary: {
+            type: ["object", "null"], additionalProperties: false,
+            properties: {
+              scope: { type: "string", enum: ["internal", "external", "unknown"] },
+              party: { type: "string" },
+              visibility: { type: "string", enum: ["visible", "partial", "unavailable", "unknown"] },
+              incoming: { type: "array", maxItems: 12, items: { type: "string" } },
+              outgoing: { type: "array", maxItems: 12, items: { type: "string" } },
+              unknowns: { type: "array", maxItems: 12, items: { type: "string" } },
+              certainty: { type: "string", enum: ["confirmed", "inferred", "unknown"] },
+              evidence: { type: "string" },
+            },
+            required: ["scope", "party", "visibility", "incoming", "outgoing", "unknowns", "certainty", "evidence"],
+          },
           executionContext: {
             type: ["object", "null"],
             additionalProperties: false,
@@ -260,6 +275,7 @@ const WORKFLOW_DRAFT_SCHEMA = {
           "responsiblePerson",
           "executionMode",
           "executingSystem",
+          "boundary",
           "executionContext",
           "action",
           "certainty",
@@ -778,7 +794,8 @@ Rules:
 23. detailSteps are ordered child operations of this business step, with a condition when explicitly stated. Use [] if no detailed operations are stated. Preserve current human edits and stable child IDs. Never expand vague notes into invented detail.
 24. organization is a concise title for this story, an understandable company activity (what the company accomplishes), and a capability (a type of work under it). Use plain Japanese rather than Activity/Capability jargon. Reuse suitable names from the organization catalog rather than adding synonyms. This is an organizing proposal, not a new business fact: certainty=inferred unless the interview explicitly states the classification. Evidence must quote the supporting interview. Use null, or empty activity/capability, when there is insufficient context. Keep the title specific and short; omit '入力した話'. Do not invent a company name, hierarchy of departments, or enterprise-wide value chain.
 24a. activity is broader than the individual workflow and should group several types of work. For example a production-planning story might have activity '製品をつくる' and capability '製造計画'; this is a grouping proposal only. Do not copy this story's detailed actions or quantities into the activity label. Prefer short, familiar words. Do not put a planning story into a sales activity merely because sales is its upstream source.
-25. systemProfiles describe each named tool's category and purpose in THIS interview. Categories are editable organization labels; reuse suitable catalog category names. Include groupware, infrastructure and local tools as named tools, not miscellaneous. Mark classifications inferred unless explicit; explain only the stated role, and never assume dependencies, owners or integrations from product knowledge. Use empty strings for unknown role/category. System names must match the draft mentions.
+25. systemProfiles describe each named tool's category and purpose in THIS interview. Categories are editable organization labels; reuse suitable catalog category names. Include groupware, infrastructure and local tools as named tools, not miscellaneous. Mark classifications inferred unless explicit; explain only the stated role, and never assume dependencies, owners or integrations from product knowledge. Use empty strings for unknown role/category. System names must match the draft mentions. A company, vendor, customer or department is an actor/party, never a system or a systemDataFlow endpoint. A specifically named vendor portal, LIMS or API remains a distinct system; keep its exact name separate from the company.
+25a. boundary describes WHO PERFORMS THIS STEP and how much is known about THIS STEP'S INSIDE, not its recipient, sender, hosting location or a nearby vendor. For the example 'our quality staff sends a request → external laboratory tests it, its internal method is invisible → our quality staff receives a PDF → our quality staff records it in LIMS', ONLY the external laboratory's testing step has an external boundary. The internal send, receive and record steps have boundary=null; do not attach the laboratory's hidden work to them. For stated outsourced/vendor work, preserve one business-level external step in the sequence even when its internal method, personnel, tool and decision are unknown. For that external step, scope=external, party=the stated performing organization (empty if unnamed); incoming=what our company hands TO this external step, outgoing=what this external step sends BACK to our company. These lists are not reversed on adjacent internal steps. visibility is unavailable if the source says that step's inside is hidden, partial if only some inside facts are known, visible only if explicitly known, otherwise unknown. Unknowns record specific unseen facts. Boundary evidence quotes the source; certainty is inferred for image interpretation. Keep source-backed received/sent data on the external step as well. Leave boundary=null on other steps unless their own scope/visibility is explicitly stated. Never invent a vendor's internal process, system, pass/fail decision, elapsed time or resumption route. Receiving or recording a test report does not imply judging it acceptable. Known exchange arrows remain; an invisible internal method does not break the exchange or mean the work stops. Leave source-grounded uncertainty visible for review.
 25a. systemDependencies capture ONLY dependencies explicitly described by this source: the system needs the named prerequisite to operate, log in or connect. For example "TeamsとSharePointはEntra IDのSSOを使う" has Teams → Entra ID and SharePoint → Entra ID. Quote the complete clause naming both ends and the direction. These facts are not tasks, transfers or simultaneous use. Do not infer a dependency from vendor knowledge, common technology, another interview, a future plan, negation or unknown authentication. Use an empty array when none is stated. Human corrections and rejected relationships remain authoritative.
 25a1. Capture the dependency even when the same interview also describes business actions. "VPNはログイン時にEntra IDの認証を使います" explains VPN → Entra ID. It does not say that the administrator performs a VPN login between registering a user and checking a connection test. Keep that specification in systemDependencies, without inventing a login/authentication task or its position. Preserve an actual login/authentication action when the source narrates who or what executes it as part of the work. Include the named dependent tool even if no task directly uses it.
 25b. When the source only explains system dependencies and does not describe business actions, use steps=[] with the grounded systemDependencies. Do not invent a login/check/registration task to fill a workflow.
@@ -1155,6 +1172,7 @@ function buildGraphPatch(
       technicalDetails: step.technicalDetails ?? [],
       detailSteps: step.detailSteps ?? [],
       executionContext: step.executionContext,
+      boundary: step.boundary,
       meaning: step.meaning,
       humanEdits: step.humanEdits,
     });
@@ -1313,6 +1331,7 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
         responsiblePerson: step.responsiblePerson ?? null,
         meaning: step.meaning ?? undefined,
         executionContext: step.executionContext ?? undefined,
+        boundary: normalizeWorkBoundary(step.boundary),
         technicalDetails: (step.technicalDetails ?? []).filter(
           (detail) =>
             detail.module ||
@@ -1523,7 +1542,7 @@ Keep the check's stable key, add a key for the stated approval, and keep every u
   const evidenceSource = [args.interview, ...additionalEvidence].join("\n");
   const sourceSemantics = distinguishRegistrationInputs(separateDependencyDescriptions(
     supplementSourceDependencies(validateSystemDependencies(
-      separateMissingFacts(groundStepEvidence(normalizeDraft(rawDraft), evidenceSource), evidenceSource), evidenceSource, false), evidenceSource,
+      separateMissingFacts(groundStepEvidence(separateWorkParties(normalizeDraft(rawDraft)), evidenceSource), evidenceSource), evidenceSource, false), evidenceSource,
       scopedAssetNodes(args.graph, args.workflow).filter(n => n.kind === "system").flatMap(n => [n.label, ...(n.aliases ?? [])])),
     evidenceSource), evidenceSource);
   const sourceDraft = groundVisualRelations(validateAITransitions(
@@ -1606,10 +1625,10 @@ export async function resolveWorkflowReviewWithAI(args: {
   review: ExtractionReview;
   provider: string;
 }> {
-  const draft = normalizeDraft({
+  const draft = separateWorkParties(normalizeDraft({
     ...args.review,
     transitions: args.review.transitions ?? [],
-  });
+  }));
 
   const candidates = collectCandidates(draft);
   const resolutions = await resolveAssets(candidates, args.graph, args.workflow);
@@ -1643,10 +1662,10 @@ export function resolveWorkflowReviewLocally(args: {
   workflow: Workflow;
   graph: LensGraph;
 }): { patch: GraphPatch; review: ExtractionReview } {
-  const draft = normalizeDraft({
+  const draft = separateWorkParties(normalizeDraft({
     ...args.review,
     transitions: args.review.transitions ?? [],
-  });
+  }));
   const candidates = collectCandidates(draft);
   const resolutions: AssetResolution[] = candidates.map((candidate) => {
     const exact = findConfirmedAsset(

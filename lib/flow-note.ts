@@ -329,6 +329,7 @@ export function planFlowAddition(
       detailSteps: step.detailSteps,
       technicalDetails: step.technicalDetails,
       executionContext: step.executionContext,
+      boundary: step.boundary,
       meaning: step.meaning,
       humanEdits: step.humanEdits,
     };

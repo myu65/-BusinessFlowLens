@@ -6,6 +6,7 @@ import {
   type LensNode,
   type WorkflowScenario,
 } from "./graph";
+import { workBoundaryText } from "./work-boundary";
 import { inputSystemDependencies } from "./system-dependencies";
 import { describeHumanEdit } from "./review-workbench";
 import { connectionKindLabel, connectionRoleLabel } from "./knowledge-guide";
@@ -389,7 +390,7 @@ function comparableProcess(graph: LensGraph, process: LensNode) {
     .sort();
   return { label: process.label, action: process.action, meaning: process.meaning,
     mode: process.executionMode, actor: process.actor, department: process.department,
-    responsiblePerson: process.responsiblePerson, executionContext: process.executionContext, resources };
+    responsiblePerson: process.responsiblePerson, executionContext: process.executionContext, boundary: process.boundary, resources };
 }
 
 export function comparisonExecutor(graph: LensGraph, process: LensNode, edges = graph.edges) {
@@ -591,6 +592,9 @@ export function knowledgeReportDocument(
         `- 結果: ${p.meaning?.result || "未確認"} / 次の仕事: ${p.meaning?.next || "未確認"}`,
         `- 条件: ${p.meaning?.condition || "未確認"}${p.meaning?.halt ? " / 停止・保留する" : ""}`,
         ...(p.executionContext ? [`- 実行のきっかけ: ${p.executionContext.trigger || "未確認"} / 判断・ルール: ${p.executionContext.rule || "未確認"} / 失敗・例外: ${p.executionContext.exception || "未確認"}`] : []),
+        ...(p.boundary ? [`- 工程の範囲: ${p.boundary.scope === "external" ? "社外" : p.boundary.scope === "internal" ? "社内" : "未確認"} / 相手: ${p.boundary.party || "未確認"} / 内部の進め方: ${p.boundary.visibility === "unavailable" ? "見えない" : p.boundary.visibility === "partial" ? "一部のみ" : p.boundary.visibility === "visible" ? "把握済み" : "未確認"}`,
+          `- 工程に渡すもの: ${p.boundary.incoming.join(" / ") || "未確認"} / 戻ってくるもの: ${p.boundary.outgoing.join(" / ") || "未確認"}`,
+          `- 見えていない点: ${p.boundary.unknowns.join(" / ") || "未登録"} / 確かさ: ${confidenceLabels[p.boundary.certainty]} / 根拠: ${p.boundary.evidence || "未登録"}`] : []),
         `- 手順の確かさ: ${confidenceLabels[p.status]} / 処理結果の確かさ: ${confidenceLabels[p.meaning?.certainty ?? "unknown"]}`,
         "原文:", ...reportQuote(p.evidence),
         ...(p.meaning?.evidence && p.meaning.evidence !== p.evidence ? ["結果の根拠:", ...reportQuote(p.meaning.evidence)] : []),
@@ -622,7 +626,7 @@ export function knowledgeReportDocument(
       ...comparisons.flatMap((c) => [
         ...c.resultChanges.map(
           (x) =>
-            `同じ手順の変更: ${x.before.label} → ${x.after.label} / 担当・実行主体: ${comparisonExecutor(graph, x.before)} → ${comparisonExecutor(graph, x.after)} / 実行方法: ${executionLabels[x.before.executionMode ?? "unknown"]} → ${executionLabels[x.after.executionMode ?? "unknown"]} / 結果: ${x.before.meaning?.result || "未確認"} → ${x.after.meaning?.result || "未確認"} / 次の仕事: ${x.before.meaning?.next || "未確認"} → ${x.after.meaning?.next || "未確認"} / 道具: ${comparisonResources(graph, x.before).tools} → ${comparisonResources(graph, x.after).tools} / 受け取る情報: ${comparisonResources(graph, x.before).input} → ${comparisonResources(graph, x.after).input} / 残す情報: ${comparisonResources(graph, x.before).output} → ${comparisonResources(graph, x.after).output} / 確かさ: ${confidenceLabels[x.before.meaning?.certainty ?? x.before.status]} → ${confidenceLabels[x.after.meaning?.certainty ?? x.after.status]} / 原文: ${comparisonEvidence(x.before)} → ${comparisonEvidence(x.after)} / 人の訂正: ${x.before.humanEdits?.length ?? 0}件 → ${x.after.humanEdits?.length ?? 0}件`,
+            `同じ手順の変更: ${x.before.label} → ${x.after.label} / 担当・実行主体: ${comparisonExecutor(graph, x.before)} → ${comparisonExecutor(graph, x.after)} / 実行方法: ${executionLabels[x.before.executionMode ?? "unknown"]} → ${executionLabels[x.after.executionMode ?? "unknown"]} / 結果: ${x.before.meaning?.result || "未確認"} → ${x.after.meaning?.result || "未確認"} / 次の仕事: ${x.before.meaning?.next || "未確認"} → ${x.after.meaning?.next || "未確認"} / 道具: ${comparisonResources(graph, x.before).tools} → ${comparisonResources(graph, x.after).tools} / 受け取る情報: ${comparisonResources(graph, x.before).input} → ${comparisonResources(graph, x.after).input} / 残す情報: ${comparisonResources(graph, x.before).output} → ${comparisonResources(graph, x.after).output} / 工程の範囲: ${workBoundaryText(x.before.boundary)} → ${workBoundaryText(x.after.boundary)} / 確かさ: ${confidenceLabels[x.before.meaning?.certainty ?? x.before.status]} → ${confidenceLabels[x.after.meaning?.certainty ?? x.after.status]} / 原文: ${comparisonEvidence(x.before)} → ${comparisonEvidence(x.after)} / 人の訂正: ${x.before.humanEdits?.length ?? 0}件 → ${x.after.humanEdits?.length ?? 0}件`,
         ),
         ...c.added.map(
           (p) =>

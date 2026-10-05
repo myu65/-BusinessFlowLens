@@ -69,10 +69,11 @@ export function InputFlowCanvas({ review, selected, page, onPage, choose, added 
         {layout.nodes.map(({ step, x, y, isolated, context }) => <button key={step.stepKey}
           style={{ left: x, top: y }}
           title={step.name}
-          aria-label={`${step.order}. ${inputStepName(step)} · ${step.actor || step.executingSystem || "担当は未確認"} · ${inputStepMode(step)}`}
+          aria-label={`${step.order}. ${inputStepName(step)} · ${step.actor || step.boundary?.party || step.executingSystem || "担当は未確認"} · ${inputStepMode(step)}`}
           aria-pressed={selected.stepKey === step.stepKey}
           className="input-canvas-step"
           data-mode={step.executionMode}
+          data-external={step.boundary?.scope === "external" || undefined}
           data-context={context || undefined}
           data-halt={step.meaning?.halt || undefined}
           data-unconfirmed={step.certainty !== "explicit" || isolated || undefined}
@@ -80,8 +81,8 @@ export function InputFlowCanvas({ review, selected, page, onPage, choose, added 
           onClick={() => choose(step)}>
           <small>{step.order}. {context ? "別のページの手順" : added.includes(step.stepKey) ? "追加" : changed.includes(step.stepKey) ? "訂正" : step.humanEdits?.some(e => e.field !== "placement") ? "人が訂正" : step.certainty === "inferred" ? "推定・要確認" : isolated ? "前後は未確認" : "原文に明示"}</small>
           <strong>{inputCanvasLabel(step)}</strong>
-          <span>{step.actor || step.executingSystem || "担当は未確認"}</span>
-          <em>{step.meaning?.halt ? "停止・保留" : inputStepMode(step)}</em>
+          <span>{step.actor || step.boundary?.party || step.executingSystem || "担当は未確認"}</span>
+          <em>{step.boundary?.scope === "external" ? `社外 · ${step.boundary.visibility === "unavailable" ? "内部は見えない" : step.boundary.visibility === "partial" ? "内部は一部のみ" : "社外の工程"}` : step.meaning?.halt ? "停止・保留" : inputStepMode(step)}</em>
           <span className="input-canvas-tools">{[...new Set(step.systems.map(s => s.name))].slice(0, 2).join(" · ") || "道具は未確認"}</span>
         </button>)}
       </nav>
