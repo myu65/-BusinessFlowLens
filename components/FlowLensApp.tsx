@@ -2154,7 +2154,8 @@ function Workspace() {
     setKnowledgeExploration(value);
     const focus = value.focus;
     setAssetExploration(previous => focus.kind === "asset"
-      ? { id: focus.id, scope: value.scope, department: value.department }
+      ? { id: focus.id, scope: value.scope, department: value.department, readingPosition: value.assetReading,
+          trail: previous?.id === focus.id && previous.scope === value.scope && previous.department === value.department ? previous.trail : undefined }
       : previous ? { ...previous, scope: value.scope, department: value.department } : undefined);
   }, []);
   const keepAssetExploration = useCallback((value: AssetExploration) => {
@@ -2163,6 +2164,7 @@ function Workspace() {
       focus: { kind: "asset", id: value.id }, scope: value.scope,
       department: value.department, query: "", category: "",
       history: previous?.history ?? [],
+      assetReading: value.readingPosition,
     }));
   }, []);
   const [graph, setGraph] = useState<LensGraph>(() => createDemoGraph());
@@ -2406,7 +2408,13 @@ function Workspace() {
 
       {section === "dataflow" ? <>{activeDraft && <div className="input-preview-banner" role="status">保存前の候補を表示しています。<button onClick={()=>setSection("interviews")}>入力と構造の確認へ戻る</button></div>}<DataFlowExplorer graph={visibleGraph} initialWorkflowId={visibleWorkflowId} onSelectWorkflow={id => setSelectedWorkflowId(inputKeyForWorkflow(drafts, id))} onGraphApply={activeDraft ? ()=>setSection("interviews") : setGraph} onEdit={id => {setSelectedWorkflowId(inputKeyForWorkflow(drafts, id));setSection("interviews");}}><DataFlowView graph={visibleGraph} initialWorkflowId={visibleWorkflowId} /></DataFlowExplorer></> : null}
 
-      {section === "assets" ? <AssetExplorer exploration={assetExploration} onExplorationChange={keepAssetExploration} graph={graph} onGraphApply={setGraph} onEdit={id=>{setSelectedWorkflowId(id);setSection("interviews");}} /> : null}
+      {section === "assets" ? <AssetExplorer exploration={assetExploration} onExplorationChange={keepAssetExploration} graph={graph} onGraphApply={setGraph}
+        onEdit={id=>{setSelectedWorkflowId(id);setSection("interviews");}}
+        onActivity={id => {
+          setKnowledgeExploration(previous => ({ focus: { kind: "activity", id }, scope: assetExploration?.scope ?? "current", department: assetExploration?.department ?? "", query: "", category: "",
+            history: assetExploration ? [...(previous?.history ?? []), { focus: { kind: "asset", id: assetExploration.id }, scope: assetExploration.scope, department: assetExploration.department, query: "", category: "", assetReading: assetExploration.readingPosition }] : [] }));
+          navigateSection("company");
+        }} /> : null}
       {section === "overview" ? <CrossBusinessOverview graph={graph} onOpen={id=>{setSelectedWorkflowId(id);setSection("interviews");}} /> : null}
     </main>
   );

@@ -4,7 +4,7 @@ import type { LensGraph, LensNode } from "@/lib/graph";
 import { inputSystemRoles } from "@/lib/input-knowledge";
 import { termExplanation } from "@/lib/knowledge-guide";
 import type { knowledgeIndex } from "@/lib/knowledge";
-import { USAGE_DEFINITION } from "./ScopedExplorers";
+import { USAGE_DEFINITION } from "@/lib/usage-definition";
 
 export function SystemLandscapeCards({ graph, systems, view, page, onPage, onSelect }: {
   graph: LensGraph;

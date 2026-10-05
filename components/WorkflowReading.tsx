@@ -42,6 +42,7 @@ export function WorkflowReading({
   initialDataId,
   initialDepth = "step",
   initialLens = "work",
+  compactControls = false,
   onGraphApply,
   onStepChange,
   onReadingChange,
@@ -56,6 +57,7 @@ export function WorkflowReading({
   initialDataId?: string;
   initialDepth?: Depth;
   initialLens?: "work" | "data";
+  compactControls?: boolean;
   onGraphApply?: (graph: LensGraph) => void;
   onStepChange?: (id: string) => void;
   onReadingChange?: (position: FlowReadingPosition) => void;
@@ -343,143 +345,7 @@ export function WorkflowReading({
       )}
     </>
   );
-  return (
-    <section
-      ref={readerRef}
-      className="kg-reader continuous-reader"
-      aria-label="業務と情報を一緒に読む"
-    >
-      <p className="flow-anchor">
-        {workflow?.name} → 手順{selected.stepOrder}
-      </p>
-      {journey && (
-        <aside
-          className="flow-journey"
-          aria-label="業務をまたいで辿っている文脈"
-        >
-          <strong>同じ仕事の続き</strong>
-          {journey.trail.slice(-4).map((j, i) => (
-            <p key={i}>
-              <button
-                onClick={() => {
-                  const back: FlowJourney = {
-                    workflowId: j.workflowId,
-                    stepId: j.stepId,
-                    dataId: j.dataId,
-                    depth,
-                    trail: journey.trail.slice(
-                      0,
-                      Math.max(0, journey.trail.length - 4) + i,
-                    ),
-                    entryKnown: true,
-                  };
-                  setJourney(back);
-                  setStepId(j.stepId);
-                  setData(j.dataId ?? "");
-                  onNavigateWorkflow?.(j.workflowId, back);
-                }}
-              >
-                ← {graph.workflows.find((w) => w.id === j.workflowId)?.name} ·{" "}
-                {label(j.stepId)}
-              </button>
-              <span>
-                {j.description} · 根拠：{j.evidence}
-              </span>
-            </p>
-          ))}
-          <p>
-            辿る情報：
-            {journey.dataId
-              ? label(journey.dataId)
-              : "受渡す情報は未確認"} → {workflow?.name}
-          </p>
-          {!journey.entryKnown && (
-            <p>
-              {journeyEntryExplanation(journey, selected, context.index)}
-            </p>
-          )}
-        </aside>
-      )}
-      <div className="flow-depth" role="group" aria-label="流れを見る粒度">
-        {(
-          [
-            ["summary", "業務のまとまり"],
-            ["step", "手順と受渡し"],
-            ["detail", "判断・個別作業"],
-          ] as const
-        ).map(([value, name]) => (
-          <button
-            key={value}
-            aria-pressed={depth === value}
-            onClick={() => setDepth(value)}
-          >
-            {name}
-          </button>
-        ))}
-      </div>
-      <p className="flow-explanation">
-        同じ業務・手順を保ったまま、全体から作業まで拡大できます。人・道具・情報は同じ流れの中に表示します。
-      </p>
-      {depth === "summary" ? (
-        <>
-          <h3>仕事と情報の大きな流れ</h3>
-          <div className="kg-chapters">
-            {chapters.slice(0, 5).map((c, i) => (
-              <button
-                key={c.steps[0].id}
-                aria-pressed={chapterIndex === i}
-                onClick={() => select(c.steps[0].id, "step")}
-              >
-                <small>
-                  手順{c.steps[0].stepOrder}–{c.steps.at(-1)!.stepOrder}
-                </small>
-                <strong>{c.steps[0].label}</strong>
-                <span>
-                  {mode(c.mode)} · {c.department}
-                </span>
-                <span>
-                  {[
-                    ...new Set(
-                      c.steps.flatMap((s) =>
-                        stepContext(graph, workflowId, s.id).systems.map(
-                          (n) => n.label,
-                        ),
-                      ),
-                    ),
-                  ]
-                    .slice(0, 2)
-                    .join(" / ")}
-                </span>
-                <span>{c.steps.length}手順を読む →</span>
-                <span>
-                  受取：
-                  {stepContext(graph, workflowId, c.steps[0].id).inputs[0]
-                    ?.label ?? "未登録"}
-                </span>
-                <span>
-                  渡す：
-                  {stepContext(graph, workflowId, c.steps.at(-1)!.id).outputs[0]
-                    ?.label ?? "未登録"}
-                </span>
-              </button>
-            ))}
-          </div>
-          {chapters.length > 5 && (
-            <details>
-              <summary>続きのまとまり（{chapters.length - 5}件）</summary>
-              {chapters.slice(5).map((c) => (
-                <button
-                  key={c.steps[0].id}
-                  onClick={() => select(c.steps[0].id, "step")}
-                >
-                  {c.steps[0].label} →
-                </button>
-              ))}
-            </details>
-          )}
-        </>
-      ) : (
-        <>
+  const stepControls = <>
           <div className="kg-step-navigation">
             <button
               disabled={!context.previous}
@@ -575,6 +441,145 @@ export function WorkflowReading({
                 </button>
               ))}
           </div>
+  </>;
+  return (
+    <section
+      ref={readerRef}
+      className={`kg-reader continuous-reader${compactControls ? " continuous-reader--compact" : ""}`}
+      aria-label="業務と情報を一緒に読む"
+    >
+      <p className="flow-anchor">
+        {workflow?.name} → 手順{selected.stepOrder}
+      </p>
+      {journey && (
+        <aside
+          className="flow-journey"
+          aria-label="業務をまたいで辿っている文脈"
+        >
+          <strong>同じ仕事の続き</strong>
+          {journey.trail.slice(-4).map((j, i) => (
+            <p key={i}>
+              <button
+                onClick={() => {
+                  const back: FlowJourney = {
+                    workflowId: j.workflowId,
+                    stepId: j.stepId,
+                    dataId: j.dataId,
+                    depth,
+                    trail: journey.trail.slice(
+                      0,
+                      Math.max(0, journey.trail.length - 4) + i,
+                    ),
+                    entryKnown: true,
+                  };
+                  setJourney(back);
+                  setStepId(j.stepId);
+                  setData(j.dataId ?? "");
+                  onNavigateWorkflow?.(j.workflowId, back);
+                }}
+              >
+                ← {graph.workflows.find((w) => w.id === j.workflowId)?.name} ·{" "}
+                {label(j.stepId)}
+              </button>
+              <span>
+                {j.description} · 根拠：{j.evidence}
+              </span>
+            </p>
+          ))}
+          <p>
+            辿る情報：
+            {journey.dataId
+              ? label(journey.dataId)
+              : "受渡す情報は未確認"} → {workflow?.name}
+          </p>
+          {!journey.entryKnown && (
+            <p>
+              {journeyEntryExplanation(journey, selected, context.index)}
+            </p>
+          )}
+        </aside>
+      )}
+      <div className="flow-depth" role="group" aria-label="流れを見る粒度">
+        {(
+          [
+            ["summary", "業務のまとまり"],
+            ["step", "手順と受渡し"],
+            ["detail", "判断・個別作業"],
+          ] as const
+        ).map(([value, name]) => (
+          <button
+            key={value}
+            aria-pressed={depth === value}
+            onClick={() => setDepth(value)}
+          >
+            {name}
+          </button>
+        ))}
+      </div>
+      {!compactControls && <p className="flow-explanation">
+        同じ業務・手順を保ったまま、全体から作業まで拡大できます。人・道具・情報は同じ流れの中に表示します。
+      </p>}
+      {depth === "summary" ? (
+        <>
+          <h3>仕事と情報の大きな流れ</h3>
+          <div className="kg-chapters">
+            {chapters.slice(0, 5).map((c, i) => (
+              <button
+                key={c.steps[0].id}
+                aria-pressed={chapterIndex === i}
+                onClick={() => select(c.steps[0].id, "step")}
+              >
+                <small>
+                  手順{c.steps[0].stepOrder}–{c.steps.at(-1)!.stepOrder}
+                </small>
+                <strong>{c.steps[0].label}</strong>
+                <span>
+                  {mode(c.mode)} · {c.department}
+                </span>
+                <span>
+                  {[
+                    ...new Set(
+                      c.steps.flatMap((s) =>
+                        stepContext(graph, workflowId, s.id).systems.map(
+                          (n) => n.label,
+                        ),
+                      ),
+                    ),
+                  ]
+                    .slice(0, 2)
+                    .join(" / ")}
+                </span>
+                <span>{c.steps.length}手順を読む →</span>
+                <span>
+                  受取：
+                  {stepContext(graph, workflowId, c.steps[0].id).inputs[0]
+                    ?.label ?? "未登録"}
+                </span>
+                <span>
+                  渡す：
+                  {stepContext(graph, workflowId, c.steps.at(-1)!.id).outputs[0]
+                    ?.label ?? "未登録"}
+                </span>
+              </button>
+            ))}
+          </div>
+          {chapters.length > 5 && (
+            <details>
+              <summary>続きのまとまり（{chapters.length - 5}件）</summary>
+              {chapters.slice(5).map((c) => (
+                <button
+                  key={c.steps[0].id}
+                  onClick={() => select(c.steps[0].id, "step")}
+                >
+                  {c.steps[0].label} →
+                </button>
+              ))}
+            </details>
+          )}
+        </>
+      ) : (
+        <>
+          {compactControls ? <details className="flow-step-context"><summary>{selected.meaning?.halt ? "停止・保留と再開条件" : "前後の仕事・条件分岐"}を確認する</summary>{stepControls}</details> : stepControls}
           <div className="flow-depth" role="group" aria-label="注目する流れ">
             <button
               aria-pressed={lens === "work"}

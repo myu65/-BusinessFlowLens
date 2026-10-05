@@ -8,7 +8,7 @@ export type ActivityReadingPosition = { activityId: string; capabilityId: string
 export type CompanyReadingPosition = { activityId: string; page: number; relationPage: number; relationId: string };
 export type SystemReadingPosition = { categoryId: string; systemId: string; page: number; relationId: string; relationPage: number; relationKind: "transfer" | "dependency" };
 export type AssetReadingPosition = {
-  assetId: string; section: "work" | "flows" | "processes" | "dependencies";
+  assetId: string; section: "work" | "impact" | "flows" | "processes" | "dependencies";
   rolesPage: number; activityPage: number; workPage: number; flowPage: number; processPage: number;
   dependencyPage: number; dependentPage: number; workKind: "direct" | "indirect" | "critical";
 };

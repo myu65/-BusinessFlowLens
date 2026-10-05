@@ -6,7 +6,7 @@ import { inputSystemRoles } from "@/lib/input-knowledge";
 import { termExplanation } from "@/lib/knowledge-guide";
 import { readingPage } from "@/lib/overview-reading";
 import type { AssetReadingPosition } from "@/lib/exploration";
-import { USAGE_DEFINITION } from "./ScopedExplorers";
+import { USAGE_DEFINITION } from "@/lib/usage-definition";
 
 type View = ReturnType<typeof knowledgeIndex>;
 type Impact = ReturnType<View["systemProfile"]>;
@@ -26,14 +26,16 @@ function FlowWorkflows({ ids, graph, onWorkflow }: { ids: string[]; graph: LensG
     <Pages window={window} size={6} noun="関連業務" onPage={setPage} /></>;
 }
 
-export function AssetReading({ graph, view, asset, impact, position, onPositionChange, onActivity, onWorkflow, onAsset, onProcess, onReadData, onInput, editor }: {
+export function AssetReading({ graph, view, asset, impact, position, onPositionChange, onActivity, onWorkflow, onAsset, onProcess, onReadData, onInput, editor, standaloneEditor = false, initialSection = "work" }: {
   graph: LensGraph; view: View; asset: LensNode; impact: Impact; position?: AssetReadingPosition;
   onPositionChange?: (position: AssetReadingPosition) => void;
   onActivity: (id: string) => void; onWorkflow: (id: string) => void; onAsset: (id: string) => void;
   onProcess: (id: string) => void; onReadData: () => void; onInput?: (id: string) => void; editor?: React.ReactNode;
+  initialSection?: AssetReadingPosition["section"];
+  standaloneEditor?: boolean;
 }) {
   const [reading, setReading] = useState<AssetReadingPosition>(() => position?.assetId === asset.id ? position : {
-    assetId: asset.id, section: "work", rolesPage: 0, activityPage: 0, workPage: 0, flowPage: 0,
+    assetId: asset.id, section: initialSection, rolesPage: 0, activityPage: 0, workPage: 0, flowPage: 0,
     processPage: 0, dependencyPage: 0, dependentPage: 0, workKind: "direct",
   });
   useEffect(() => onPositionChange?.(reading), [reading, onPositionChange]);
@@ -52,6 +54,7 @@ export function AssetReading({ graph, view, asset, impact, position, onPositionC
   const certainty = (value?: string) => value === "confirmed" ? "原文に明示" : value === "unknown" ? "未確認" : "整理案・要確認";
   const generalPurpose = asset.kind === "system" ? termExplanation(asset.label) : undefined;
   const sections = [{ id: "work", name: "役割と仕事", count: impact.direct.length },
+    { id: "impact", name: "変更の影響", count: impact.direct.length + impact.indirect.length },
     { id: "flows", name: "情報の受渡し", count: impact.flows.length },
     { id: "processes", name: "人・自動処理", count: impact.processes.length },
     { id: "dependencies", name: "稼働の依存", count: (impact.profile?.dependsOn.length ?? 0) + impact.dependents.length }] as const;
@@ -114,6 +117,33 @@ export function AssetReading({ graph, view, asset, impact, position, onPositionC
           <details><summary>{confidenceLabels[p.meaning?.certainty ?? p.status]} · 根拠と前後の仕事</summary><p>{p.meaning?.evidence || p.evidence || "未登録"}</p>{p.workflowId && <button onClick={() => onWorkflow(p.workflowId!)}>{graph.workflows.find(w => w.id === p.workflowId)?.name} →</button>}</details>
         </article>; })}</div>{impact.processes.length > 0 && <Pages window={processWindow} size={6} noun="手順" onPage={processPage => change({ processPage })} />}
       </>}
+      {reading.section === "impact" && <><h3>変更するときに、どの判断・結果を確認する？</h3>
+        <p className="asset-impact-note">登録された関係から、変更時に確認する判断と結果を示します。</p>
+        <div className="asset-work-kinds" aria-label="影響を調べる業務の範囲">
+          {([{ id: "direct", name: "直接関連", count: impact.direct.length }, { id: "indirect", name: "基盤を介した影響", count: impact.indirect.length }, { id: "critical", name: "重要業務", count: critical.length }] as const).map(k =>
+            <button key={k.id} aria-pressed={reading.workKind === k.id} onClick={() => change({ workKind: k.id, workPage: 0 })}>{k.name} {k.count}</button>)}
+        </div>
+        <div className="asset-impact-cards">{workWindow.items.map(r => {
+          const isIndirect = impact.indirect.includes(r);
+          const systems = new Set(isIndirect ? impact.dependents.map(n => n.id) : [asset.id]);
+          const processIds = new Set(r.flows.filter(f => [...systems].some(id => [f.sourceSystemId, f.targetSystemId, ...f.dataIds].includes(id))).flatMap(f => f.processIds));
+          const processes = r.processes.filter(p => processIds.has(p.id) || impact.processes.some(n => n.id === p.id) || (isIndirect && view.assetsFor([p]).some(n => systems.has(n.id))));
+          return <article key={r.workflow.id}><button onClick={() => onWorkflow(r.workflow.id)}>{r.workflow.name} →</button>
+            {isIndirect && <p>この業務で使う道具が、登録された基盤依存を介して{asset.label}を必要とします。</p>}
+            {!processes.length && <p>連携先として関連しています。担当する手順は未確認です。</p>}
+            {processes.slice(0, 2).map(p => <div className="asset-impact-step" key={p.id}>
+              <button onClick={() => onProcess(p.id)}>{p.label} を読む →</button>
+              <small>{comparisonExecutor(graph, p)} · {executionLabels[getProcessExecutionMode(graph, p)]}</small>
+              <dl><div><dt>判断の根拠</dt><dd>{p.meaning?.basis || "未確認"}</dd></div><div><dt>決まること</dt><dd>{p.meaning?.result || "未確認"}</dd></div><div><dt>次の仕事</dt><dd>{p.meaning?.next || "未確認"}</dd></div></dl>
+              {p.meaning?.purpose && <p>必要な理由：{p.meaning.purpose}</p>}
+              {p.meaning?.halt && <p>停止・保留：{p.meaning.condition || "条件は未確認"}</p>}
+              <details><summary>{confidenceLabels[p.meaning?.certainty ?? p.status]} · ルール・例外・原文</summary><p>ルール：{p.executionContext?.rule || "未確認"}</p><p>例外：{p.executionContext?.exception || "未確認"}</p><p>{p.meaning?.evidence || p.evidence || "原文の根拠は未登録"}</p></details>
+            </div>)}
+            {processes.length > 2 && <p>ほか{processes.length - 2}手順は業務の流れで確認できます。</p>}
+            {onInput && <button onClick={() => onInput(r.workflow.id)}>この業務の話を補足・訂正する</button>}
+          </article>;
+        })}</div>{workRows.length > 0 ? <Pages window={workWindow} size={6} noun="業務" onPage={workPage => change({ workPage })} /> : <p>この範囲の業務は登録されていません。</p>}
+      </>}
       {reading.section === "dependencies" && <>
         <h3>{asset.label}が動くために必要な仕組み</h3>
         {!dependencyWindow.total && <p>稼働の依存先はまだ登録されていません。</p>}
@@ -126,6 +156,6 @@ export function AssetReading({ graph, view, asset, impact, position, onPositionC
         {impact.indirect.length > 0 && <button onClick={() => change({ section: "work", workKind: "indirect", workPage: 0 })}>基盤を介して影響する{impact.indirect.length}業務を読む →</button>}
       </>}
     </section>
-    {editor && <details className="asset-reading-editor"><summary>道具の分類・役割・管理部署・依存を編集する</summary>{editor}</details>}
+    {editor && (standaloneEditor ? editor : <details className="asset-reading-editor"><summary>道具の分類・役割・管理部署・依存を編集する</summary>{editor}</details>)}
   </section>;
 }
