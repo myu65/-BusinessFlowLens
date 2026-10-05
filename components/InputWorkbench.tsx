@@ -99,9 +99,12 @@ export function InputWorkbench({
   const memo = transcripts[key] ?? "";
   const [query, setQuery] = useState("");
   const [documentInputOpen, setDocumentInputOpen] = useState(false);
+  const documentReturnKey = useRef(key);
   const [stepKey, setStepKey] = useState("");
   const [stepPage, setStepPage] = useState(0);
   const [busy, setBusy] = useState(false);
+  const organizeRequest = useRef<AbortController | null>(null);
+  const [organizeNotice, setOrganizeNotice] = useState("");
   const [operation, setOperation] = useState<"organize" | "addition" | "save">("organize");
   const [waitingSeconds, setWaitingSeconds] = useState(0);
   useEffect(() => {
@@ -399,13 +402,17 @@ export function InputWorkbench({
     const requestKey = documentStart?.key ?? key,
       before = documentStart ? null : review;
     setOperation("organize");
+    setOrganizeNotice("");
     setBusy(true);
     setError("");
     setEdit(null);
     let responseFailure: "failure" | "unusable" = "failure";
+    const controller = new AbortController();
+    organizeRequest.current = controller;
     try {
       const response = await fetch("/api/extract", {
         method: "POST",
+        signal: controller.signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           interview: text,
@@ -416,6 +423,7 @@ export function InputWorkbench({
         }),
       });
       const payload = await response.json();
+      if (controller.signal.aborted || organizeRequest.current !== controller) return;
       if (!response.ok) {
         responseFailure = payload.code === "invalid_response" ? "unusable" : "failure";
         throw new Error(payload.error ?? "構造化に失敗しました。");
@@ -462,12 +470,13 @@ export function InputWorkbench({
         );
       }
     } catch (cause) {
+      if (controller.signal.aborted || organizeRequest.current !== controller) return;
       if (aiConfig?.configured) setAIResponse(responseFailure);
       setError(
         cause instanceof Error ? cause.message : "読み取りに失敗しました。",
       );
     } finally {
-      setBusy(false);
+      if (organizeRequest.current === controller) { organizeRequest.current=null;setBusy(false); }
     }
   }
   async function startDocumentWork(document: SourceDocument, item: DocumentWorkItem) {
@@ -480,6 +489,17 @@ export function InputWorkbench({
     await organize([], text, { key: requestKey, workflow: { id: requestKey, name: documentWorkName(item), scenario: item.scope, scenarioLabel: item.site || undefined }, evidence: {
       documentId: document.id, documentName: document.name, sha256: document.sha256, itemId: item.id, unitIds: [...new Set([...item.contextUnitIds, ...item.unitIds])],
     } });
+  }
+
+  function withdrawDocumentCandidates(documentId: string) {
+    setOrganizeNotice("");setError("");
+    const prefix = `doc-${documentId}-`;
+    const savedIds = new Set(latest.current.graph.workflows.map(workflow => workflow.id));
+    const keys = [...new Set([...Object.keys(drafts), ...Object.keys(latest.current.transcripts)])].filter(id => id.startsWith(prefix) && !savedIds.has(id));
+    const remaining = { ...latest.current.transcripts };
+    for (const id of keys) { onDraft(id, null); delete remaining[id]; }
+    onTranscripts(remaining);
+    if (keys.includes(key)) onSelect(keys.includes(documentReturnKey.current) ? NEW_MEMO_ID : documentReturnKey.current);
   }
 
   async function save() {
@@ -1199,11 +1219,16 @@ export function InputWorkbench({
           </strong>
           <span aria-hidden="true"> · {waitingSeconds}秒</span>
           <p>メモと前の候補を保ったまま、結果を待っています。</p>
+          {operation === "organize" && <button className="button-secondary" onClick={() => {
+            organizeRequest.current?.abort();organizeRequest.current=null;setBusy(false);
+            setOrganizeNotice("整理をやめました。入力した話と、前の候補は残っています。");
+          }}>この整理をやめる</button>}
           {waitingSeconds >= 20 && operation !== "save" && aiConfig?.configured && (
             <p>AIの応答を待っています。結果が届いたら、保存前に内容を確かめられます。</p>
           )}
         </aside>
       )}
+      {organizeNotice && <p className="input-addition-notice" role="status">{organizeNotice}</p>}
       <nav className="input-mobile-tabs" aria-label="メモと流れの表示切替">
         <button
           aria-pressed={mobilePane === "note"}
@@ -1219,7 +1244,7 @@ export function InputWorkbench({
         </button>
         <button aria-pressed={mobilePane === "details"} disabled={!selected} onClick={() => setMobilePane("details")}>3 手順の詳細</button>
       </nav>
-      <div hidden={!documentInputOpen}><DocumentInput projectId={projectId} busy={busy} completed={new Set([...Object.keys(drafts), ...graph.workflows.map(w => w.id)])} savedIds={new Set(graph.workflows.map(w => w.id))} activeDocumentId={review?.documentEvidence?.[0]?.documentId} onClose={() => setDocumentInputOpen(false)} onStart={startDocumentWork} onAIResponse={() => setAIResponse("success")} /></div>
+      <div hidden={!documentInputOpen}><DocumentInput projectId={projectId} busy={busy} completed={new Set([...Object.keys(drafts), ...graph.workflows.map(w => w.id)])} savedIds={new Set(graph.workflows.map(w => w.id))} activeDocumentId={review?.documentEvidence?.[0]?.documentId} onClose={() => setDocumentInputOpen(false)} onStart={startDocumentWork} onWithdraw={withdrawDocumentCandidates} onAIResponse={() => setAIResponse("success")} /></div>
       <div className="input-workbench-grid" hidden={documentInputOpen}>
         <section className="input-note-pane">
           <div className="input-note-heading">
@@ -1239,7 +1264,7 @@ export function InputWorkbench({
               </button>
             )}
           </div>
-          <button className="input-document-entry button-secondary" disabled={busy} onClick={() => setDocumentInputOpen(true)}>{review?.documentEvidence?.length ? "資料の別の仕事を見る" : "Excel・PDFから始める"}</button>
+          <button className="input-document-entry button-secondary" disabled={busy} onClick={() => { documentReturnKey.current=key;setDocumentInputOpen(true); }}>{review?.documentEvidence?.length ? "資料の別の仕事を見る" : "資料・画像から始める"}</button>
           {!review && memoComposer}
           {review && selected && <button className="input-add-work" disabled={busy || stale} onClick={() => openAddition()}>{addition.trim() ? "入力中の話を続ける" : "＋ 分かったことを足す"}</button>}
           {review && <p className="input-growing-hint">図の＋から、途中の作業も一つずつ足せます。</p>}

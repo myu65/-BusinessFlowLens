@@ -1,17 +1,21 @@
 import type { ExtractionReview } from "../graph";
 import { sourceEvidence } from "../source-evidence";
+import { splitVisualSource } from "../source-document";
 
 // A matching quote is not a semantic verification of all the model's fields.
 // Unmatched proposals remain reviewable, but cannot masquerade as source text.
 // Apply this before preserving the user's field corrections.
 export function groundStepEvidence<T extends ExtractionReview>(review: T, source: string): T {
+  const {literal:literalSource,interpretations} = splitVisualSource(source);
   const warnings = [...review.warnings];
   const steps = review.steps.map(step => {
     const unmatched: string[] = [];
+    let interpreted = false;
     const quote = (evidence: string | undefined, label: string, required = true) => {
       const proposal = typeof evidence === "string" ? evidence : "";
-      const literal = sourceEvidence(source, proposal);
+      const literal = sourceEvidence(literalSource, proposal);
       if (literal) return literal;
+      if (interpretations.some(text=>sourceEvidence(text,proposal))) { interpreted = true; return proposal; }
       if (proposal || required) unmatched.push(`${label}：${proposal || "引用未登録"}`);
       return "";
     };
@@ -20,7 +24,7 @@ export function groundStepEvidence<T extends ExtractionReview>(review: T, source
       step.meaning.certainty === "confirmed");
     const meaning = step.meaning && { ...step.meaning,
       evidence: meaningEvidence,
-      certainty: !meaningEvidence && step.meaning.certainty === "confirmed"
+      certainty: (!meaningEvidence || interpreted) && step.meaning.certainty === "confirmed"
         ? "inferred" as const : step.meaning.certainty,
     };
     const systems = step.systems.map(system => ({ ...system,
@@ -39,8 +43,18 @@ export function groundStepEvidence<T extends ExtractionReview>(review: T, source
       `「${step.name}」のAIの引用を原文で確認できませんでした。${[...new Set(unmatched)].join(" / ")}。一致しない引用は原文として使わず、推定として残しました。原文と見比べて訂正できます。`,
     );
     return { ...step, evidence, meaning, systems, data, technicalDetails, detailSteps,
-      certainty: unmatched.length ? "inferred" as const : step.certainty,
+      certainty: unmatched.length || interpreted ? "inferred" as const : step.certainty,
     };
   });
   return { ...review, steps, warnings };
+}
+
+/** A matching AI interpretation supports a proposal, not a confirmed source relation. */
+export function groundVisualRelations<T extends ExtractionReview>(review:T,source:string):T {
+  const {literal,interpretations}=splitVisualSource(source);
+  const visualOnly=(evidence:string|undefined)=>Boolean(evidence&&!sourceEvidence(literal,evidence)&&interpretations.some(text=>sourceEvidence(text,evidence)));
+  const downgrade=<V extends {evidence?:string;certainty?:string}>(value:V):V=>visualOnly(value.evidence)&&value.certainty!=="unknown"?{...value,certainty:"inferred"}:value;
+  return {...review,organization:review.organization?downgrade(review.organization):review.organization,
+    systemProfiles:review.systemProfiles?.map(downgrade),systemDependencies:review.systemDependencies?.map(downgrade),
+    transitions:review.transitions.map(downgrade),dataFlows:review.dataFlows.map(downgrade),handoffs:review.handoffs?.map(downgrade),incomingHandoffs:review.incomingHandoffs?.map(downgrade)};
 }

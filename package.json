@@ -11,13 +11,15 @@
     "test:regression": "node tests/run-regressions.mjs"
   },
   "dependencies": {
+    "@napi-rs/canvas": "1.0.10",
     "@xyflow/react": "^12.8.0",
     "exceljs": "^4.4.0",
     "jszip": "^3.10.1",
     "next": "^15.5.0",
     "pdfjs-dist": "^6.4.299",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "sharp": "0.35.5"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
