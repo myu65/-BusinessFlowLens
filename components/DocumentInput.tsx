@@ -63,6 +63,7 @@ export function DocumentInput({projectId, busy, onClose, onStart, completed, sav
     const controller=begin();setWorking(true);setError("");setStatus("元資料を開いています…");remember(null);
     try {const response=await fetch(sourceURL(projectId,id),{signal:controller.signal});const value=await response.json();if(!active(controller))return;if(!response.ok)throw new Error(value.error);
       let doc=value.document as SourceDocument;
+      currentDocument.current=doc;
       if(doc.format==="pdf"&&doc.lifecycle?.state!=="withdrawn"&&needsSourceRendering(doc)) {
         setStatus("文字が欠けないよう、ページを作り直しています…");
         const prepared=await post("/api/source-document/prepare",doc,controller);if(!active(controller))return;doc=prepared.document;
