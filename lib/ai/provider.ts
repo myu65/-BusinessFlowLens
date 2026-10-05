@@ -1,6 +1,8 @@
 import { findConfirmedAsset, preserveRefinements } from "../refinement";
 import {applyConfirmedAssetNames} from '../current-understanding';
-import { existsSync, readFileSync } from "node:fs";
+import {resolveAIBaseURL, resolveAIToken} from './credentials';
+import { structuredResponseText } from './api-response';
+import { prepareClaudeSchema, validateStructuredConstraints } from './structured-schema';
 import { buildExtractionContext, buildPreviousReviewContext } from "./context";
 import { preApprovalRepair, approvalDenialRepair, retainSplitCheckKeys } from "./draft-quality";
 import { groundStepEvidence, groundVisualRelations } from "./source-grounding";
@@ -525,30 +527,12 @@ function env(name: string) {
   return value ? value : undefined;
 }
 
-const SNOWFLAKE_SESSION_TOKEN = "/snowflake/session/token";
-
-function runtimeTokenAvailable() {
-  return existsSync(SNOWFLAKE_SESSION_TOKEN);
-}
-
 function resolveBaseURL() {
-  const configured = env("AI_BASE_URL");
-  if (configured) return configured;
-
-  const host = env("SNOWFLAKE_HOST");
-  if (!host) return undefined;
-
-  const target = env("AI_TARGET") === "gateway" ? "gateway" : "cortex";
-  return target === "gateway"
-    ? `https://${host}/api/v2/aigateways/SNOWFLAKE/v1`
-    : `https://${host}/api/v2/cortex/v1`;
+  return resolveAIBaseURL();
 }
 
 function resolveToken() {
-  if (runtimeTokenAvailable()) {
-    return readFileSync(SNOWFLAKE_SESSION_TOKEN, "utf8").trim();
-  }
-  return env("AI_API_KEY");
+  return resolveAIToken(resolveBaseURL());
 }
 
 export function hasAIConfig() {
@@ -560,7 +544,7 @@ export function getAIConfigurationStatus(): AIConfigurationStatus {
   const localCodex = env("AI_RUNTIME") === "codex";
   if (!localCodex && !resolveBaseURL()) missing.push("endpoint");
   if (!env("AI_MODEL")) missing.push("model");
-  if (!localCodex && !(runtimeTokenAvailable() || env("AI_API_KEY")))
+  if (!localCodex && !resolveToken())
     missing.push("credential");
   return {
     configured: missing.length === 0,
@@ -581,9 +565,19 @@ function providerLabel() {
     : `${protocol()}-compatible:${env("AI_MODEL")}`;
 }
 
-function endpoint(baseURL: string, mode: AIProtocol) {
+export function aiEndpoint(baseURL: string, mode: AIProtocol) {
   const base = baseURL.replace(/\/$/, "");
   const path = mode === "openai" ? "/chat/completions" : "/messages";
+  let url: URL;
+  try { url = new URL(base); } catch {
+    throw new AIProviderError('provider', 'AI接続先に有効なHTTP・HTTPSのURLを指定してください。');
+  }
+  if (url.username || url.password || url.search || url.hash || !['http:', 'https:'].includes(url.protocol))
+    throw new AIProviderError('provider', 'AI接続先には認証情報やクエリを含まないHTTP・HTTPSのURLを指定してください。');
+  if (url.pathname.includes('/inference:complete') || url.pathname.endsWith(mode === 'openai' ? '/messages' : '/chat/completions'))
+    throw new AIProviderError('provider', 'AIの接続先と応答形式が一致していません。Chat CompletionsまたはMessages APIの接続先を確認してください。');
+  // The Anthropic SDK appends /v1/messages to Cortex's base URL; our raw fetch must do the same.
+  if (/\/api\/v2\/cortex$/.test(url.pathname)) return `${base}/v1${path}`;
   return base.endsWith(path) ? base : `${base}${path}`;
 }
 
@@ -638,14 +632,17 @@ export async function structuredCall<T>(args: {
   }
 
   const mode = protocol();
-  const url = endpoint(baseURL, mode);
+  const url = aiEndpoint(baseURL, mode);
+  const claude = mode === 'anthropic' || /(?:^|\/)claude(?:-|$)/i.test(model);
+  const prepared = claude ? prepareClaudeSchema(args.schema) : { schema: args.schema, emptyStringNulls: false };
+  const system = args.system + (prepared.emptyStringNulls ? '\nFor fields whose schema describes an empty string as unknown, use an empty string instead of null. Never invent a missing fact.' : '');
 
   const body =
     mode === "openai"
       ? {
           model,
           messages: [
-            { role: "system", content: args.system },
+            { role: "system", content: system },
             { role: "user", content: args.images?.length ? [{ type: "text", text: args.user }, ...args.images.map(image => ({ type: "image_url", image_url: { url: `data:${image.mimeType};base64,${Buffer.from(image.bytes).toString("base64")}`, detail: "high" } }))] : args.user },
           ],
           response_format: {
@@ -653,19 +650,19 @@ export async function structuredCall<T>(args: {
             json_schema: {
               name: args.schemaName,
               strict: true,
-              schema: args.schema,
+              schema: prepared.schema,
             },
           },
         }
       : {
           model,
           max_tokens: 8192,
-          system: args.system,
+          system,
           messages: [{ role: "user", content: args.images?.length ? [{ type: "text", text: args.user }, ...args.images.map(image => ({ type: "image", source: { type: "base64", media_type: image.mimeType, data: Buffer.from(image.bytes).toString("base64") } }))] : args.user }],
           output_config: {
             format: {
               type: "json_schema",
-              schema: args.schema,
+              schema: prepared.schema,
             },
           },
         };
@@ -675,7 +672,7 @@ export async function structuredCall<T>(args: {
     Number.isFinite(configuredTimeout) && configuredTimeout >= 100
       ? Math.min(configuredTimeout, 180_000)
       : 90_000;
-  let payload: any;
+  let payload: unknown;
   try {
     const response = await fetch(url, {
       method: "POST",
@@ -697,6 +694,8 @@ export async function structuredCall<T>(args: {
           "rate_limit",
           "AIの利用上限または混雑により整理できませんでした。時間をおいて再試行してください。メモと候補は残っています。",
         );
+      if (response.status === 400)
+        throw new AIProviderError('provider', 'AIへの送信項目または構造化出力の指定が接続先の仕様に合っていません（HTTP 400）。応答形式・モデル・出力スキーマを確認してください。メモと前の候補は残っています。');
       throw new AIProviderError(
         "provider",
         `AIが整理結果を返せませんでした（HTTP ${response.status}）。接続先とモデルの設定を確認してください。メモと候補は残っています。`,
@@ -724,22 +723,13 @@ export async function structuredCall<T>(args: {
       "AIの接続先に到達できませんでした。接続を確認して再試行してください。メモと候補は残っています。",
     );
   }
-  const text =
-    mode === "openai"
-      ? payload?.choices?.[0]?.message?.content
-      : payload?.content?.find?.(
-          (part: { type?: string }) => part?.type === "text",
-        )?.text;
-
-  if (typeof text !== "string") {
-    throw new AIProviderError(
-      "invalid_response",
-      "AIの応答に整理結果がありませんでした。メモと前の候補は残っています。再試行してください。",
-    );
-  }
+  const text = structuredResponseText(payload, mode);
   try {
-    return JSON.parse(text) as T;
-  } catch {
+    const parsed: unknown = JSON.parse(text);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Not a structured result');
+    return validateStructuredConstraints(parsed, args.schema, prepared.emptyStringNulls) as T;
+  } catch (error) {
+    if (error instanceof AIProviderError) throw error;
     throw new AIProviderError(
       "invalid_response",
       "AIの応答を構造として読み取れませんでした。メモと前の候補は残っています。再試行してください。",

@@ -8,7 +8,12 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
-    "test:regression": "node tests/run-regressions.mjs"
+    "test:regression": "node tests/run-regressions.mjs",
+    "build:app-runtime": "node scripts/build-app-runtime.mjs",
+    "start:app-runtime": "node scripts/start-app-runtime.mjs",
+    "snowflake:setup": "tsx scripts/snowflake-setup.ts",
+    "test:snowflake": "tsx --test tests/live-snowflake.ts",
+    "test:app-runtime": "node scripts/test-app-runtime.mjs"
   },
   "dependencies": {
     "@napi-rs/canvas": "1.0.10",
@@ -19,14 +24,16 @@
     "pdfjs-dist": "^6.4.299",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "sharp": "0.35.5"
+    "sharp": "0.35.5",
+    "snowflake-sdk": "3.4.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "tsx": "^4.23.15",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "yaml": "2.9.0"
   },
   "engines": {
     "node": ">=22.13.0"

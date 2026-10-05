@@ -174,7 +174,7 @@ This remains readable as the number of interviews grows.
 
 ## Persistence
 
-The prototype now persists current state in SQLite using Node 22's built-in `node:sqlite`.
+SQLite is the default, using Node 22's built-in `node:sqlite`. Snowflake storage supports separate standard and Hybrid Table configurations through the same repository interface.
 
 The application does not call SQLite directly from UI or business logic. Persistence is behind:
 
@@ -197,7 +197,7 @@ BUSINESS_FLOW_SQLITE_PATH=.data/business-flow-lens.sqlite
 
 Current state is stored in normalized tables for projects, workflows, graph nodes, graph edges, and system data flows. Workflow revisions are append-only snapshots containing source notes, final structured review, follow-up Q&A, scenario/effective-date metadata, updater, and update time.
 
-This interface is intentionally the migration boundary for a future `SnowflakeHybridTableRepository`; UI and AI extraction code should not depend on the storage implementation.
+`SnowflakeBusinessFlowRepository` preserves logical graph IDs, source documents in an internal stage, and revision evidence. Its SQL views expose the same graph for future API/MCP traversal. See [Snowflake and App Runtime setup, verification, and current limitations](docs/snowflake-app-runtime.md). Standard tables were tested on the provided account; Hybrid Tables, Cortex AI and cloud App Runtime were unavailable in its trial.
 
 ## AI API compatibility
 
@@ -208,7 +208,7 @@ Supported protocol shapes:
 - OpenAI-compatible Chat Completions
 - Anthropic-compatible Messages
 
-Snowflake Cortex REST supports structured output for both API shapes, and Cortex AI Gateway exposes standard OpenAI/Anthropic-compatible endpoints. The adapter intentionally sends a small portable parameter surface and does not set optional sampling parameters such as `temperature` by default.
+Snowflake Cortex REST supports structured output for both API shapes. The adapter sends separate protocol requests, reads the matching response envelope, and rejects incomplete output. See [Cortex request/response contracts and Claude schema limits](docs/cortex-api-contract.md). It does not set optional sampling parameters such as `temperature` by default.
 
 ### Environment
 
@@ -286,7 +286,7 @@ Process nodes are workflow-scoped. System/Data identities are project-wide.
 
 - explicit merge/split UI for uncertain shared assets
 - add/reorder steps and System/Data mentions directly in the review
-- Snowflake Hybrid Table repository implementation
+- Hybrid Tables and cloud App Runtime verification on an eligible account
 - explicit restore/compare actions for historical revisions
 - Snowflake metadata / lineage enrichment
 - automatic suggestions such as duplicate entry, high-impact shared systems, and unclear data ownership
