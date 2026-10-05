@@ -93,6 +93,17 @@ export type ProcessMeaning = {
   evidence: string;
 };
 export type HumanEdit = { field: string; before: unknown; after: unknown; evidence: string };
+/** Organizational boundary, independent of execution mode or a system's identity. */
+export type WorkBoundary = {
+  scope: "internal" | "external" | "unknown";
+  party: string;
+  visibility: "visible" | "partial" | "unavailable" | "unknown";
+  incoming: string[];
+  outgoing: string[];
+  unknowns: string[];
+  certainty: Confidence;
+  evidence: string;
+};
 /** A person's correspondence for one connection, never a global alias. Empty dataId deliberately leaves it unconfirmed. */
 export type HandoffDataBinding = { name: string; dataId: string; evidence: string };
 export type ReviewHandoff = {
@@ -167,6 +178,7 @@ export type LensNode = {
   detailSteps?: DetailStep[];
   aliases?: string[];
   executionContext?: { trigger: string; rule: string; exception: string };
+  boundary?: WorkBoundary;
   meaning?: ProcessMeaning;
   humanEdits?: HumanEdit[];
 };
@@ -244,6 +256,7 @@ export type GraphPatchNode = {
   technicalDetails?: TechnicalDetail[];
   detailSteps?: DetailStep[];
   executionContext?: LensNode["executionContext"];
+  boundary?: WorkBoundary;
   meaning?: ProcessMeaning;
   humanEdits?: HumanEdit[];
 };
@@ -293,6 +306,7 @@ export type FollowUpAnswer = {
 
 export type ExtractionReviewStep = {
   executionContext?: LensNode["executionContext"];
+  boundary?: WorkBoundary;
   meaning?: ProcessMeaning;
   humanEdits?: HumanEdit[];
   stepKey: string;
@@ -506,6 +520,7 @@ export function replaceWorkflowGraph(
         patchNode.technicalDetails ?? existing.technicalDetails;
       existing.detailSteps = patchNode.detailSteps ?? existing.detailSteps;
       existing.executionContext = patchNode.executionContext ?? existing.executionContext;
+      existing.boundary = patchNode.boundary ?? existing.boundary;
       existing.meaning = patchNode.meaning ?? existing.meaning;
       existing.humanEdits = patchNode.humanEdits ?? existing.humanEdits;
       continue;
@@ -529,6 +544,7 @@ export function replaceWorkflowGraph(
       technicalDetails: patchNode.technicalDetails,
       detailSteps: patchNode.detailSteps,
       executionContext: patchNode.executionContext,
+      boundary: patchNode.boundary,
       meaning: patchNode.meaning,
       humanEdits: patchNode.humanEdits,
     };
@@ -1470,6 +1486,7 @@ export function buildWorkflowReviewFromGraph(
       technicalDetails: process.technicalDetails ?? [],
       detailSteps: process.detailSteps ?? [],
       executionContext: process.executionContext,
+      boundary: process.boundary,
       meaning: process.meaning,
       humanEdits: process.humanEdits,
       certainty: process.status === "confirmed" ? "explicit" : "inferred",

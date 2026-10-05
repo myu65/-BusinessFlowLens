@@ -8,6 +8,7 @@ export const REVIEW_FIELD_LABELS: Record<string, string> = {
   result: "決まる・変わること", next: "次に動く仕事", condition: "実行条件",
   halt: "停止・保留", system: "依存する道具", prerequisite: "必要な仕組み",
   reason: "必要な理由", rejected: "依存関係の除外",
+  boundary: "社内・社外と見える範囲", scope: "社内・社外", party: "社外の相手", visibility: "見える範囲", incoming: "工程に渡すもの", outgoing: "戻ってくるもの", unknowns: "見えていない点",
 };
 
 export function reviewFieldLabel(field: string) {

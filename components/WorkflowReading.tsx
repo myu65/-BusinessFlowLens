@@ -19,6 +19,7 @@ import {
 } from "@/lib/flow-context";
 import { FlowNoteInput } from "./FlowNoteInput";
 import { describeHumanEdit } from "@/lib/review-workbench";
+import { WorkBoundaryReading } from "./WorkBoundaryReading";
 
 type Depth = "summary" | "step" | "detail";
 const mode = (value: string) =>
@@ -624,6 +625,7 @@ export function WorkflowReading({
               · {mode(getProcessExecutionMode(graph, selected))} ·{" "}
               {selected.status === "confirmed" ? "確認済み" : "要確認"}
             </p>
+            <WorkBoundaryReading boundary={selected.boundary} />
             <section className="flow-decision" aria-label="判断と情報の変化">
               <h4>この処理で、何が決まるか</h4>
               <div className="flow-meaning-grid">

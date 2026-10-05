@@ -7,6 +7,7 @@ import { termExplanation } from "@/lib/knowledge-guide";
 import { readingPage } from "@/lib/overview-reading";
 import type { AssetReadingPosition } from "@/lib/exploration";
 import { USAGE_DEFINITION } from "@/lib/usage-definition";
+import { workBoundaryText } from "@/lib/work-boundary";
 
 type View = ReturnType<typeof knowledgeIndex>;
 type Impact = ReturnType<View["systemProfile"]>;
@@ -136,6 +137,7 @@ export function AssetReading({ graph, view, asset, impact, position, onPositionC
               <small>{comparisonExecutor(graph, p)} · {executionLabels[getProcessExecutionMode(graph, p)]}</small>
               <dl><div><dt>判断の根拠</dt><dd>{p.meaning?.basis || "未確認"}</dd></div><div><dt>決まること</dt><dd>{p.meaning?.result || "未確認"}</dd></div><div><dt>次の仕事</dt><dd>{p.meaning?.next || "未確認"}</dd></div></dl>
               {p.meaning?.purpose && <p>必要な理由：{p.meaning.purpose}</p>}
+              {p.boundary && <details><summary>この道具が関わる社外の工程</summary><p>{workBoundaryText(p.boundary)}</p></details>}
               {p.meaning?.halt && <p>停止・保留：{p.meaning.condition || "条件は未確認"}</p>}
               <details><summary>{confidenceLabels[p.meaning?.certainty ?? p.status]} · ルール・例外・原文</summary><p>ルール：{p.executionContext?.rule || "未確認"}</p><p>例外：{p.executionContext?.exception || "未確認"}</p><p>{p.meaning?.evidence || p.evidence || "原文の根拠は未登録"}</p></details>
             </div>)}

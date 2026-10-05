@@ -10,6 +10,7 @@ import {
 import { findConfirmedAsset } from "./refinement";
 import { resolveHandoffInformation } from "./handoff-information";
 import { REVIEW_FIELD_LABELS, reviewFieldLabel } from "./review-copy";
+import { boundaryScope, boundaryVisibility, separateWorkParties } from "./work-boundary";
 import {
   applyInputOrganization,
   emptyInputKnowledge,
@@ -107,6 +108,7 @@ export function previewReviewGraph(
   workflow: Workflow,
   review: ExtractionReview,
 ): LensGraph {
+  review = separateWorkParties(review);
   const patch: GraphPatch = {
     nodes: [],
     edges: [],
@@ -152,6 +154,7 @@ export function previewReviewGraph(
       executionMode: step.executionMode,
       evidence: step.evidence,
       executionContext: step.executionContext,
+      boundary: step.boundary,
       meaning: step.meaning,
       humanEdits: step.humanEdits,
       technicalDetails: step.technicalDetails,
@@ -532,18 +535,18 @@ export function editReviewStep(
                     JSON.stringify(value),
                 )
                 .flatMap<import("./graph").HumanEdit>(([field, after]) =>
-                  field === "meaning" && after
+                  (field === "meaning" || field === "boundary") && after
                     ? Object.entries(after)
                         .filter(
                           ([f, value]) =>
                             !["certainty", "evidence"].includes(f) &&
                             JSON.stringify(
-                              s.meaning?.[f as keyof typeof s.meaning],
+                              (s[field] as unknown as Record<string, unknown> | undefined)?.[f],
                             ) !== JSON.stringify(value),
                         )
                         .map(([f, value]) => ({
-                          field: `meaning.${f}`,
-                          before: s.meaning?.[f as keyof typeof s.meaning],
+                          field: `${field}.${f}`,
+                          before: (s[field] as unknown as Record<string, unknown> | undefined)?.[f],
                           after: value,
                           evidence: "利用者が候補を訂正",
                         }))
@@ -634,6 +637,8 @@ export function describeHumanEdit(edit: import("./graph").HumanEdit): string[] {
             ? "詳細を更新"
             : String(v);
   const fieldValue = (v: unknown) => {
+    if (edit.field === "boundary.scope") return boundaryScope[v as keyof typeof boundaryScope] ?? value(v);
+    if (edit.field === "boundary.visibility") return boundaryVisibility[v as keyof typeof boundaryVisibility] ?? value(v);
     if (edit.field === "certainty" || edit.field.endsWith(".certainty"))
       return { explicit: "原文に明示", confirmed: "根拠あり", inferred: "推定・要確認", unknown: "未確認" }[String(v)] ?? value(v);
     if (["data", "systems"].includes(edit.field) && Array.isArray(v)) {
@@ -656,6 +661,10 @@ export function describeHumanEdit(edit: import("./graph").HumanEdit): string[] {
     return ["trigger", "rule", "exception"].filter(field => value(before[field]) !== value(after[field]))
       .map(field => `${labels[field]}：${value(before[field])} → ${value(after[field])}`);
   }
+  if (edit.field === "boundary")
+    return Object.entries((edit.after ?? {}) as Record<string, unknown>)
+      .filter(([field, v]) => !["evidence", "certainty"].includes(field) && JSON.stringify((edit.before as Record<string, unknown>)?.[field]) !== JSON.stringify(v))
+      .flatMap(([field, after]) => describeHumanEdit({ ...edit, field: `boundary.${field}`, before: (edit.before as Record<string, unknown>)?.[field], after }));
   if (edit.field === "meaning")
     return Object.entries(edit.after as Record<string, unknown>)
       .filter(

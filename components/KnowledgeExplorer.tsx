@@ -1,4 +1,5 @@
 "use client";
+import { workBoundaryText } from "@/lib/work-boundary";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { LensGraph, LensNode } from "@/lib/graph";
@@ -773,6 +774,7 @@ export function KnowledgeExplorer({
                       {x.before.meaning?.result || "結果未確認"} →{" "}
                       {x.after.meaning?.result || "結果未確認"}</p>
                       <p>次の仕事：{x.before.meaning?.next || "未確認"} → {x.after.meaning?.next || "未確認"}</p>
+                      {(x.before.boundary || x.after.boundary) && <details><summary>社外の工程と見える範囲を比べる</summary><p>比較元：{workBoundaryText(x.before.boundary)}</p><p>比較先：{workBoundaryText(x.after.boundary)}</p></details>}
                       <details><summary>判断の根拠・道具・情報・原文を比べる</summary>
                         <p>仕事の理由：{x.before.meaning?.purpose || "未確認"} → {x.after.meaning?.purpose || "未確認"}</p>
                         <p>判断の根拠：{x.before.meaning?.basis || "未確認"} → {x.after.meaning?.basis || "未確認"}</p>

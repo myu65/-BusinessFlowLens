@@ -858,6 +858,7 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
             detailSteps: node.detailSteps ?? [],
             aliases: node.aliases ?? [],
             executionContext: node.executionContext,
+            boundary: node.boundary,
             meaning: node.meaning,
             humanEdits: node.humanEdits,
           }),

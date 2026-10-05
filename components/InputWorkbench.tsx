@@ -1,4 +1,6 @@
 "use client";
+import { WorkBoundaryEditor } from "./WorkBoundaryEditor";
+import { normalizeWorkBoundary } from "@/lib/work-boundary";
 import React, {
   useEffect,
   useMemo,
@@ -557,6 +559,7 @@ export function InputWorkbench({
     if (!edit || !review || !selected || edit.data.some(data => !data.name.trim())) return;
     const corrected = {
       ...edit, data: edit.data.map(data => ({ ...data, name: data.name.trim() })),
+      boundary: normalizeWorkBoundary(edit.boundary),
       systems: toolText === null ? edit.systems : stepToolsFromText(edit.systems, toolText),
     };
     const patch = Object.fromEntries(
@@ -776,6 +779,7 @@ export function InputWorkbench({
                   </label>
                   <details>
                     <summary>部署・道具・情報・判断の条件も訂正する</summary>
+                    <WorkBoundaryEditor value={edit.boundary} onChange={boundary => setEdit({ ...edit, boundary })} />
                     <label className="kg-edit-field">
                       部署
                       <input
