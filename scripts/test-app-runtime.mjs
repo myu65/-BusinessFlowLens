@@ -5,6 +5,7 @@ import {tmpdir} from 'node:os';
 import {spawn} from 'node:child_process';
 import {join,resolve} from 'node:path';
 import {japaneseGlyphPDF,assertJapaneseGlyphImage} from '../tests/pdf-glyph-fixture.mjs';
+import {completeDocumentAnalysis} from './document-analysis.mjs';
 
 const packageOnly=process.argv.includes('--package-only');
 const testAI=process.argv.includes('--ai');
@@ -82,7 +83,7 @@ try {
       const original=await request(base+'&original=1');assert.equal(original.status,200);assert.equal(createHash('sha256').update(Buffer.from(await original.arrayBuffer())).digest('hex'),document.sha256);
       const prepared=await api('/api/source-document/prepare','POST',{projectId,documentId:document.id});assert.equal(prepared.document.rendering.status,'ready');assert.ok(prepared.document.units.length>0);assert.ok(prepared.document.units.every(u=>u.image));
       for(const unit of prepared.document.units){const image=await request(base+'&image='+encodeURIComponent(unit.id));assert.equal(image.status,200);assert.equal(image.headers.get('Content-Type'),'image/jpeg');const imageBytes=new Uint8Array(await image.arrayBuffer());assert.ok(imageBytes.byteLength>100);if(name==='japanese-glyph.pdf')await assertJapaneseGlyphImage(imageBytes);}
-      if(testAI&&name!=='japanese-glyph.pdf'){const analyzed=await api('/api/source-document/analyze','POST',{projectId,documentId:document.id});assert.equal(analyzed.document.analysis.method,'ai');assert.equal(analyzed.document.analysis.model,health.ai.model);assert.ok(analyzed.document.units.some(u=>u.visualReading?.method==='ai'),'Rendered page images must actually be read by AI.');assert.ok(analyzed.document.workItems.length>0);}
+      if(testAI&&name!=='japanese-glyph.pdf'){const analyzed=await completeDocumentAnalysis(()=>api('/api/source-document/analyze','POST',{projectId,documentId:document.id}),prepared.document.units.filter(unit=>unit.image).length);assert.equal(analyzed.document.analysis.method,'ai');assert.equal(analyzed.document.analysis.model,health.ai.model);assert.ok(analyzed.document.units.every(u=>!u.image||u.visualReading?.method==='ai'),'Every rendered page image must actually be read by AI.');assert.ok(analyzed.document.workItems.length>0);}
       await api('/api/source-document/state','POST',{projectId,documentId:document.id,state:'withdrawn'});
       const rejected=await request('/api/source-document/prepare',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({projectId,documentId:document.id})});assert.equal(rejected.status,409);
       assert.equal((await request(base+'&original=1')).status,200,'Withdrawing interpretation must retain the original.');
