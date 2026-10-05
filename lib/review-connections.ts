@@ -1,6 +1,7 @@
 import type { ExtractionReview, ExtractionTransition, FollowUpAnswer, LensGraph, Workflow } from "./graph";
 import { normalizeAssetName } from "./refinement";
 import { sourceEvidence } from "./source-evidence";
+import { statedReworkReturn } from "./rework-flow";
 
 // Cover a model omission only when one clause names the work, receipt/reference
 // and Data, and one recorded output matches. This remains an inferred candidate.
@@ -173,6 +174,7 @@ export function validateAITransitions<T extends ExtractionReview>(
   const responseWork = (text: string) => repair(text) ||
     (/条項.{0,16}調整/.test(text) && !/調整(?:しない|しません|していない|していません|せず|しなかった)|不明|分から|未確認|未定/.test(text));
   const completion = /確定|承認|完了|公開|納品|出荷|反映|再開|再実行|再試行|解除|配信/;
+  const uncertainRequest = /(?:依頼|申請)(?:する|した)(?:か|のか)|(?:依頼|申請)(?:は|を)?(?:不明|未確認|未定)/;
   const namedSystems = new Set(review.steps.flatMap(s => [...s.systems.map(system => compact(system.name)),
     ...(s.executingSystem ? [compact(s.executingSystem)] : [])]).concat((review.systemProfiles ?? []).map(system => compact(system.name))));
   const transitions = review.transitions.map<ExtractionTransition>(t => ({ ...t, holdEffect: undefined, evidence: sourceEvidence(source, t.evidence) ?? t.evidence })).filter((t) => {
@@ -180,20 +182,23 @@ export function validateAITransitions<T extends ExtractionReview>(
     const evidence = compact(t.evidence);
     const restart = evidence && original.includes(evidence) &&
       (repeat.test(evidence) || /解除|再開|戻す|戻る|resume|restart/i.test(evidence)) &&
-      !/(?:解除|再開|再実行|再試行)(?:しない|しません|せず|されない|しなかった)/.test(evidence) &&
-      !/不明|分から|分かりません|未確認|unknown/i.test(evidence);
+      !/(?:解除|再開|再実行|再試行|再確認|再測定|再検査)(?:しない|しません|せず|されない|しなかった)|戻(?:らない|りません|さない|しません)/.test(evidence) &&
+      !/不明|分から|分かりません|未確認|未定|unknown/i.test(evidence) && !uncertainRequest.test(evidence);
     const target = review.steps.find(s => s.stepKey === t.toStepKey);
     const statedContinuation = evidence && original.includes(evidence) &&
       /(?:回答|承認|許可|確認|修正|解消|完了).{0,10}(?:されたら|された後|を受け|後に|後、)/.test(evidence) &&
-      !/不可|不許可|不承認|否認|不合格|不一致|失敗|未完了|不明|分から|未確認/.test(evidence);
+      !/不可|不許可|不承認|否認|不合格|不一致|失敗|未完了|不明|分から|未確認|未定/.test(evidence);
     const continuedHold = target?.meaning?.halt && evidence && original.includes(evidence) &&
       /保留|停止/.test(evidence) && !/不明|分から|未確認/.test(evidence);
     const isHandoff = (text: string) =>
       /通知|連絡|依頼|渡(?:す|します)|引き継|照会|問い?合わせ|知らせ|報告|inform|request|handoff/i.test(text) &&
       !/(?:通知|連絡|依頼|照会|報告)(?:は|を)?しない|知らせない|渡さない|引き継がない|問い?合わせない/.test(text);
-    const handover = evidence && original.includes(evidence) &&
+    const handover = evidence && original.includes(evidence) && !uncertainRequest.test(evidence) &&
       isHandoff(evidence) && isHandoff(target?.action ?? "");
     const targetEvidence = target && sourceEvidence(source, target.evidence);
+    const releaseRequest = handover && targetEvidence &&
+      /解除.{0,12}(?:依頼|申請|求め)|(?:依頼|申請).{0,12}解除/.test(target?.action ?? "") &&
+      /解除.{0,12}(?:依頼|申請|求め)|(?:依頼|申請).{0,12}解除/.test(targetEvidence);
     const preApprovalEvidence = sourceEvidence(source, t.evidence) ?? targetEvidence;
     const approves = !step?.meaning?.halt &&
       !/承認(?:しない|しません|しなかった|していない|していません)/.test(step?.action ?? "") &&
@@ -299,7 +304,8 @@ export function validateAITransitions<T extends ExtractionReview>(
       review.steps.filter(s => s.meaning?.halt && sourceEvidence(source, s.evidence) === sourceStepEvidence).length === 1;
     // A conditional check may have a normal path and a hold inside it. A step
     // executed only on the hold condition needs an explicit release to proceed.
-    if (step?.meaning?.halt && step.meaning.condition && !restart && !statedContinuation && !continuedHold && !handover && !exceptionResponse && !scopedResponse && !heldInquiry && !heldIncidentRecord) {
+    const reworkReturn = step && target && statedReworkReturn(review, step, target, t, source);
+    if (step?.meaning?.halt && step.meaning.condition && !restart && !statedContinuation && !continuedHold && !handover && !exceptionResponse && !scopedResponse && !heldInquiry && !heldIncidentRecord && !reworkReturn) {
       warnings.push(`${step.name}：停止・保留の解除を原文で確認できないため、その先へ進む線を保留しました。`);
       questions.push({
         question: `${step.name}の後は、どの条件・判断で再開し、どの手順へ進みますか？`,
@@ -309,7 +315,7 @@ export function validateAITransitions<T extends ExtractionReview>(
       return false;
     }
     if (step?.meaning?.halt && step.meaning.condition) {
-      t.holdEffect = scopedResponse ? "response" : restart || statedContinuation ? "resume" : continuedHold || handover || exceptionResponse || heldInquiry || heldIncidentRecord ? "response" : undefined;
+      t.holdEffect = scopedResponse || releaseRequest || reworkReturn ? "response" : restart || statedContinuation ? "resume" : continuedHold || handover || exceptionResponse || heldInquiry || heldIncidentRecord ? "response" : undefined;
       if (scopedResponse) t.evidence = `「${sourceEvidence(source, step.evidence)}」「${targetEvidence}」`;
       if (scopedResponse || ((quotedResponse || explicitWhileHeld) && exceptionResponse)) t.certainty = "inferred";
     } else if (restart && sourceStepEvidence && targetEvidence && /再開|resume|restart/i.test(evidence)) {
