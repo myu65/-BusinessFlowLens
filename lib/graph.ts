@@ -59,7 +59,7 @@ export type Workflow = {
   landscape?: WorkflowLandscape;
   reviewContext?: Pick<
     ExtractionReview,
-    "summary" | "trigger" | "outcome" | "questions" | "warnings" | "excludedSteps" | "excludedTransitions" | "excludedHandoffs" | "excludedIncomingHandoffs" | "extraction" | "protectedDetails" | "organization" | "systemProfiles" | "systemDependencies" | "documentEvidence" | "dialogueHistory"
+    "summary" | "summaryBasis" | "readingHistory" | "questionReviews" | "trigger" | "outcome" | "questions" | "warnings" | "excludedSteps" | "excludedTransitions" | "excludedHandoffs" | "excludedIncomingHandoffs" | "extraction" | "protectedDetails" | "organization" | "systemProfiles" | "systemDependencies" | "documentEvidence" | "dialogueHistory"
   > & {
     followUpAnswers?: FollowUpAnswer[];
   };
@@ -377,6 +377,9 @@ export type ExtractionTransition = {
 };
 
 export type ExtractionReview = {
+  summaryBasis?: 'structure';
+  readingHistory?: import('./current-understanding').ReadingHistory[];
+  questionReviews?: import('./current-understanding').QuestionReview[];
   dialogueHistory?: import("./dialogue-operations").DialogueTurn[];
   excludedHandoffs?: Array<ReviewHandoff & {excludedBy:string}>;
   excludedIncomingHandoffs?: Array<ReviewIncomingHandoff & {excludedBy:string}>;
@@ -1569,6 +1572,9 @@ export function buildWorkflowReviewFromGraph(
     transitions,
     dataFlows,
     questions: workflow?.reviewContext?.questions ?? [],
+    summaryBasis: workflow?.reviewContext?.summaryBasis,
+    readingHistory: workflow?.reviewContext?.readingHistory,
+    questionReviews: workflow?.reviewContext?.questionReviews,
     warnings: workflow?.reviewContext?.warnings ?? [],
     excludedSteps: workflow?.reviewContext?.excludedSteps,
     excludedTransitions: workflow?.reviewContext?.excludedTransitions,

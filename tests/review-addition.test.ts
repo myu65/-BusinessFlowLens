@@ -31,7 +31,9 @@ test("a short addition splits only the selected branch and preserves people, dat
   const added: ExtractionReview = { ...blank, organization: { title: "別の題名", activity: "別活動", capability: "", certainty: "inferred", evidence: note },
     steps: [{ ...task("check", note, 1), systems: [{ name: "Excel", interaction: "view", evidence: note }], data: [{ name: "重量", operation: "read", evidence: note }] }] };
   const result = addReviewNote(before, added, { afterStepKey: "check", transition: before.transitions[0] }, note, "test-1");
-  assert.equal(result.review.summary, before.summary);
+  assert.ok(result.review.readingHistory?.some(reading=>reading.summary===before.summary));
+  assert.match(result.review.summary,/倉庫係長/);
+  assert.match(result.review.summary,/Excel/);
   assert.equal(result.review.organization, before.organization);
   assert.equal(result.review.steps.length, 4);
   assert.equal(result.review.steps[1].stepKey, result.addedKeys[0]);

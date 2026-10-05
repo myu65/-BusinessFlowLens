@@ -3,6 +3,7 @@ import {canonicalDataFlowId} from './graph';
 import { preserveSystemDependencies } from "./system-dependencies";
 import { reviewFieldLabel } from "./review-copy";
 import { transitionKey } from './review-connection-edits';
+import {retainQuestionReviews,withCurrentExplanation} from './current-understanding';
 
 export { normalizeAssetName, findConfirmedAsset } from "./asset-identity";
 
@@ -446,8 +447,9 @@ export function preserveRefinements(
     warnings.push(
       "登録された話のまとまりを保持しました。最新の説明と合うか確認できます。",
     );
-  return {
+  const retained:ExtractionReview={
     ...review,
+    readingHistory:[...new Map([...(previous.readingHistory??[]),...(review.readingHistory??[])].map(item=>[JSON.stringify(item),item])).values()],
     excludedHandoffs,
     excludedIncomingHandoffs,
     organization,
@@ -479,4 +481,8 @@ export function preserveRefinements(
       restoredHumanField && i < review.warnings.length
         ? `人の訂正を反映する前の候補への注意：${warning}` : warning))],
   };
+  const understood=retainQuestionReviews(retained,previous);
+  return restoredHumanField||previous.summaryBasis==='structure'
+    ?withCurrentExplanation(understood,previous,'人の訂正を保って読み直し','以前に確認した担当・道具・接続を保持')
+    :understood;
 }

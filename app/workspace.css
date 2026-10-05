@@ -483,3 +483,7 @@
 .saved-workflow-diagram { margin: 16px 0; padding: 15px; border: 1px solid #d7e3dc; border-radius: 12px; background: #fafcfb; }
 .saved-workflow-diagram h3 { margin-top: 0; }
 .input-document-variants { padding: 9px 12px; background: #fff7e4; border: 1px solid #e7cf9a; border-radius: 7px; color: #75571d; font-size: 12px; line-height: 1.65; }
+.input-reading-history { margin: 8px 0; font-size: 12px; color: #475e57; }
+.input-reading-history summary { cursor: pointer; }
+.input-reading-history article { margin: 8px 0; padding: 10px; border: 1px solid #dbe5e0; border-radius: 6px; background: #fafcfb; }
+.input-reading-history p, .input-reading-history blockquote { margin: 6px 0; line-height: 1.6; }

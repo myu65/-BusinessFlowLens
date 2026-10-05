@@ -1,4 +1,5 @@
 import { findConfirmedAsset, preserveRefinements } from "../refinement";
+import {applyConfirmedAssetNames} from '../current-understanding';
 import { existsSync, readFileSync } from "node:fs";
 import { buildExtractionContext, buildPreviousReviewContext } from "./context";
 import { preApprovalRepair, approvalDenialRepair, retainSplitCheckKeys } from "./draft-quality";
@@ -874,6 +875,7 @@ Use existing company context to interpret shorthand and references such as "ERP"
 - When an existing System/Data/Workflow is a plausible match, use that knowledge to make the draft more coherent and mention ambiguity in warnings/questions when identity is not clear.
 - If the interview says "after that we do the usual shipping process" and an existing shipping workflow is present, do not invent its internal steps; describe the handoff and ask only what is still needed.
 - If a follow-up answer resolves a question, update the draft and remove that question.
+- Previous reviewedQuestions are a person's decisions about specific questions. For the latest state=resolved, keep that narrow confirmed answer and do not re-ask a synonymous question in the same scope solely because unchanged older source says unknown. state=reopened returns it to unconfirmed. Do not infer missing ownership, order, handoffs or other facts from an identity confirmation. These review records never justify a broader resolution.
 - Ask new questions only for remaining material gaps.
 - Each question asks about one concrete gap. Do not bundle the actor, sequence, tools and exceptions into a single multi-part question; prioritize what helps the person understand or correct the diagram next.
 
@@ -1385,6 +1387,9 @@ function normalizeDraft(raw: WorkflowDraft): WorkflowDraft {
   return {
     organization: raw.organization,
     dialogueHistory: raw.dialogueHistory,
+    summaryBasis: raw.summaryBasis,
+    readingHistory: raw.readingHistory,
+    questionReviews: raw.questionReviews,
     systemProfiles: raw.systemProfiles?.filter(
       (p) => p.name?.trim() && p.evidence?.trim(),
     ),
@@ -1620,7 +1625,8 @@ Keep the check's stable key, add a key for the stated approval, and keep every u
       args.workflow,
     ),
   ),args.documentConflicts??[]);
-  const draft = args.correction ? preserveRefinements(correctionCandidate(args.previousReview, validatedDraft, args.correction, rawDraft.correctionFields), prior) : validatedDraft;
+  const preserved = args.correction ? preserveRefinements(correctionCandidate(args.previousReview, validatedDraft, args.correction, rawDraft.correctionFields), prior) : validatedDraft;
+  const draft=applyConfirmedAssetNames(preserved,args.graph);
 
   if (process.env.AI_DIAGNOSTICS === "1") console.info(JSON.stringify({
     phase: "workflow_draft_shape", rawSteps: rawDraft.steps.length,
@@ -1648,6 +1654,9 @@ Keep the check's stable key, add a key for the stated approval, and keep every u
         imagePages: images.length || undefined,
       },
       summary: draft.summary,
+      summaryBasis: draft.summaryBasis,
+      readingHistory: draft.readingHistory,
+      questionReviews: draft.questionReviews,
       trigger: draft.trigger,
       outcome: draft.outcome,
       steps: draft.steps,

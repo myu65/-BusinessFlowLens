@@ -1,5 +1,6 @@
 import type { ExtractionReview, ExtractionTransition, HumanEdit } from "./graph";
 import { inputStepName } from "./input-canvas";
+import {withCurrentExplanation} from './current-understanding';
 
 export type ReviewInsertion = {
   afterStepKey: string;
@@ -105,7 +106,7 @@ export function addReviewNote(
     const seen = new Set<string>();
     return items.filter(item => { const identityKey = identity(item); if (seen.has(identityKey)) return false; seen.add(identityKey); return true; });
   };
-  return { addedKeys, review: {
+  return { addedKeys, review: withCurrentExplanation({
     ...before,
     extraction: addition.extraction ?? before.extraction,
     steps: ordered.map((s, i) => s.order === i + 1 ? s : { ...s, order: i + 1 }),
@@ -116,5 +117,5 @@ export function addReviewNote(
     systemProfiles: unique([...(before.systemProfiles ?? []), ...(addition.systemProfiles ?? [])], p => p.name),
     systemDependencies: unique([...(before.systemDependencies ?? []), ...(addition.systemDependencies ?? [])], d => `${d.system}\0${d.prerequisite}`),
     questions: unique(questions, q => q.question), warnings: [...new Set(warnings)],
-  } };
+  },before,'話から途中の作業を追加',note.trim()) };
 }

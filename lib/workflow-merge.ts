@@ -153,6 +153,9 @@ export function previewWorkflowMerge(input: MergeInput): {graph: LensGraph; tran
   const summary=`${target!.name}について、二つの話をまとめた流れです。${finalSteps.slice(0,3).map(n=>n.label).join('、')}などの${finalSteps.length}手順があります。入力資料の違いと採用内容は履歴から確認できます。`;
   const mergedWorkflow:Workflow={...target!,summary,reviewContext:{...context,summary,trigger:context?.trigger??target!.trigger??null,outcome:context?.outcome??target!.outcome??null,
     questions:unique([...(context?.questions??[]),...(other?.questions??[]),...(differingConnections?[{question:'二つの原文で違う手順のつながりは、どちらの運用を採用しますか？',reason:'統合先にない追加の接続は、原文の記載差として未確認で残しています。人が加えた手順や接続も保持しています。',target:'handoff' as const}]:[])]),warnings:unique([...(context?.warnings??[]),...(other?.warnings??[])]),
+    summaryBasis:'structure',
+    readingHistory:unique([...(context?.readingHistory??[]),...(other?.readingHistory??[]),...[target!.summary??context?.summary,source!.summary??other?.summary].filter((text):text is string=>!!text).map(summary=>({summary,reason:'二つの話を同じ業務へ統合',evidence:`「${source!.name}」を「${target!.name}」へ統合`}))]),
+    questionReviews:unique([...(context?.questionReviews??[]),...(other?.questionReviews??[])]).sort((a,b)=>a.reviewedAt.localeCompare(b.reviewedAt)),
     documentEvidence:unique([...(context?.documentEvidence??[]),...(other?.documentEvidence??[])]),
     followUpAnswers:unique([...(context?.followUpAnswers??[]),...(other?.followUpAnswers??[])]),
     dialogueHistory:unique([...(context?.dialogueHistory??[]),...(other?.dialogueHistory??[])]),

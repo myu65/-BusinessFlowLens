@@ -242,6 +242,9 @@ export function previewReviewGraph(
       outcome: review.outcome,
       reviewContext: {
         summary: review.summary,
+        summaryBasis: review.summaryBasis,
+        readingHistory: review.readingHistory,
+        questionReviews: review.questionReviews,
         trigger: review.trigger,
         outcome: review.outcome,
         questions: review.questions,
