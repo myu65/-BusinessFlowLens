@@ -318,7 +318,7 @@ export function InputReviewFlow({
             next && (
               <button key={i} onClick={() => choose(next)}>
                 <span>
-                  {t.holdEffect === "response" ? "停止中の対応 · " : t.holdEffect === "resume" ? "再開 · " : ""}
+                  {t.sourceVariant ? "資料の記載差 · 採用版は未確認 · " : t.holdEffect === "response" ? "停止中の対応 · " : t.holdEffect === "resume" ? "再開 · " : ""}
                   {t.condition || "次へ"}
                   {t.certainty !== "confirmed" ? "（接続は要確認）" : ""}
                 </span>{" "}
@@ -366,6 +366,7 @@ export function InputReviewFlow({
       </section>
       <details className="input-evidence">
         <summary>原文の根拠・人が訂正した内容を見る</summary>
+        {!!selected.sourceRefs?.length&&<p>元の図から読み取った説明です。原文の引用ではありません。元ページと見比べて確かめられます。</p>}
         <blockquote>{selected.evidence || "原文の根拠は未登録"}</blockquote>
         <p>
           この手順：{certainty[selected.certainty]}。結果の説明：

@@ -1,4 +1,4 @@
-import type { DocumentEvidence } from "./source-document";
+import type { DocumentEvidence, SourceReference } from "./source-document";
 export type NodeKind = "process" | "system" | "data";
 export type Confidence = "confirmed" | "inferred" | "unknown";
 export type Relation =
@@ -160,6 +160,7 @@ export type ReviewSystemDependency = {
 };
 
 export type LensNode = {
+  sourceRefs?: SourceReference[];
   id: string;
   canonicalKey: string;
   kind: NodeKind;
@@ -184,6 +185,8 @@ export type LensNode = {
 };
 
 export type LensEdge = {
+  sourceVariant?: "document_conflict";
+  sourceRefs?: SourceReference[];
   id: string;
   source: string;
   target: string;
@@ -241,6 +244,7 @@ export type CompanyKnowledge = {
 };
 
 export type GraphPatchNode = {
+  sourceRefs?: SourceReference[];
   canonicalKey: string;
   kind: NodeKind;
   label: string;
@@ -262,6 +266,8 @@ export type GraphPatchNode = {
 };
 
 export type GraphPatchEdge = {
+  sourceVariant?: "document_conflict";
+  sourceRefs?: SourceReference[];
   sourceKey: string;
   targetKey: string;
   relation: Relation;
@@ -305,6 +311,7 @@ export type FollowUpAnswer = {
 };
 
 export type ExtractionReviewStep = {
+  sourceRefs?: SourceReference[];
   executionContext?: LensNode["executionContext"];
   boundary?: WorkBoundary;
   meaning?: ProcessMeaning;
@@ -349,6 +356,8 @@ export type ExtractionDataFlow = {
 };
 
 export type ExtractionTransition = {
+  sourceVariant?: "document_conflict";
+  sourceRefs?: SourceReference[];
   fromStepKey: string;
   toStepKey: string;
   condition: string | null;
@@ -365,7 +374,7 @@ export type ExtractionReview = {
   systemDependencies?: ReviewSystemDependency[];
   incomingHandoffs?: ReviewIncomingHandoff[];
   protectedDetails?: Array<{ stepKey: string; fields: Array<"technicalDetails" | "detailSteps" | "executionContext"> }>;
-  extraction?: { method: "ai" | "local"; provider: string; model?: string; completedAt: string };
+  extraction?: { method: "ai" | "local"; provider: string; model?: string; completedAt: string; imagePages?: number };
   summary: string;
   trigger: string | null;
   outcome: string | null;
@@ -547,6 +556,7 @@ export function replaceWorkflowGraph(
       boundary: patchNode.boundary,
       meaning: patchNode.meaning,
       humanEdits: patchNode.humanEdits,
+      sourceRefs: patchNode.sourceRefs,
     };
     nodes.push(created);
     byKey.set(canonicalKey, created);
@@ -589,6 +599,8 @@ export function replaceWorkflowGraph(
       status: patchEdge.status,
       holdEffect: patchEdge.holdEffect,
       humanEdits: patchEdge.humanEdits,
+      sourceRefs: patchEdge.sourceRefs,
+      sourceVariant: patchEdge.sourceVariant,
     });
   }
 
@@ -1489,6 +1501,7 @@ export function buildWorkflowReviewFromGraph(
       boundary: process.boundary,
       meaning: process.meaning,
       humanEdits: process.humanEdits,
+      sourceRefs: process.sourceRefs,
       certainty: process.status === "confirmed" ? "explicit" : "inferred",
       evidence: process.evidence ?? "",
       systems,
@@ -1519,6 +1532,8 @@ export function buildWorkflowReviewFromGraph(
       certainty: edge.status,
       holdEffect: edge.holdEffect,
       humanEdits: edge.humanEdits,
+      sourceRefs: edge.sourceRefs,
+      sourceVariant: edge.sourceVariant,
     }));
 
   const dataFlows: ExtractionDataFlow[] = (graph.dataFlows ?? [])

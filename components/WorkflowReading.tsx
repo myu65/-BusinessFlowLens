@@ -1,9 +1,10 @@
 "use client";
 import { handoffInformationText } from "@/lib/handoff-information";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   getProcessExecutionMode,
   getWorkflowProcesses,
+  buildWorkflowReviewFromGraph,
   type LensGraph,
   type LensNode,
 } from "@/lib/graph";
@@ -20,6 +21,9 @@ import {
 import { FlowNoteInput } from "./FlowNoteInput";
 import { describeHumanEdit } from "@/lib/review-workbench";
 import { WorkBoundaryReading } from "./WorkBoundaryReading";
+import { InputFlowCanvas } from "./InputFlowCanvas";
+import { INPUT_CANVAS_PAGE_SIZE } from "@/lib/input-canvas";
+import { DocumentSourceEvidence } from "./DocumentInput";
 
 type Depth = "summary" | "step" | "detail";
 const mode = (value: string) =>
@@ -35,6 +39,7 @@ const operation = (value: string) =>
   ] ?? value;
 
 export function WorkflowReading({
+  projectId,
   graph,
   workflowId: parentWorkflowId,
   onDetail,
@@ -50,6 +55,7 @@ export function WorkflowReading({
   onNavigateWorkflow,
   journey: initialJourney,
 }: {
+  projectId?: string;
   graph: LensGraph;
   workflowId: string;
   onDetail: (id: string) => void;
@@ -106,6 +112,7 @@ export function WorkflowReading({
   );
   const steps = getWorkflowProcesses(graph, workflowId);
   const selected = steps.find((s) => s.id === stepId) ?? steps[0];
+  const flow = useMemo(()=>buildWorkflowReviewFromGraph(graph,workflowId),[graph,workflowId]);
   const chapters = workflowChapters(graph, workflowId);
   useEffect(() => {
     const currentStep = selected?.id ?? "";
@@ -385,7 +392,7 @@ export function WorkflowReading({
             </strong>
             {context.outgoing.map(({ edge, step }) => (
               <button key={edge.id} onClick={() => select(step.id)}>
-                {edge.holdEffect === "response" ? "停止中の対応 · " : edge.holdEffect === "resume" ? "再開 · " : ""}
+                {edge.sourceVariant ? "資料の記載差 · 採用版は未確認 · " : edge.holdEffect === "response" ? "停止中の対応 · " : edge.holdEffect === "resume" ? "再開 · " : ""}
                 {edge.label ? `条件：${edge.label}` : edge.holdEffect ? "接続を辿る" : "順に進む"} → {step.label}{" "}
                 ·{" "}
                 {edge.status === "confirmed"
@@ -520,6 +527,12 @@ export function WorkflowReading({
       {!compactControls && <p className="flow-explanation">
         同じ業務・手順を保ったまま、全体から作業まで拡大できます。人・道具・情報は同じ流れの中に表示します。
       </p>}
+      {depth !== "summary"&&flow.steps.length>0&&<div className="saved-workflow-diagram">
+        <h3>この仕事のフロー図</h3>
+        <InputFlowCanvas review={flow} selected={flow.steps.find(step=>step.stepKey===selected.canonicalKey.split(":").at(-1))??flow.steps[0]} page={Math.floor(steps.indexOf(selected)/INPUT_CANVAS_PAGE_SIZE)} reading
+          onPage={page=>select(steps[page*INPUT_CANVAS_PAGE_SIZE]?.id??selected.id)} choose={step=>select(steps.find(process=>process.canonicalKey.split(":").at(-1)===step.stepKey)?.id??selected.id)}/>
+        {projectId&&!!flow.documentEvidence?.length&&<DocumentSourceEvidence projectId={projectId} evidence={flow.documentEvidence} sourceRefs={selected.sourceRefs} focusText={selected.evidence} stepName={selected.label} buttonLabel="このフローの元資料を見る"/>}
+      </div>}
       {depth === "summary" ? (
         <>
           <h3>仕事と情報の大きな流れ</h3>

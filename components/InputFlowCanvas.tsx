@@ -4,7 +4,7 @@ import type { ExtractionReview, ExtractionReviewStep, ExtractionTransition } fro
 import { inputCanvasEdge, inputCanvasLabel, inputCanvasLayout, inputStepMode, inputStepName } from "@/lib/input-canvas";
 import { readingPage } from "@/lib/overview-reading";
 
-export function InputFlowCanvas({ review, selected, page, onPage, choose, added = [], changed = [], onInsert, editingDisabled }: {
+export function InputFlowCanvas({ review, selected, page, onPage, choose, added = [], changed = [], onInsert, editingDisabled, reading = false }: {
   review: ExtractionReview;
   selected: ExtractionReviewStep;
   page: number;
@@ -14,6 +14,7 @@ export function InputFlowCanvas({ review, selected, page, onPage, choose, added 
   changed?: string[];
   onInsert?: (transition: ExtractionTransition) => void;
   editingDisabled?: boolean;
+  reading?: boolean;
 }) {
   const layout = inputCanvasLayout(review, page);
   const [boundaryPage, setBoundaryPage] = useState(0);
@@ -23,19 +24,20 @@ export function InputFlowCanvas({ review, selected, page, onPage, choose, added 
   const byKey = new Map(layout.nodes.map(n => [n.step.stepKey, n]));
   return <section className="input-canvas-section" aria-label="話からできた業務の流れ">
     <div className="input-canvas-key">
-      <span>手順を選ぶと、右で確認・編集できます。矢印の＋で、間に作業を足せます。</span>
+      <span>{reading ? "手順を選ぶと、人・道具・情報と、その後の仕事を下で読めます。" : "手順を選ぶと、右で確認・編集できます。矢印の＋で、間に作業を足せます。"}</span>
       <span><i className="input-key-human" />人の作業 <i className="input-key-auto" />システム自動 <i className="input-key-hold" />保留</span>
     </div>
-    {!!boundaries.total && <section className="input-canvas-boundaries" aria-label="ページをまたぐつながり">
-      <h3>ページをまたぐつながり</h3>
+    {review.transitions.some(edge=>edge.sourceVariant)&&<p className="input-document-variants">資料のページで進み方が異なります。「記載差」の矢印は、どの版を使うか未確認です。</p>}
+    {!!boundaries.total && <section className="input-canvas-boundaries" aria-label="画面の外に続くつながり">
+      <h3>画面の外に続くつながり</h3>
       <div>{boundaries.items.map((edge, i) => {
         const from = review.steps.find(s => s.stepKey === edge.fromStepKey), to = review.steps.find(s => s.stepKey === edge.toStepKey);
         if (!from || !to) return <p key={i}>接続する手順が未登録です。</p>;
         const other = byKey.get(from.stepKey)?.context === false ? to : from;
         return <article key={i}>
           <p>{from.order}. {inputStepName(from)} → {to.order}. {inputStepName(to)}</p>
-          <p>{edge.holdEffect === "response" ? "停止中の対応 · " : edge.holdEffect === "resume" ? "再開 · " : ""}{edge.condition || (edge.holdEffect ? "接続を辿る" : "順に進む")} · {edge.certainty === "confirmed" ? "確認済みの接続" : edge.certainty === "inferred" ? "接続は推定" : "接続は未確認"}{to.meaning?.halt && " · 停止・保留"}</p>
-          <button onClick={() => choose(other)}>手順{other.order}「{inputStepName(other)}」のページへ</button>
+          <p>{edge.sourceVariant ? "資料の記載差 · 採用版は未確認 · " : edge.holdEffect === "response" ? "停止中の対応 · " : edge.holdEffect === "resume" ? "再開 · " : ""}{edge.condition || (edge.holdEffect ? "接続を辿る" : "順に進む")} · {edge.certainty === "confirmed" ? "確認済みの接続" : edge.certainty === "inferred" ? "接続は推定" : "接続は未確認"}{to.meaning?.halt && " · 停止・保留"}</p>
+          <button onClick={() => choose(other)}>手順{other.order}「{inputStepName(other)}」の部分を表示</button>
         </article>;
       })}</div>
       {boundaries.last > 0 && <div className="kg-pagination">
@@ -45,14 +47,14 @@ export function InputFlowCanvas({ review, selected, page, onPage, choose, added 
       </div>}
     </section>}
     <div className="input-canvas-scroll">
-      <nav className="input-flow-canvas" aria-label="入力が作った手順" style={{ width: layout.width, height: layout.height }}>
+      <nav className="input-flow-canvas" aria-label={reading ? "業務の手順" : "入力が作った手順"} style={{ width: layout.width, height: layout.height }}>
         <svg viewBox={`0 0 ${layout.width} ${layout.height}`} aria-hidden="true">
           <defs><marker id={marker} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" /></marker></defs>
           {layout.edges.map((edge, i) => {
             const from = byKey.get(edge.fromStepKey)!, to = byKey.get(edge.toStepKey)!;
             const geometry = inputCanvasEdge(from, to, layout.nodes, i);
             const halt = to.step.meaning?.halt;
-            const caption = `${edge.holdEffect === "response" ? "停止中の対応" : edge.holdEffect === "resume" ? "再開" : ""}${edge.condition ? `${edge.holdEffect ? " · " : ""}${edge.condition}` : ""}`;
+            const caption = edge.sourceVariant ? "記載差 · 採用版は未確認" : `${edge.holdEffect === "response" ? "停止中の対応" : edge.holdEffect === "resume" ? "再開" : ""}${edge.condition ? `${edge.holdEffect ? " · " : ""}${edge.condition}` : ""}`;
             return <g key={i} data-from={edge.fromStepKey} data-to={edge.toStepKey} data-certainty={edge.certainty ?? "unknown"} data-halt={halt || undefined} data-hold-effect={edge.holdEffect}>
               <path d={geometry.path} markerEnd={`url(#${marker})`} />
               {caption && <text x={geometry.x} y={geometry.labelY ?? geometry.y - 15} textAnchor="middle"><title>{caption}</title>{caption.length > 14 ? `${caption.slice(0, 14)}…` : caption}</text>}
@@ -62,7 +64,7 @@ export function InputFlowCanvas({ review, selected, page, onPage, choose, added 
         {onInsert && <div className="input-canvas-insertions">{layout.edges.map((edge, i) => {
           const from = byKey.get(edge.fromStepKey)!, to = byKey.get(edge.toStepKey)!;
           const geometry = inputCanvasEdge(from, to, layout.nodes, i);
-          const label = `「${inputStepName(from.step)}」→「${inputStepName(to.step)}」の間に作業を追加${edge.condition ? `（${edge.condition}）` : ""}${edge.holdEffect === "response" ? " · 停止中の対応" : edge.holdEffect === "resume" ? " · 再開" : ""}`;
+          const label = `「${inputStepName(from.step)}」→「${inputStepName(to.step)}」の間に作業を追加${edge.condition ? `（${edge.condition}）` : ""}${edge.sourceVariant ? " · 資料の記載差" : edge.holdEffect === "response" ? " · 停止中の対応" : edge.holdEffect === "resume" ? " · 再開" : ""}`;
           return <button key={i} className="input-canvas-insert" type="button" title={label} aria-label={label} disabled={editingDisabled}
             style={{ left: geometry.x - 11, top: geometry.y - 11 }} onClick={() => onInsert(edge)}>＋</button>;
         })}</div>}
@@ -87,7 +89,7 @@ export function InputFlowCanvas({ review, selected, page, onPage, choose, added 
         </button>)}
       </nav>
     </div>
-    <p className="input-canvas-footnote">点線は、推定または未確認です。ページをまたぐ接続は上で読めます。{layout.nodes.some(n => n.context) && "別のページの手順を、前後の文脈として図にも表示しています。"}</p>
+    <p className="input-canvas-footnote">点線は、推定または未確認です。画面にない前後の手順は、上のつながりから開けます。{layout.nodes.some(n => n.context) && "別のページの手順を、前後の文脈として図にも表示しています。"}</p>
     {layout.total > 6 && <div className="kg-pagination">
       <button disabled={layout.page === 0} onClick={() => onPage(layout.page - 1)}>前の6手順</button>
       <span>{layout.page * 6 + 1}–{Math.min(layout.total, (layout.page + 1) * 6)} / {layout.total}手順</span>

@@ -625,6 +625,7 @@ export function KnowledgeExplorer({
           <h3>業務の流れ</h3>
           <WorkflowReading
             key={row.workflow.id}
+            projectId={projectId}
             graph={graph}
             workflowId={row.workflow.id}
             initialStepId={readStepId}
@@ -818,6 +819,7 @@ export function KnowledgeExplorer({
           <h2>{asset.label}</h2>
           <WorkflowReading
             key={asset.id}
+            projectId={projectId}
             graph={graph}
             workflowId={processRow.workflow.id}
             initialStepId={asset.id}

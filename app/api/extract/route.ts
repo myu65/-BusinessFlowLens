@@ -9,6 +9,10 @@ import {
 import { extractWorkflowReviewWithAI, hasAIConfig } from "@/lib/ai/provider";
 import { safeAIError } from "@/lib/ai/errors";
 import type { ReviewAdditionContext } from "@/lib/review-addition";
+import type { DocumentEvidence } from "@/lib/source-document";
+import { getBusinessFlowRepository } from "@/lib/storage";
+import { workflowSourceImages } from "@/lib/ai/document-context";
+import type { WorkflowCorrection } from "@/lib/ai/workflow-correction";
 
 type ExtractRequest = {
   interview?: string;
@@ -17,6 +21,9 @@ type ExtractRequest = {
   previousReview?: ExtractionReview | null;
   followUpAnswers?: FollowUpAnswer[];
   additionContext?: ReviewAdditionContext;
+  projectId?: string;
+  documentEvidence?: DocumentEvidence[];
+  correction?: WorkflowCorrection;
 };
 
 export async function POST(request: Request) {
@@ -28,8 +35,17 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
+  if(body.correction && (typeof body.correction.text!=="string" || !body.correction.text.trim() || body.correction.text.length>4000 ||
+    (body.correction.stepKey && !body.previousReview?.steps.some(step=>step.stepKey===body.correction!.stepKey))))
+    return NextResponse.json({error:"訂正する手順と4000文字までの内容を指定してください。"},{status:400});
 
   try {
+    const evidence = body.documentEvidence ?? body.previousReview?.documentEvidence ?? [];
+    const images = evidence.length ? await workflowSourceImages(getBusinessFlowRepository(), body.projectId ?? "", evidence) : [];
+    const documentConflicts=(await Promise.all(evidence.map(async ref=>{
+      const record=await getBusinessFlowRepository().getSourceDocument(body.projectId??"",ref.documentId);
+      return (record?.document.findings??[]).filter(finding=>finding.kind==="conflict").map(finding=>finding.unitIds.filter(id=>ref.unitIds.includes(id)).map(unitId=>({documentId:ref.documentId,unitId})));
+    }))).flat().filter(group=>group.length>1);
     const result = hasAIConfig()
       ? await extractWorkflowReviewWithAI({
           interview: body.interview,
@@ -38,6 +54,10 @@ export async function POST(request: Request) {
           previousReview: body.previousReview ?? null,
           followUpAnswers: body.followUpAnswers ?? [],
           additionContext: body.additionContext,
+          images,
+          signal: request.signal,
+          correction: body.correction,
+          documentConflicts,
         })
       : (() => {
           const baseReview = extractGroundedLocal(
@@ -61,7 +81,7 @@ export async function POST(request: Request) {
           };
         })();
 
-    return NextResponse.json({ ...result, review: { ...result.review, documentEvidence: body.previousReview?.documentEvidence } });
+    return NextResponse.json({ ...result, review: { ...result.review, documentEvidence: evidence.length ? evidence : undefined } });
   } catch (error) {
     const failure = safeAIError(
       error,

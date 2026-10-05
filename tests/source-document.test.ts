@@ -47,7 +47,8 @@ test("AI selects actual evidence units; unrelated jobs are excluded while header
   const doc=await parseSourceDocument("audit.xlsx",readFileSync("public/examples/audit-business-controls.xlsx"));
   const selected=validateDocumentItems(doc,[{title:"材料収支",scope:"current",site:"東工場",unitIds:["sheet-1-row-5","sheet-1-row-6"],contextUnitIds:["sheet-1-row-4","sheet-2-row-4","sheet-3-row-7"],note:"将来案は現行から除く"}])[0];
   const text=documentWorkSource(doc,selected);
-  assert.equal(documentWorkName(selected),"東工場：材料収支");
+  assert.equal(documentWorkName(selected),"材料収支");
+  assert.equal(selected.site,"東工場","site remains separate from the work title");
   assert.match(text,/業務フロー一覧!A4:L4/);assert.match(text,/将来案/);assert.doesNotMatch(text,/通常と異なる製造操作を報告する/);
   assert.ok(!text.includes(selected.note),"AIの概要を元資料の記述として再入力しない");
   assert.throws(()=>validateDocumentItems(doc,[{...selected,unitIds:["invented-page"]}]),/元資料にない/);

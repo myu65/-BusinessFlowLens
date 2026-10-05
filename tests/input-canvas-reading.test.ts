@@ -102,12 +102,12 @@ test("a hold on the next page keeps the original common check, normal alternativ
   assert.ok(last.edges.some(e => e.fromStepKey === "s2" && e.toStepKey === "s3"));
   assert.ok(!last.edges.some(e => e.fromStepKey === "s3" && e.toStepKey === "s6"));
   const html = renderToStaticMarkup(createElement(InputFlowCanvas, { review, selected: steps[6], page: 1, onPage: () => {}, choose: () => {}, onInsert: () => {} }));
-  assert.match(html, /別のページの手順/); assert.match(html, /手順3「s2」のページへ/);
+  assert.match(html, /別のページの手順/); assert.match(html, /手順3「s2」の部分を表示/);
   assert.match(html, /data-from="s2" data-to="s6" data-certainty="confirmed" data-halt="true"/);
   assert.match(html, /の間に作業を追加（前の製品が不明）/);
   const first = renderToStaticMarkup(createElement(InputFlowCanvas, { review, selected: steps[2], page: 0, onPage: () => {}, choose: () => {} }));
-  assert.match(first, /手順7「s6」のページへ/);
-  assert.doesNotMatch(first, /手順3「s2」のページへ/);
+  assert.match(first, /手順7「s6」の部分を表示/);
+  assert.doesNotMatch(first, /手順3「s2」の部分を表示/);
   assert.equal(JSON.stringify(review), before);
 });
 
@@ -118,7 +118,7 @@ test("a full page shows its boundary before the diagram, caps dense boundary lin
   assert.equal(layout.nodes.length, 6); assert.equal(layout.outside.length, 294); assert.equal(layout.nodes[2].isolated, false);
   const html = renderToStaticMarkup(createElement(InputFlowCanvas, { review, selected: review.steps[2], page: 0, onPage: () => {}, choose: () => {} }));
   assert.equal((html.match(/<article>/g) ?? []).length, 6); assert.match(html, /1–6 \/ 294接続/);
-  assert.ok(html.indexOf('aria-label="ページをまたぐつながり"') < html.indexOf('aria-label="入力が作った手順"'));
+  assert.ok(html.indexOf('aria-label="画面の外に続くつながり"') < html.indexOf('aria-label="入力が作った手順"'));
   assert.doesNotMatch(html, /矢印がない手順は、前後がまだ分かっていません/);
   assert.match(html, /点線は、推定または未確認です/);
   for (let p = 0; p < 50; p++) assert.ok(inputCanvasLayout(review, p).nodes.length <= 6);
