@@ -14,6 +14,7 @@ import { editReviewStep, previewReviewGraph } from "../lib/review-workbench";
 import { preserveRefinements } from "../lib/refinement";
 import { buildWorkflowReviewFromGraph, type LensGraph } from "../lib/graph";
 import type { SourceDocument, WorkflowSourceImage } from "../lib/source-document";
+import { PDF_RENDER_VERSION } from "../lib/source-document";
 import { SqliteBusinessFlowRepository } from "../lib/storage/sqlite";
 import { WorkflowReading } from "../components/WorkflowReading";
 const empty:LensGraph={workflows:[],nodes:[],edges:[],dataFlows:[]};
@@ -66,7 +67,7 @@ test("image extraction uses every scoped page directly, preserves anchors throug
 
 test("original evidence cannot cross projects, invent pages, or use a different file hash",async()=>{
   const repo=new SqliteBusinessFlowRepository(join(mkdtempSync(join(tmpdir(),"bfl-source-")),"test.sqlite"));
-  const document:SourceDocument={id:"document",name:"原本.pdf",format:"pdf",sha256:"known-hash",byteSize:3,createdAt:new Date().toISOString(),units:images.map(image=>({id:image.unitId,location:image.location,text:"",image:{width:image.width,height:image.height,mimeType:image.mimeType}})),warnings:[]};
+  const document:SourceDocument={id:"document",name:"原本.pdf",format:"pdf",sha256:"known-hash",byteSize:3,createdAt:new Date().toISOString(),rendering:{status:"ready",version:PDF_RENDER_VERSION},units:images.map(image=>({id:image.unitId,location:image.location,text:"",image:{width:image.width,height:image.height,mimeType:image.mimeType}})),warnings:[]};
   await repo.saveProject({projectId:"qa",projectName:"QA",graph:empty,transcripts:{},updatedAt:new Date().toISOString()});
   await repo.saveSourceDocument("qa",document,new Uint8Array([1,2,3]),images);
   const evidence={documentId:"document",documentName:"原本.pdf",sha256:"known-hash",itemId:"work",unitIds:["page-1","page-4"]};
@@ -74,6 +75,9 @@ test("original evidence cannot cross projects, invent pages, or use a different 
   await assert.rejects(workflowSourceImages(repo,"other",[evidence]));
   await assert.rejects(workflowSourceImages(repo,"qa",[{...evidence,sha256:"changed-hash"}]));
   await assert.rejects(workflowSourceImages(repo,"qa",[{...evidence,unitIds:["invented-page"]}]));
+  const saved=(await repo.getSourceDocument("qa",document.id))!;
+  await repo.saveSourceDocument("qa",{...saved.document,rendering:{status:"ready"}},saved.bytes);
+  await assert.rejects(workflowSourceImages(repo,"qa",[evidence]),/ページを作り直す必要/);
   const review=extractGroundedLocal(source);review.steps[0].sourceRefs=[{documentId:"other",unitId:"page-1"}];
   const grounded=groundDiagramReferences(review,images);assert.equal(grounded.review.steps[0].sourceRefs,undefined);assert.equal(grounded.interpretation,"");
 });

@@ -441,6 +441,11 @@
 .document-page-image { width: 100%; display: block; padding: 0; border: 0; background: white; cursor: zoom-in; }
 .document-page-comparison figure[data-zoomed="false"] img { max-height: 55dvh; object-fit: contain; }
 .document-page-comparison figure[data-zoomed="true"] .document-page-image { cursor: zoom-out; }
+.document-page-comparison:has(figure[data-zoomed="true"]) { grid-template-columns: minmax(0, 1fr); }
+.document-page-comparison figure[data-zoomed="true"] { max-height: 65dvh; overflow: auto; }
+.document-page-comparison figure[data-zoomed="true"] .document-page-image { width: max(1400px, 100%); }
+.document-page-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 12px 0; }
+.document-page-tools small { color: #56665a; }
 .document-page-comparison img { display: block; width: 100%; height: auto; border: 1px solid #d8e3dc; background: white; }
 .document-page-comparison figcaption { margin: 6px 0; color: #56665a; font-size: 12px; }
 .document-page-comparison > div { max-height: 580px; overflow: auto; padding-right: 8px; }

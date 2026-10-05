@@ -1,6 +1,6 @@
 import type { BusinessFlowRepository } from "../storage/repository";
 import type { DocumentEvidence, WorkflowSourceImage, SourceReference } from "../source-document";
-import { visualSourceBlock } from "../source-document";
+import { needsSourceRendering, visualSourceBlock } from "../source-document";
 import type { ExtractionReview } from "../graph";
 
 /** Load project-scoped originals on the server; clients send identities, never image bytes or paths. */
@@ -11,6 +11,8 @@ export async function workflowSourceImages(repo: BusinessFlowRepository, project
     const record = await repo.getSourceDocument(projectId, ref.documentId);
     if (!record || record.document.sha256 !== ref.sha256 || !Array.isArray(ref.unitIds) || ref.unitIds.length > 700 || ref.unitIds.some(id => !record.document.units.some(unit => unit.id === id)))
       throw new Error("元資料のページを確認できませんでした。保存されている資料を開き直してください。");
+    if (record.document.format === "pdf" && needsSourceRendering(record.document))
+      throw new Error("PDFのページを作り直す必要があります。元資料を開き直してください。使用を取り消した資料は、読取りを再開してから確認できます。");
     for (const unit of record.document.units.filter(unit => ref.unitIds.includes(unit.id) && unit.image)) {
       const identity = `${ref.documentId}/${unit.id}`;
       if (seen.has(identity)) continue;

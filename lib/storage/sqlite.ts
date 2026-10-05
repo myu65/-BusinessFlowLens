@@ -23,7 +23,7 @@ import type {
   WorkflowRevision,
   WorkflowRevisionSummary,
 } from "@/lib/storage/repository";
-import { ProjectChangedError } from "@/lib/storage/repository";
+import { ProjectChangedError, SourceDocumentChangedError } from "@/lib/storage/repository";
 import type { SourceDocument, SourceImage } from "@/lib/source-document";
 
 type SqliteRow = Record<string, unknown>;
@@ -245,9 +245,12 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
     return row ? { unitId, mimeType: "image/jpeg", bytes: row.image_bytes as Uint8Array, width: Number(row.width), height: Number(row.height) } : null;
   }
 
-  async setSourceDocumentState(projectId: string, documentId: string, state: "active" | "withdrawn"): Promise<SourceDocument | null> {
-    this.db.prepare("UPDATE source_documents SET document_json=json_set(document_json, '$.lifecycle', json_object('state', ?, 'generation', COALESCE(json_extract(document_json, '$.lifecycle.generation'), 0)+1, 'changedAt', ?)) WHERE project_id=? AND id=?")
-      .run(state, new Date().toISOString(), projectId, documentId);
+  async setSourceDocumentState(projectId: string, documentId: string, state: "active" | "withdrawn", expectedActiveGeneration?: number): Promise<SourceDocument | null> {
+    const guarded = expectedActiveGeneration !== undefined;
+    const guard = guarded ? " AND COALESCE(json_extract(document_json, '$.lifecycle.generation'),0)=? AND COALESCE(json_extract(document_json, '$.lifecycle.state'),'active')='active'" : "";
+    const result = this.db.prepare("UPDATE source_documents SET document_json=json_set(document_json, '$.lifecycle', json_object('state', ?, 'generation', COALESCE(json_extract(document_json, '$.lifecycle.generation'), 0)+1, 'changedAt', ?)) WHERE project_id=? AND id=?" + guard)
+      .run(state, new Date().toISOString(), projectId, documentId, ...(guarded ? [expectedActiveGeneration] : []));
+    if (guarded && !result.changes) throw new SourceDocumentChangedError();
     return (await this.getSourceDocument(projectId, documentId))?.document ?? null;
   }
 

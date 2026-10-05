@@ -39,10 +39,20 @@ export type SourceDocument = {
   warnings: string[];
   workItems?: DocumentWorkItem[];
   findings?: DocumentFinding[];
-  rendering?: { status: "pending" | "ready" | "unavailable"; message?: string };
+  rendering?: { status: "pending" | "ready" | "unavailable"; message?: string; version?: string };
+  analysisHistory?: SourceAnalysisSnapshot[];
   lifecycle?: { state: "active" | "withdrawn"; generation: number; changedAt: string };
   analysis?: { method: "ai"; provider: string; model: string | null; completedAt: string };
 };
+export type SourceAnalysisSnapshot = Pick<SourceDocument, "rendering" | "analysis" | "workItems" | "findings"> & {
+  archivedAt: string;
+  units: Array<{ id: string; visualReading: VisualReading }>;
+};
+export const PDF_RENDER_VERSION = "pdf-jp-v2";
+export function needsSourceRendering(document: SourceDocument): boolean {
+  return document.rendering?.status === "pending" || document.rendering?.status === "unavailable" ||
+    (document.format === "pdf" && document.rendering?.version !== PDF_RENDER_VERSION);
+}
 export type DocumentWorkItem = {
   id: string;
   title: string;
@@ -137,7 +147,7 @@ export function validateDocumentItems(document: SourceDocument, raw: unknown): D
     const note = typeof item.note === "string" ? item.note.slice(0,500) : "";
     const visualSiteNote="工場の区分は画像の読取りに基づく候補です。";
     const title=item.title.trim(),prefix=site?[`${site}：`,`${site}:`].find(value=>title.startsWith(value)):undefined;
-    return { id: `work-${i + 1}`, title: prefix?title.slice(prefix.length).trim()||title:title, scope: item.scope!, site, unitIds: [...new Set(item.unitIds)], contextUnitIds: [...new Set(item.contextUnitIds)],
+    return { id: `${document.format === "pdf" && document.rendering?.version ? `${document.rendering.version}:` : ""}work-${i + 1}`, title: prefix?title.slice(prefix.length).trim()||title:title, scope: item.scope!, site, unitIds: [...new Set(item.unitIds)], contextUnitIds: [...new Set(item.contextUnitIds)],
       note: proposedSite && !site ? `${note} 対象「${proposedSite}」は原資料で確認できないため、工場の区分には使っていません。` : visualSite && !literalSite && !note.includes(visualSiteNote) ? `${note} ${visualSiteNote}` : note };
   });
 }

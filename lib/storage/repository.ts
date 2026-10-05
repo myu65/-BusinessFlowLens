@@ -16,6 +16,9 @@ export type ProjectSnapshot = {
 export class ProjectChangedError extends Error {
   constructor() { super("保存済みの内容が変わりました。最新の業務を読み直して、統合を確認してください。"); }
 }
+export class SourceDocumentChangedError extends Error {
+  constructor() { super("資料の状態が変わりました。ページを開き直してください。"); }
+}
 
 export type WorkflowRevisionSummary = {
   id: number;
@@ -62,7 +65,7 @@ export type NewWorkflowRevision = {
 export interface BusinessFlowRepository {
   saveSourceDocument(projectId: string, document: SourceDocument, bytes: Uint8Array, images?: SourceImage[]): Promise<void>;
   getSourceImage(projectId: string, documentId: string, unitId: string): Promise<SourceImage | null>;
-  setSourceDocumentState(projectId: string, documentId: string, state: "active" | "withdrawn"): Promise<SourceDocument | null>;
+  setSourceDocumentState(projectId: string, documentId: string, state: "active" | "withdrawn", expectedActiveGeneration?: number): Promise<SourceDocument | null>;
   listSourceDocuments(projectId: string): Promise<Array<Pick<SourceDocument, "id" | "name" | "format" | "createdAt">>>;
   getSourceDocument(projectId: string, documentId: string): Promise<{ document: SourceDocument; bytes: Uint8Array } | null>;
   findSourceDocument(projectId: string, sha256: string): Promise<SourceDocument | null>;
