@@ -3,6 +3,7 @@ import type {
   FollowUpAnswer,
   LensGraph,
 } from "@/lib/graph";
+import type { SourceDocument } from "@/lib/source-document";
 
 export type ProjectSnapshot = {
   projectId: string;
@@ -55,6 +56,10 @@ export type NewWorkflowRevision = {
 };
 
 export interface BusinessFlowRepository {
+  saveSourceDocument(projectId: string, document: SourceDocument, bytes: Uint8Array): Promise<void>;
+  listSourceDocuments(projectId: string): Promise<Array<Pick<SourceDocument, "id" | "name" | "format" | "createdAt">>>;
+  getSourceDocument(projectId: string, documentId: string): Promise<{ document: SourceDocument; bytes: Uint8Array } | null>;
+  findSourceDocument(projectId: string, sha256: string): Promise<SourceDocument | null>;
   loadProject(projectId: string): Promise<ProjectSnapshot | null>;
   saveProject(snapshot: ProjectSnapshot): Promise<void>;
 

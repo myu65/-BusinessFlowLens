@@ -23,6 +23,7 @@ import type {
   WorkflowRevision,
   WorkflowRevisionSummary,
 } from "@/lib/storage/repository";
+import type { SourceDocument } from "@/lib/source-document";
 
 type SqliteRow = Record<string, unknown>;
 
@@ -273,6 +274,10 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
         "  name TEXT NOT NULL,",
         "  updated_at TEXT NOT NULL",
         ");",
+        "CREATE TABLE IF NOT EXISTS source_documents (",
+        "  project_id TEXT NOT NULL, id TEXT NOT NULL, document_json TEXT NOT NULL, original_bytes BLOB NOT NULL,",
+        "  PRIMARY KEY (project_id, id), FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE",
+        ");",
         "CREATE TABLE IF NOT EXISTS workflows (",
         "  project_id TEXT NOT NULL,",
         "  id TEXT NOT NULL,",
@@ -358,6 +363,7 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
         "  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE",
         ");",
         "CREATE INDEX IF NOT EXISTS idx_workflows_project ON workflows(project_id);",
+        "CREATE INDEX IF NOT EXISTS idx_source_documents_sha ON source_documents(project_id, json_extract(document_json, '$.sha256'));",
         "CREATE INDEX IF NOT EXISTS idx_nodes_project_kind ON graph_nodes(project_id, kind);",
         "CREATE INDEX IF NOT EXISTS idx_nodes_project_workflow ON graph_nodes(project_id, workflow_id);",
         "CREATE INDEX IF NOT EXISTS idx_edges_project_source ON graph_edges(project_id, source_id);",
@@ -414,6 +420,26 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
     if (!exists) {
       this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
     }
+  }
+
+  async saveSourceDocument(projectId: string, document: SourceDocument, bytes: Uint8Array): Promise<void> {
+    this.db.prepare("INSERT INTO source_documents (project_id, id, document_json, original_bytes) VALUES (?, ?, ?, ?) ON CONFLICT(project_id, id) DO UPDATE SET document_json = excluded.document_json")
+      .run(projectId, document.id, JSON.stringify(document), bytes);
+  }
+
+  async getSourceDocument(projectId: string, documentId: string): Promise<{ document: SourceDocument; bytes: Uint8Array } | null> {
+    const row = this.db.prepare("SELECT document_json, original_bytes FROM source_documents WHERE project_id = ? AND id = ?").get(projectId, documentId);
+    return row ? { document: JSON.parse(String(row.document_json)), bytes: row.original_bytes as Uint8Array } : null;
+  }
+
+  async listSourceDocuments(projectId: string): Promise<Array<Pick<SourceDocument, "id" | "name" | "format" | "createdAt">>> {
+    return this.db.prepare("SELECT id, json_extract(document_json, '$.name') AS name, json_extract(document_json, '$.format') AS format, json_extract(document_json, '$.createdAt') AS createdAt FROM source_documents WHERE project_id = ? ORDER BY createdAt DESC LIMIT 20")
+      .all(projectId) as Array<Pick<SourceDocument, "id" | "name" | "format" | "createdAt">>;
+  }
+
+  async findSourceDocument(projectId: string, sha256: string): Promise<SourceDocument | null> {
+    const row=this.db.prepare("SELECT document_json FROM source_documents WHERE project_id = ? AND json_extract(document_json, '$.sha256') = ? LIMIT 1").get(projectId,sha256);
+    return row ? JSON.parse(String(row.document_json)) : null;
   }
 
   async loadProject(projectId: string): Promise<ProjectSnapshot | null> {

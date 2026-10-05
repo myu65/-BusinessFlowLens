@@ -37,6 +37,8 @@ import { InputOrganization } from "./InputOrganization";
 import { InputSystemDependencies } from "./InputSystemDependencies";
 import { createQuestionReferenceFinder, referenceAnswer } from "@/lib/question-evidence";
 import { confirmHandoffInformation } from "@/lib/handoff-information";
+import { DocumentInput, DocumentSourceEvidence } from "./DocumentInput";
+import { documentWorkSource, documentWorkName, type DocumentEvidence, type SourceDocument, type DocumentWorkItem } from "@/lib/source-document";
 
 const REVIEW_PAGE_SIZE = INPUT_CANVAS_PAGE_SIZE;
 
@@ -96,6 +98,7 @@ export function InputWorkbench({
   const workflow = draft?.workflow ?? saved;
   const memo = transcripts[key] ?? "";
   const [query, setQuery] = useState("");
+  const [documentInputOpen, setDocumentInputOpen] = useState(false);
   const [stepKey, setStepKey] = useState("");
   const [stepPage, setStepPage] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -381,9 +384,10 @@ export function InputWorkbench({
       saved?.reviewContext?.followUpAnswers ??
       [],
     text = memo,
+    documentStart?: { workflow: Workflow; key: string; evidence: DocumentEvidence },
   ) {
     if (!text.trim()) return;
-    const w = workflow ?? {
+    const w = documentStart?.workflow ?? workflow ?? {
       id: `note-${crypto.randomUUID()}`,
       familyId: undefined,
       scenario: "current" as const,
@@ -392,8 +396,8 @@ export function InputWorkbench({
         .split(/[。\n]/)[0]
         .slice(0, 24)}`,
     };
-    const requestKey = key,
-      before = review;
+    const requestKey = documentStart?.key ?? key,
+      before = documentStart ? null : review;
     setOperation("organize");
     setBusy(true);
     setError("");
@@ -426,7 +430,7 @@ export function InputWorkbench({
             before?.organization?.title,
           ),
         },
-        review: payload.review,
+        review: { ...payload.review, documentEvidence: documentStart ? [documentStart.evidence] : before?.documentEvidence },
         provider: payload.provider,
         sourceNotes: text,
         baseline: before,
@@ -466,6 +470,18 @@ export function InputWorkbench({
       setBusy(false);
     }
   }
+  async function startDocumentWork(document: SourceDocument, item: DocumentWorkItem) {
+    const requestKey = `doc-${document.id}-${item.id}`;
+    setDocumentInputOpen(false);
+    if (drafts[requestKey] || graph.workflows.some(w => w.id === requestKey)) { onSelect(requestKey); setMobilePane("flow"); return; }
+    const text = documentWorkSource(document, item);
+    onTranscripts({ ...latest.current.transcripts, [requestKey]: text });
+    onSelect(requestKey);
+    await organize([], text, { key: requestKey, workflow: { id: requestKey, name: documentWorkName(item), scenario: item.scope, scenarioLabel: item.site || undefined }, evidence: {
+      documentId: document.id, documentName: document.name, sha256: document.sha256, itemId: item.id, unitIds: [...new Set([...item.contextUnitIds, ...item.unitIds])],
+    } });
+  }
+
   async function save() {
     if (pendingAnswers) { setError("入力した回答を、確認事項の見直しで流れへ反映してから保存してください。"); return; }
     if (!draft || stale || busy || addition.trim()) return;
@@ -632,6 +648,7 @@ export function InputWorkbench({
   </>);
   const stepDetail = review && selected ? (<>
               <div ref={focusRef} className="input-focus-anchor">
+                {review.documentEvidence?.length ? <DocumentSourceEvidence key={key} projectId={projectId} evidence={review.documentEvidence} focusText={selected.evidence} stepName={selected.name} /> : null}
                 {!edit && <InputReviewFlow
                   review={review}
                   selected={selected}
@@ -1202,7 +1219,8 @@ export function InputWorkbench({
         </button>
         <button aria-pressed={mobilePane === "details"} disabled={!selected} onClick={() => setMobilePane("details")}>3 手順の詳細</button>
       </nav>
-      <div className="input-workbench-grid">
+      <div hidden={!documentInputOpen}><DocumentInput projectId={projectId} busy={busy} completed={new Set([...Object.keys(drafts), ...graph.workflows.map(w => w.id)])} savedIds={new Set(graph.workflows.map(w => w.id))} activeDocumentId={review?.documentEvidence?.[0]?.documentId} onClose={() => setDocumentInputOpen(false)} onStart={startDocumentWork} onAIResponse={() => setAIResponse("success")} /></div>
+      <div className="input-workbench-grid" hidden={documentInputOpen}>
         <section className="input-note-pane">
           <div className="input-note-heading">
             <h2>
@@ -1221,6 +1239,7 @@ export function InputWorkbench({
               </button>
             )}
           </div>
+          <button className="input-document-entry button-secondary" disabled={busy} onClick={() => setDocumentInputOpen(true)}>{review?.documentEvidence?.length ? "資料の別の仕事を見る" : "Excel・PDFから始める"}</button>
           {!review && memoComposer}
           {review && selected && <button className="input-add-work" disabled={busy || stale} onClick={() => openAddition()}>{addition.trim() ? "入力中の話を続ける" : "＋ 分かったことを足す"}</button>}
           {review && <p className="input-growing-hint">図の＋から、途中の作業も一つずつ足せます。</p>}

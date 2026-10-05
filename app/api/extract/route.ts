@@ -61,7 +61,7 @@ export async function POST(request: Request) {
           };
         })();
 
-    return NextResponse.json(result);
+    return NextResponse.json({ ...result, review: { ...result.review, documentEvidence: body.previousReview?.documentEvidence } });
   } catch (error) {
     const failure = safeAIError(
       error,
