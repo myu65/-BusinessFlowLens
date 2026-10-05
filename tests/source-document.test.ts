@@ -75,8 +75,8 @@ test("original bytes and provenance survive SQLite save/reload and local normali
 
 test("the document entry leads with the file action, scope and example actions before the source library",()=>{
   const html=renderToStaticMarkup(React.createElement(DocumentInput,{projectId:"p",busy:false,onClose:()=>{},onStart:()=>{},completed:new Set<string>()}));
-  assert.match(html,/Excel・PDFを選ぶ/);assert.match(html,/文字を選択できるPDF/);assert.match(html,/監査Excelの例を読み込む/);
-  assert.ok(html.indexOf("Excel・PDFを選ぶ")<html.indexOf("監査Excelの例"));
+  assert.match(html,/資料・画像を選ぶ/);assert.match(html,/Word・PowerPoint・PNG・JPEG・WebP/);assert.match(html,/監査Excelの例を読み込む/);
+  assert.ok(html.indexOf("資料・画像を選ぶ")<html.indexOf("監査Excelの例"));
 });
 
 test("the selected step opens its literal source row, while horizontal merged titles display once",async()=>{

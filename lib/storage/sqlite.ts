@@ -23,7 +23,7 @@ import type {
   WorkflowRevision,
   WorkflowRevisionSummary,
 } from "@/lib/storage/repository";
-import type { SourceDocument } from "@/lib/source-document";
+import type { SourceDocument, SourceImage } from "@/lib/source-document";
 
 type SqliteRow = Record<string, unknown>;
 
@@ -278,6 +278,10 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
         "  project_id TEXT NOT NULL, id TEXT NOT NULL, document_json TEXT NOT NULL, original_bytes BLOB NOT NULL,",
         "  PRIMARY KEY (project_id, id), FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE",
         ");",
+        "CREATE TABLE IF NOT EXISTS source_document_images (",
+        "  project_id TEXT NOT NULL, document_id TEXT NOT NULL, unit_id TEXT NOT NULL, image_bytes BLOB NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL,",
+        "  PRIMARY KEY (project_id, document_id, unit_id), FOREIGN KEY (project_id, document_id) REFERENCES source_documents(project_id, id) ON DELETE CASCADE",
+        ");",
         "CREATE TABLE IF NOT EXISTS workflows (",
         "  project_id TEXT NOT NULL,",
         "  id TEXT NOT NULL,",
@@ -422,9 +426,34 @@ export class SqliteBusinessFlowRepository implements BusinessFlowRepository {
     }
   }
 
-  async saveSourceDocument(projectId: string, document: SourceDocument, bytes: Uint8Array): Promise<void> {
-    this.db.prepare("INSERT INTO source_documents (project_id, id, document_json, original_bytes) VALUES (?, ?, ?, ?) ON CONFLICT(project_id, id) DO UPDATE SET document_json = excluded.document_json")
-      .run(projectId, document.id, JSON.stringify(document), bytes);
+  async saveSourceDocument(projectId: string, document: SourceDocument, bytes: Uint8Array, images: SourceImage[] = []): Promise<void> {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const previous = this.db.prepare("SELECT document_json FROM source_documents WHERE project_id=? AND id=?").get(projectId, document.id);
+      if (previous) {
+        const saved = JSON.parse(String(previous.document_json)) as SourceDocument;
+        if (saved.lifecycle?.state === "withdrawn" || (saved.lifecycle?.generation ?? 0) !== (document.lifecycle?.generation ?? 0)) throw new Error("資料の読取りは取り消されています。遅れて届いた結果は反映していません。");
+      }
+      this.db.prepare("INSERT INTO source_documents (project_id, id, document_json, original_bytes) VALUES (?, ?, ?, ?) ON CONFLICT(project_id, id) DO UPDATE SET document_json = excluded.document_json")
+        .run(projectId, document.id, JSON.stringify(document), bytes);
+      const insert = this.db.prepare("INSERT INTO source_document_images (project_id, document_id, unit_id, image_bytes, width, height) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(project_id, document_id, unit_id) DO UPDATE SET image_bytes=excluded.image_bytes, width=excluded.width, height=excluded.height");
+      for (const image of images) {
+        if (!document.units.some(unit => unit.id === image.unitId && unit.image)) throw new Error("元資料の画像位置を確認できません。");
+        insert.run(projectId, document.id, image.unitId, image.bytes, image.width, image.height);
+      }
+      this.db.exec("COMMIT");
+    } catch (error) { this.db.exec("ROLLBACK"); throw error; }
+  }
+
+  async getSourceImage(projectId: string, documentId: string, unitId: string): Promise<SourceImage | null> {
+    const row = this.db.prepare("SELECT image_bytes, width, height FROM source_document_images WHERE project_id=? AND document_id=? AND unit_id=?").get(projectId, documentId, unitId);
+    return row ? { unitId, mimeType: "image/jpeg", bytes: row.image_bytes as Uint8Array, width: Number(row.width), height: Number(row.height) } : null;
+  }
+
+  async setSourceDocumentState(projectId: string, documentId: string, state: "active" | "withdrawn"): Promise<SourceDocument | null> {
+    this.db.prepare("UPDATE source_documents SET document_json=json_set(document_json, '$.lifecycle', json_object('state', ?, 'generation', COALESCE(json_extract(document_json, '$.lifecycle.generation'), 0)+1, 'changedAt', ?)) WHERE project_id=? AND id=?")
+      .run(state, new Date().toISOString(), projectId, documentId);
+    return (await this.getSourceDocument(projectId, documentId))?.document ?? null;
   }
 
   async getSourceDocument(projectId: string, documentId: string): Promise<{ document: SourceDocument; bytes: Uint8Array } | null> {

@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
 import {
   getAIConfigurationStatus,
   extractWorkflowReviewWithAI,
   resolveWorkflowReviewWithAI,
+  readDocumentImagesWithAI,
 } from "../lib/ai/provider";
 import { aiStatusLabel } from "../lib/ai/status";
 import { AIProviderError, safeAIError } from "../lib/ai/errors";
@@ -12,6 +14,37 @@ import { extractGroundedLocal } from "../lib/local-review";
 import type { ExtractionReview, LensGraph } from "../lib/graph";
 import { previewReviewGraph } from "../lib/review-workbench";
 import { knowledgeIndex } from "../lib/knowledge";
+import { sourceDocumentMetadata } from "../lib/source-document-parser";
+
+test("vision transports keep image bytes and unit IDs paired for OpenAI and Anthropic, rejecting invented pages",async()=>{
+  const bytes=readFileSync("public/examples/vendor-inspection.jpg");
+  const doc=sourceDocumentMetadata("vendor.jpg",bytes);
+  doc.units=[{id:"image-1",location:"画像1",text:"",image:{mimeType:"image/jpeg",width:1280,height:720}}];
+  for(const mode of ["openai","anthropic"]){
+    let requestBody:any,invalid=false;
+    const server=createServer(async(request,response)=>{
+      const chunks:Buffer[]=[];for await(const chunk of request)chunks.push(Buffer.from(chunk));
+      requestBody=JSON.parse(Buffer.concat(chunks).toString());
+      const text=JSON.stringify({pages:[{unitId:invalid?"invented-page":"image-1",description:"外部検査会社へ依頼書を送る。",uncertainties:["業者内の判断は見えない。"]}]});
+      response.setHeader("Content-Type","application/json");
+      response.end(JSON.stringify(mode==="openai"?{choices:[{message:{content:text}}]}:{content:[{type:"text",text}]}));
+    });
+    await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));
+    try{await withConfig({AI_MODEL:"mock-vision",AI_API_KEY:"test-only",AI_BASE_URL:`http://127.0.0.1:${(server.address() as {port:number}).port}`,AI_PROTOCOL:mode},async()=>{
+      const result=await readDocumentImagesWithAI(doc,[{unitId:"image-1",bytes,mimeType:"image/jpeg",width:1280,height:720}]);
+      assert.equal(result[0].unitId,"image-1");assert.equal(result[0].reading.model,"mock-vision");
+      assert.deepEqual(result[0].reading.uncertainties,["業者内の判断は見えない。"]);
+      const content=requestBody.messages.at(-1).content;
+      assert.equal(content[0].type,"text");assert.match(content[0].text,/image-1/);
+      const encoded=mode==="openai"?content[1].image_url.url.split(",")[1]:content[1].source.data;
+      assert.deepEqual(Buffer.from(encoded,"base64"),bytes);
+      invalid=true;
+      await assert.rejects(()=>readDocumentImagesWithAI(doc,[{unitId:"image-1",bytes,mimeType:"image/jpeg",width:1280,height:720}]),/読取り結果/);
+      const cancelled=new AbortController();cancelled.abort();
+      await assert.rejects(()=>readDocumentImagesWithAI(doc,[{unitId:"image-1",bytes,mimeType:"image/jpeg",width:1280,height:720}],cancelled.signal),/取り消されています/);
+    });}finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+  }
+});
 
 const empty: LensGraph = { workflows: [], nodes: [], edges: [], dataFlows: [] };
 const workflow = { id: "new", name: "入力した話" };
