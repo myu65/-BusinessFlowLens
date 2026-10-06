@@ -4,6 +4,8 @@ import { scopedDataFlows, aggregateDataFlows, scenarioGraph } from "@/lib/knowle
 import { DataFlowExplorer } from "./DataFlowExplorer";
 import { KnowledgeExplorer, type KnowledgeExploration } from "./KnowledgeExplorer";
 import { exploreSavedStory } from "@/lib/exploration";
+import { assetPosition, knowledgeLocation, knowledgePosition, type ScreenLocation, type ScreenPosition, type WorkspaceSection } from "@/lib/navigation";
+import { useScreenNavigation } from "./useScreenNavigation";
 import { InputWorkbench } from "./InputWorkbench";
 import { AssetExplorer, CrossBusinessOverview, type AssetExploration } from "./ScopedExplorers";
 import { NEW_MEMO_ID, hasUnreflectedNotes, inputKeyForWorkflow, notesAfterSave, previewReviewGraph, recordReviewEdits, type InputDraft } from "@/lib/review-workbench";
@@ -46,13 +48,7 @@ import {
   type WorkflowScenario,
 } from "@/lib/graph";
 
-type Section =
-  | "company"
-  | "interviews"
-  | "workflow"
-  | "dataflow"
-  | "assets"
-  | "overview";
+type Section = WorkspaceSection;
 
 
 type PendingExtraction = {
@@ -1729,6 +1725,7 @@ function WorkflowView({
   setWorkflowId,
   onEdit,
   onGraphApply,
+  position, onPositionChange,
 }: {
   graph: LensGraph;
   workflowId: string;
@@ -1736,10 +1733,11 @@ function WorkflowView({
   onEdit: () => void;
   onGraphApply: (graph: LensGraph) => void;
   focusedStepId?: string; onFocusStep?: (workflowId:string,stepId:string)=>void;
+  position?: ScreenPosition; onPositionChange?: (position: ScreenPosition) => void;
 }) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [ownership, setOwnership] = useState<OwnershipState>({
-    department: "",
+    department: position?.department ?? "",
     responsiblePerson: "",
   });
   const [executionMode, setExecutionMode] = useState<
@@ -1778,7 +1776,7 @@ function WorkflowView({
   }
 
   return (
-    <WorkflowExplorer initialLevel="business" graph={graph} workflowId={workflowId} selectedStepId={selectedNode?.kind === "process" ? selectedNode.id : focusedStepId} onFocusStep={onFocusStep} onSelectWorkflow={setWorkflowId} onEdit={onEdit} onGraphApply={onGraphApply}>
+    <WorkflowExplorer position={position} onPositionChange={onPositionChange} initialLevel="business" graph={graph} workflowId={workflowId} selectedStepId={selectedNode?.kind === "process" ? selectedNode.id : focusedStepId} onFocusStep={onFocusStep} onSelectWorkflow={setWorkflowId} onEdit={onEdit} onGraphApply={onGraphApply}>
     <section className="page-view">
       <header className="page-header page-header--stackable">
         <div>
@@ -1896,17 +1894,20 @@ function WorkflowView({
   );
 }
 
-function DataFlowView({ graph, initialWorkflowId }: { graph: LensGraph; initialWorkflowId: string }) {
-  const [scope, setScope] = useState<WorkflowScenario>(graph.workflows.find(w => w.id === initialWorkflowId)?.scenario ?? "current");
-  const [workflowId, setWorkflowId] = useState(graph.workflows.some(w => w.id === initialWorkflowId) ? initialWorkflowId : "");
+function DataFlowView({ graph, initialWorkflowId, position, onPositionChange }: { graph: LensGraph; initialWorkflowId: string; position?: ScreenPosition; onPositionChange?: (value:ScreenPosition)=>void }) {
+  const [scope, setScope] = useState<WorkflowScenario>(position?.scope ?? graph.workflows.find(w => w.id === initialWorkflowId)?.scenario ?? "current");
+  const [workflowId, setWorkflowId] = useState(position?.workflowId ?? (graph.workflows.some(w => w.id === initialWorkflowId) ? initialWorkflowId : ""));
   const [pair, setPair] = useState("");
   const [page, setPage] = useState(0);
   const [ownership, setOwnership] = useState<OwnershipState>({
-    department: "",
+    department: position?.department ?? "",
     responsiblePerson: "",
   });
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [selectedFlowId, setSelectedFlowId] = useState<string | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(position?.selectedSystemId ?? null);
+  const [selectedFlowId, setSelectedFlowId] = useState<string | null>(position?.flowId ?? null);
+  useEffect(() => { if (position?.scope) setScope(position.scope); if (position?.workflowId !== undefined) setWorkflowId(position.workflowId); if (position && 'flowId' in position) setSelectedFlowId(position.flowId || null); }, [position?.scope, position?.workflowId, position?.flowId]);
+  useEffect(() => onPositionChange?.({scope,workflowId,department:ownership.department,selectedSystemId:selectedNodeId??undefined,flowId:selectedFlowId??undefined}),
+    [scope,workflowId,ownership.department,selectedNodeId,selectedFlowId,onPositionChange]);
 
   const ownerFilter = ownershipFilter(ownership);
   const processById = new Map(
@@ -2180,6 +2181,12 @@ function Workspace() {
   const [focusedSteps,setFocusedSteps]=useState<Record<string,string>>({});
   const [drafts, setDrafts] = useState<Record<string, InputDraft>>({});
   const [draftHydrated, setDraftHydrated] = useState(false);
+  const [screenPositions, setScreenPositions] = useState<Partial<Record<Section, ScreenPosition>>>({});
+  const keepInputPosition = useCallback((value: ScreenPosition) => setScreenPositions(p => ({ ...p, interviews: value })), []);
+  const keepWorkflowPosition = useCallback((value: ScreenPosition) => setScreenPositions(p => ({ ...p, workflow: value })), []);
+  const keepDataflowPosition = useCallback((value: ScreenPosition) => setScreenPositions(p => ({ ...p, dataflow: {...p.dataflow,...value} })), []);
+  const keepOverviewPosition = useCallback((value: ScreenPosition) => setScreenPositions(p => ({ ...p, overview: value })), []);
+  const [linkNotice, setLinkNotice] = useState('');
   const savedSnapshot = useRef("");
   const persistedTranscripts = useRef(transcripts);
   const activeDraft = drafts[selectedWorkflowId];
@@ -2191,6 +2198,28 @@ function Workspace() {
   const [saveStatus, setSaveStatus] = useState<
     "loading" | "saving" | "saved" | "error"
   >("loading");
+
+  const openScreenLink = useCallback((location: ScreenLocation, selectedId: string) => {
+    setSection(location.view); setSelectedWorkflowId(selectedId);
+    setScreenPositions(p => ({ ...p, [location.view]: location }));
+    if (location.workflowId) setFocusedSteps(p => { const next = { ...p }; if (location.stepId) next[location.workflowId!] = location.stepId; else delete next[location.workflowId!]; return next; });
+    if (location.view === 'company') setKnowledgeExploration(knowledgePosition(location));
+    if (location.view === 'assets') setAssetExploration({ id: location.assetId ?? '', scope: location.scope ?? 'current', department: location.department ?? '',
+      query: location.query, kind: location.kind, page: location.page, readingPosition: location.assetId ? assetPosition(location.assetId, location.tab, location) : undefined,
+      reading: location.workflowId ? { workflowId: location.workflowId, stepId: location.stepId ?? '', dataId: location.dataId ?? '', depth: location.depth ?? 'step', lens: location.lens ?? 'work' } : undefined });
+  }, []);
+  const screenLocation = useMemo<ScreenLocation>(() => {
+    if (section === 'company') return knowledgeLocation(projectId, knowledgeExploration);
+    if (section === 'assets') return { projectId, view: section, assetId: assetExploration?.id, scope: assetExploration?.scope,
+      department: assetExploration?.department, query: assetExploration?.query, kind: assetExploration?.kind, page: assetExploration?.page,
+      ...assetExploration?.readingPosition, tab: assetExploration?.readingPosition?.section, ...assetExploration?.reading };
+    const position = screenPositions[section] ?? {};
+    return { projectId, view: section, ...position,
+      workflowId: section === 'interviews' || section === 'workflow' ? visibleWorkflowId === NEW_MEMO_ID ? undefined : visibleWorkflowId : position.workflowId,
+      stepId: section === 'interviews' ? focusedSteps[visibleWorkflowId] : position.stepId };
+  }, [section, projectId, knowledgeExploration, assetExploration, screenPositions, visibleWorkflowId, focusedSteps]);
+  const navigation = useScreenNavigation({ ready: hydrated && draftHydrated, projectId, graph, drafts,
+    selectedId: selectedWorkflowId, location: screenLocation, onOpen: openScreenLink });
 
   useEffect(() => {
     let cancelled = false;
@@ -2311,6 +2340,7 @@ function Workspace() {
   const inputStatus = draftCount ? `保存前 ${draftCount}件` : pendingNotes ? "未反映のメモあり" : saveLabel;
   const navigateSection = (next: Section) => {
     setSection(next);
+    navigation.clearNotice(); setLinkNotice('');
     window.scrollTo({ top: 0, behavior: "instant" });
   };
 
@@ -2337,8 +2367,15 @@ function Workspace() {
           >
             {saveStatus === "error" ? saveLabel : inputStatus}
           </span>
+          <button className="screen-link-button" disabled={!navigation.link} onClick={async () => {
+            try { await navigator.clipboard.writeText(navigation.getLink()); setLinkNotice(activeDraft || pendingNotes ? 'リンクをコピーしました。保存前の入力は、このタブで開けます。' : 'この画面のリンクをコピーしました。'); }
+            catch { setLinkNotice('アドレスバーに表示されたURLをコピーしてください。'); }
+          }}>画面のリンク</button>
         </div>
       </header>
+      {navigation.notice && <div className="screen-link-notice" role="status">{navigation.notice}<button onClick={navigation.clearNotice}>閉じる</button></div>}
+      {linkNotice && <div className="screen-link-notice" role="status">{linkNotice}<button onClick={()=>setLinkNotice('')}>閉じる</button></div>}
+      {!navigation.ready && <section className="page-view"><h1>{saveStatus === 'error' ? '会社の情報を読み込めませんでした' : '指定された画面を開いています'}</h1>{saveStatus === 'error' && <button onClick={()=>window.location.reload()}>もう一度読み込む</button>}</section>}
       {!["company", "interviews"].includes(section) && (
         <nav className="detail-nav" aria-label="調べる対象を選ぶ">
           <span>詳しく調べる：</span>
@@ -2355,8 +2392,9 @@ function Workspace() {
         </nav>
       )}
 
-      {section === "company" && (hydrated ? (
+      {section === "company" && navigation.ready && (hydrated ? (
         <KnowledgeExplorer
+          key={`company:${navigation.version}`}
           exploration={knowledgeExploration}
           onExplorationChange={keepKnowledgeExploration}
           onInput={id => { setSelectedWorkflowId(id ?? NEW_MEMO_ID); navigateSection("interviews"); }}
@@ -2374,8 +2412,9 @@ function Workspace() {
         </section>
       ))}
 
-      {section === "interviews" && hydrated && draftHydrated ? (
+      {section === "interviews" && navigation.ready ? (
         <InputWorkbench
+          position={screenPositions.interviews} navigationVersion={navigation.version} onPositionChange={keepInputPosition}
           onNavigate={(view,id,focus)=>{if(id)setSelectedWorkflowId(inputKeyForWorkflow(drafts,id));if(view==='company')setKnowledgeExploration(id?exploreSavedStory(graph,id,focus):{focus:{kind:'company'},scope:'current',department:'',query:'',category:'',history:[]});if(view==='assets'&&focus)setAssetExploration({id:focus,scope:graph.workflows.find(w=>w.id===id)?.scenario??'current',department:''});if(id&&focus&&view!=='assets')setFocusedSteps(s=>({...s,[id]:focus}));navigateSection(view as Section);}}
           onExplore={(id, stepId) => { setKnowledgeExploration(exploreSavedStory(graph, id, stepId)); navigateSection("company"); }}
           focusedStepId={focusedSteps[visibleWorkflowId]} onFocusStep={(id,step)=>setFocusedSteps(s=>({...s,[id]:step}))}
@@ -2394,10 +2433,11 @@ function Workspace() {
         />
       ) : null}
 
-      {section === "workflow" ? (
+      {section === "workflow" && navigation.ready ? (
         <>
         {activeDraft && <div className="input-preview-banner" role="status">保存前の候補を表示しています。<button onClick={() => setSection("interviews")}>話と構造の確認・訂正へ戻る</button></div>}
         <WorkflowView
+          key={`workflow:${navigation.version}`} position={screenPositions.workflow} onPositionChange={keepWorkflowPosition}
           focusedStepId={focusedSteps[visibleWorkflowId]} onFocusStep={(id,step)=>setFocusedSteps(s=>({...s,[id]:step}))}
           graph={visibleGraph}
           workflowId={visibleWorkflowId}
@@ -2408,16 +2448,25 @@ function Workspace() {
         </>
       ) : null}
 
-      {section === "dataflow" ? <>{activeDraft && <div className="input-preview-banner" role="status">保存前の候補を表示しています。<button onClick={()=>setSection("interviews")}>入力と構造の確認へ戻る</button></div>}<DataFlowExplorer graph={visibleGraph} initialWorkflowId={visibleWorkflowId} onSelectWorkflow={id => setSelectedWorkflowId(inputKeyForWorkflow(drafts, id))} onGraphApply={activeDraft ? ()=>setSection("interviews") : setGraph} onEdit={id => {setSelectedWorkflowId(inputKeyForWorkflow(drafts, id));setSection("interviews");}}><DataFlowView graph={visibleGraph} initialWorkflowId={visibleWorkflowId} /></DataFlowExplorer></> : null}
+      {section === "dataflow" && navigation.ready ? <>
+        {activeDraft && <div className="input-preview-banner" role="status">保存前の候補を表示しています。<button onClick={()=>setSection("interviews")}>入力と構造の確認へ戻る</button></div>}
+        <DataFlowExplorer key={`dataflow:${navigation.version}`} position={screenPositions.dataflow} onPositionChange={keepDataflowPosition}
+          graph={visibleGraph} initialWorkflowId={visibleWorkflowId}
+          onSelectWorkflow={id => setSelectedWorkflowId(inputKeyForWorkflow(drafts, id))}
+          onGraphApply={activeDraft ? ()=>setSection("interviews") : setGraph}
+          onEdit={id => {setSelectedWorkflowId(inputKeyForWorkflow(drafts, id));setSection("interviews");}}>
+          <DataFlowView position={screenPositions.dataflow} onPositionChange={keepDataflowPosition} graph={visibleGraph} initialWorkflowId={visibleWorkflowId} />
+        </DataFlowExplorer>
+      </> : null}
 
-      {section === "assets" ? <AssetExplorer exploration={assetExploration} onExplorationChange={keepAssetExploration} graph={graph} onGraphApply={setGraph}
+      {section === "assets" && navigation.ready ? <AssetExplorer key={`assets:${navigation.version}`} exploration={assetExploration} onExplorationChange={keepAssetExploration} graph={graph} onGraphApply={setGraph}
         onEdit={id=>{setSelectedWorkflowId(id);setSection("interviews");}}
         onActivity={id => {
           setKnowledgeExploration(previous => ({ focus: { kind: "activity", id }, scope: assetExploration?.scope ?? "current", department: assetExploration?.department ?? "", query: "", category: "",
             history: assetExploration ? [...(previous?.history ?? []), { focus: { kind: "asset", id: assetExploration.id }, scope: assetExploration.scope, department: assetExploration.department, query: "", category: "", assetReading: assetExploration.readingPosition }] : [] }));
           navigateSection("company");
         }} /> : null}
-      {section === "overview" ? <CrossBusinessOverview graph={graph} onOpen={id=>{setSelectedWorkflowId(id);setSection("interviews");}} /> : null}
+      {section === "overview" && navigation.ready ? <CrossBusinessOverview key={`overview:${navigation.version}`} position={screenPositions.overview} onPositionChange={keepOverviewPosition} graph={graph} onOpen={id=>{setSelectedWorkflowId(id);setSection("interviews");}} /> : null}
     </main>
   );
 }
