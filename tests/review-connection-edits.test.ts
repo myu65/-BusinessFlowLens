@@ -29,6 +29,19 @@ test('adding a return changes only the connection and retains the held result an
   assert.equal(next.transitions.at(-1)!.holdEffect,'response');assert.equal(next.transitions.at(-1)!.humanEdits![0].evidence,back.evidence);
 });
 
+test('a human-confirmed self-loop with retry and success conditions survives SQLite without duplicating the task',async()=>{
+  const repo=new SqliteBusinessFlowRepository(join(mkdtempSync(join(tmpdir(),'bfl-self-loop-')),'qa.sqlite'));
+  const before=fixture(), retry:ExtractionTransition={fromStepKey:'s2',toStepKey:'s2',condition:'通信失敗時、3回未満なら30秒後',certainty:'confirmed',evidence:'担当者が再試行の上限と待ち時間を確認'};
+  const edited=changeReviewConnection(before,null,retry), workflow:Workflow={id:'retry-flow',name:'検査結果の送信'}, empty:LensGraph={workflows:[],nodes:[],edges:[],dataFlows:[]};
+  await repo.saveProject({projectId:'retry',projectName:'繰り返しの検証',graph:previewReviewGraph(empty,workflow,edited),transcripts:{'retry-flow':'元の話'},updatedAt:'saved'});
+  const snapshot=(await repo.loadProject('retry'))!, saved=buildWorkflowReviewFromGraph(snapshot.graph,workflow.id);
+  assert.equal(saved.steps.length,before.steps.length);
+  const restored=saved.transitions.find(edge=>edge.fromStepKey==='s2'&&edge.toStepKey==='s2')!;
+  assert.equal(restored.condition,retry.condition);assert.equal(restored.evidence,retry.evidence);
+  assert.ok(restored.humanEdits?.length);assert.ok(saved.transitions.some(edge=>edge.fromStepKey==='s2'&&edge.toStepKey==='s3'));
+  assert.equal(snapshot.transcripts['retry-flow'],'元の話');
+});
+
 test('changing a branch preserves its old evidence, excludes only the old route and can restore it',()=>{
   const before=fixture(),old=before.transitions[2],next=changeReviewConnection(before,old,{...back,fromStepKey:'s2',condition:'再調製が必要'});
   assert.equal(next.transitions.length,3);assert.ok(next.transitions.some(edge=>edge.toStepKey==='s3'));

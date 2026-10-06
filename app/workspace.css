@@ -60,12 +60,14 @@
 .input-key-human { background: #8eb4a1; }
 .input-key-auto { background: #8db5d9; }
 .input-key-hold { background: #d39d97; }
+.input-key-return { background: #557c9e; }
 .input-canvas-scroll { overflow: auto; background-image: radial-gradient(#dfe6e1 .65px, transparent .65px); background-size: 14px 14px; border-radius: 4px; }
 .input-flow-canvas { position: relative; margin: auto; }
 .input-flow-canvas svg { position: absolute; inset: 0; width: 100%; height: 100%; color: #729681; overflow: visible; }
 .input-flow-canvas svg g > path { fill: none; stroke: currentColor; stroke-width: 1.6; }
 .input-flow-canvas svg g[data-certainty="unknown"] > path, .input-flow-canvas svg g[data-certainty="inferred"] > path { stroke-dasharray: 4 3; }
 .input-flow-canvas svg g[data-halt="true"] { color: #bd7770; }
+.input-flow-canvas svg g[data-direction="return"], .input-flow-canvas svg g[data-direction="repeat"] { color: #557c9e; }
 .input-flow-canvas svg text { fill: currentColor; font: 10px sans-serif; paint-order: stroke; stroke: #fcfdfb; stroke-width: 4px; stroke-linejoin: round; }
 :is(.input-workbench,.saved-workflow-diagram) .input-canvas-step { position: absolute; width: 140px; height: 128px; display: flex; flex-direction: column; text-align: left; border: 1px solid #b3cabb; border-radius: 5px; padding: 9px; gap: 4px; background: #f8fcf8; color: #304e3d; min-height: 0; }
 .input-canvas-step small { font-size: 9px; color: #75847b; }
@@ -82,6 +84,11 @@
 .input-canvas-step[data-change="changed"] small { color: #986d35; }
 .input-canvas-tools { color: #72867a; margin-top: auto; }
 .input-canvas-footnote { font-size: 10px; color: #839087; line-height: 1.6; margin: 6px 0 12px; }
+.input-canvas-loops { padding: 8px 10px; margin: 8px 0; border-left: 3px solid #7899ae; background: #f3f7fa; border-radius: 4px; }
+.input-canvas-loops h3 { font-size: 12px; margin: 0 0 6px; }
+.input-canvas-loops article + article { margin-top: 6px; }
+.input-canvas-loops article button { border: 0; padding: 0; min-height: 28px; background: transparent; text-align: left; color: #315875; font-size: 11px; }
+.input-canvas-loops p { margin: 2px 0; font-size: 11px; line-height: 1.6; color: #617789; }
 :is(.input-workbench,.saved-workflow-diagram) .input-canvas-step[data-context="true"] { opacity: .8; }
 .input-canvas-boundaries { margin: 10px 0; border: 1px solid #d8e1db; border-radius: 7px; padding: 9px; background: #f5f8f6; }
 .input-canvas-boundaries h3 { font-size: 12px; margin: 0 0 6px; }

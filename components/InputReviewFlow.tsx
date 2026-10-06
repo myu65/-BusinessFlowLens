@@ -12,7 +12,7 @@ import type {
 import { HandoffInformation } from "./HandoffInformation";
 import { describeHumanEdit } from "@/lib/review-workbench";
 import { termExplanation } from "@/lib/knowledge-guide";
-import { inputStepName } from "@/lib/input-canvas";
+import { inputStepName, inputConnectionDirection } from "@/lib/input-canvas";
 
 const certainty = {
   explicit: "原文に明示",
@@ -321,7 +321,8 @@ export function InputReviewFlow({
               <button key={i} onClick={() => choose(next)}>
                 <span>
                   {t.sourceVariant ? "資料の記載差 · 採用版は未確認 · " : t.holdEffect === "response" ? "停止中の対応 · " : t.holdEffect === "resume" ? "再開 · " : ""}
-                  {t.condition || "次へ"}
+                  {inputConnectionDirection(selected, next) === "repeat" ? "同じ手順を繰り返す · " : inputConnectionDirection(selected, next) === "return" ? `手順${next.order}へ戻る · ` : ""}
+                  {t.condition || (inputConnectionDirection(selected, next) === "forward" ? "次へ" : "戻る条件は未確認")}
                   {t.certainty !== "confirmed" ? "（接続は要確認）" : ""}
                 </span>{" "}
                 → {inputStepName(next)}

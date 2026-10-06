@@ -2,7 +2,7 @@
 import React,{useState} from 'react';
 import type {ExtractionReview,ExtractionReviewStep,ExtractionTransition} from '@/lib/graph';
 import {changeReviewConnection,transitionKey} from '@/lib/review-connection-edits';
-import {inputStepName} from '@/lib/input-canvas';
+import {inputStepName,inputConnectionDirection} from '@/lib/input-canvas';
 import {describeHumanEdit} from '@/lib/review-workbench';
 
 export function FlowConnectionEditor({review,selected,disabled,onChange}:{review:ExtractionReview;selected:ExtractionReviewStep;disabled:boolean;onChange:(review:ExtractionReview)=>void}){
@@ -10,6 +10,7 @@ export function FlowConnectionEditor({review,selected,disabled,onChange}:{review
   const [undo,setUndo]=useState<{before:ExtractionReview;after:ExtractionReview}|null>(null),[error,setError]=useState('');
   const outgoing=review.transitions.filter(edge=>edge.fromStepKey===selected.stepKey),removed=review.excludedTransitions?.filter(edge=>edge.fromStepKey===selected.stepKey)??[];
   const name=(key:string)=>{const step=review.steps.find(step=>step.stepKey===key);return step?`${step.order}. ${inputStepName(step)}`:'以前の手順（現在の候補にはありません）';};
+  const destination=(step:ExtractionReviewStep)=>inputConnectionDirection(selected,step)==='repeat'?'（同じ手順を繰り返す）':inputConnectionDirection(selected,step)==='return'?'（戻り先）':'';
   const progress=(edge:ExtractionTransition)=>edge.holdEffect==='response'?'保留中の対応':edge.holdEffect==='resume'?'保留を解除して再開':edge.certainty==='unknown'?'進み方は未確認':'通常の流れ';
   function apply(next:ExtractionReview){setUndo({before:review,after:next});setError('');onChange(next);}
   function open(previous:ExtractionTransition|null){setEditing({previous,target:previous?.toStepKey??'',condition:previous?.condition??'',progress:previous?.holdEffect??(previous?.certainty==='unknown'||!previous&&selected.meaning?.halt?'unknown':'normal'),reason:''});setError('');}
@@ -23,10 +24,11 @@ export function FlowConnectionEditor({review,selected,disabled,onChange}:{review
     {!outgoing.length&&<p>この先のつながりは、まだ登録されていません。</p>}
     {!editing&&<button disabled={disabled} onClick={()=>open(null)}>＋ 次の手順・戻り先をつなぐ</button>}
     {editing&&<fieldset disabled={disabled}><legend>{editing.previous?'選んだ矢印を直す':'次の手順・戻り先をつなぐ'}</legend>
-      <label>進む手順<select aria-label="接続する次の手順・戻り先" value={editing.target} onChange={e=>setEditing({...editing,target:e.target.value})}><option value="">手順を選んでください</option>{review.steps.map(step=><option key={step.stepKey} value={step.stepKey}>{step.order}. {inputStepName(step)}</option>)}</select></label>
+      <label>次の手順・戻り先<select aria-label="接続する次の手順・戻り先" value={editing.target} onChange={e=>setEditing({...editing,target:e.target.value})}><option value="">手順を選んでください</option>{review.steps.map(step=><option key={step.stepKey} value={step.stepKey}>{step.order}. {inputStepName(step)}{destination(step)}</option>)}</select></label>
       <label>進む条件（なければ空欄）<input aria-label="この矢印を進む条件" value={editing.condition} onChange={e=>setEditing({...editing,condition:e.target.value})}/></label>
       <label>進み方<select aria-label="この矢印の進み方" value={editing.progress} onChange={e=>setEditing({...editing,progress:e.target.value})}><option value="normal">通常の流れ</option><option value="response">保留中の対応</option><option value="resume">保留を解除して再開</option><option value="unknown">進み方は未確認</option></select></label>
-      <p>作り直しや解除の依頼は「保留中の対応」。通常の仕事を再開できると分かったときに「保留を解除して再開」を選びます。</p>
+      <p>停止・保留した仕事への対応は「保留中の対応」、保留を解除する接続は「保留を解除して再開」を選びます。保留を伴わない再検査や繰り返しには「通常の流れ」を使えます。</p>
+      <p>繰り返す回数や待ち時間も、進む条件に書けます。</p>
       <details><summary>確認した根拠・補足を残す</summary><label>接続の根拠<textarea aria-label="この矢印を確認した根拠" value={editing.reason} onChange={e=>setEditing({...editing,reason:e.target.value})}/></label></details>
       <button className="button-primary" disabled={!editing.target} onClick={save}>この矢印を図に反映</button><button onClick={()=>setEditing(null)}>矢印の編集をやめる</button>
     </fieldset>}
