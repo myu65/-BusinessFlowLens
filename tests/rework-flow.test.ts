@@ -31,6 +31,24 @@ test('asking for a release continues a hold; the explicit later release and rest
   assert.equal(validateAITransitions(proposal,actions[0]+unknown).transitions.length,0,'a proposed request is not an actually performed response');
 });
 
+test('a saved retry offers actionable branch choices and a return without implying an automatic next task',()=>{
+  const review=reviewOf(['検査結果をAPI送信する','製造指示へ反映する','30秒待つ']);
+  review.transitions=[{fromStepKey:'s0',toStepKey:'s1',condition:'送信成功',evidence:'成功時は反映する',certainty:'confirmed'},
+    {fromStepKey:'s0',toStepKey:'s2',condition:'通信失敗で3回未満',evidence:'失敗時は30秒待つ',certainty:'confirmed'},
+    {fromStepKey:'s2',toStepKey:'s0',condition:'30秒経過後',evidence:'待って同じ送信へ戻る',certainty:'confirmed'}];
+  const workflow={id:'retry-choices',name:'検査結果の連携'}, graph=previewReviewGraph({workflows:[],nodes:[],edges:[],dataFlows:[]},workflow,review);
+  const process=(order:number)=>graph.nodes.find(node=>node.kind==='process'&&node.stepOrder===order)!.id;
+  const html=renderToStaticMarkup(createElement(WorkflowReading,{graph,workflowId:workflow.id,initialStepId:process(1),onDetail:()=>{}}));
+  const branchButton=html.match(/<button[^>]*>分岐先を選ぶ ↓<\/button>/)?.[0];
+  assert.ok(branchButton);assert.doesNotMatch(branchButton,/disabled/);
+  assert.match(html,/条件：送信成功/);assert.match(html,/条件：通信失敗で3回未満/);
+  const back=renderToStaticMarkup(createElement(WorkflowReading,{graph,workflowId:workflow.id,initialStepId:process(3),onDetail:()=>{}}));
+  assert.match(back,/戻り先の手順へ →/);assert.match(back,/手順1へ戻る · 条件：30秒経過後/);
+  const self=previewReviewGraph({workflows:[],nodes:[],edges:[],dataFlows:[]},workflow,{...review,transitions:[review.transitions[0],{...review.transitions[1],toStepKey:'s0'}]});
+  const selfHTML=renderToStaticMarkup(createElement(WorkflowReading,{graph:self,workflowId:workflow.id,initialStepId:process(1),onDetail:()=>{}}));
+  assert.match(selfHTML,/<button disabled="">← 前の手順<\/button>/,'repeating the current task is not a previous task');
+});
+
 test('an explicit re-preparation return reaches the unique earlier sample-setting step while registration stays held',()=>{
   const set='分析担当が試料を分析機器へセットします。',stop='波形が乱れた場合は結果の登録を保留して試料を再調製します。';
   const back='再調製後は試料を機器へセットする手順から再測定します。';

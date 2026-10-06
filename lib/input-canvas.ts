@@ -24,13 +24,17 @@ export function inputCanvasLayout(review: ExtractionReview, page = 0) {
   for (const edge of review.transitions.filter(t => coreKeys.has(t.fromStepKey))) addContext(edge.toStepKey);
   const keys = new Set(visible.map(s => s.stepKey));
   const edges = review.transitions.filter(t => keys.has(t.fromStepKey) && keys.has(t.toStepKey));
+  const order = new Map(steps.map((step, index) => [step.stepKey, index]));
+  // Reading order breaks layout cycles only. Keep every recorded return and
+  // retry in edges; neither add a connection nor change its meaning.
+  const forward = edges.filter(edge => order.get(edge.fromStepKey)! < order.get(edge.toStepKey)!);
   const rank = new Map<string, number>();
   const pending = new Set(keys);
-  // Bounded topological pass; feedback loops retain their explicit edge and use a fallback position.
+  // Returns must not move the initial check behind its own rework or exit.
   for (let pass = 0; pending.size && pass < visible.length; pass++) {
     for (const step of visible) {
       if (!pending.has(step.stepKey)) continue;
-      const incoming = edges.filter(t => t.toStepKey === step.stepKey);
+      const incoming = forward.filter(t => t.toStepKey === step.stepKey);
       if (incoming.some(t => !rank.has(t.fromStepKey))) continue;
       rank.set(step.stepKey, incoming.length ? Math.max(...incoming.map(t => rank.get(t.fromStepKey)!)) + 1 : 0);
       pending.delete(step.stepKey);
@@ -46,8 +50,8 @@ export function inputCanvasLayout(review: ExtractionReview, page = 0) {
   for (const step of readingOrder) {
     const depth = rank.get(step.stepKey) ?? 0;
     const band = Math.floor(depth / 3);
-    const parents = edges.filter(e => e.toStepKey === step.stepKey).map(e => positions.get(e.fromStepKey)).filter(p => !!p);
-    const branching = edges.some(e => e.toStepKey === step.stepKey && review.transitions.filter(t => t.fromStepKey === e.fromStepKey).length > 1);
+    const parents = forward.filter(e => e.toStepKey === step.stepKey).map(e => positions.get(e.fromStepKey)).filter(p => !!p);
+    const branching = forward.some(e => e.toStepKey === step.stepKey && forward.filter(t => t.fromStepKey === e.fromStepKey).length > 1);
     const siblings = readingOrder.filter(s => !isolated(s) && rank.get(s.stepKey) === depth);
     let lane = Math.max(band, ...parents.map(p => p.lane + (branching ? 1 : 0)));
     let preferred = parents.length && !branching ? parents[0].lane === lane ? parents[0].column + 1 : 0 : depth % 3;
@@ -72,7 +76,7 @@ export function inputCanvasLayout(review: ExtractionReview, page = 0) {
   });
   return {
     nodes, edges, page: safePage, total: steps.length, coreCount: core.length,
-    width: Math.max(540, 518 + edges.length * 3), height: Math.max(220, ...nodes.map(n => n.y + 158)),
+    width: Math.max(540, 536 + edges.length * 3), height: Math.max(220, ...nodes.map(n => n.y + 180)),
     outside: review.transitions.filter(t => coreKeys.has(t.fromStepKey) !== coreKeys.has(t.toStepKey)),
   };
 }
@@ -82,6 +86,25 @@ export function inputCanvasEdge(
   nodes: Array<{ x: number; y: number }>, index: number,
 ) {
   const sameRow = from.y === to.y, right = to.x > from.x;
+  if (sameRow && from.x === to.x) {
+    // A self-loop used to run straight through its own card and disappear.
+    const rail = from.x + 156, bottom = from.y + 150, top = from.y - 12;
+    return { path: `M${from.x + 98},${from.y + 128} V${bottom} H${rail} V${top} H${from.x + 98} V${from.y}`,
+      x: rail, y: bottom, labelX: from.x + 70, labelY: from.y + 174 };
+  }
+  if (to.y < from.y || sameRow && !right) {
+    const bottom = from.y + 150;
+    if (from.x === to.x) {
+      const rail = from.x + 156;
+      return { path: `M${from.x + 140},${from.y + 84} H${rail} V${to.y + 84} H${to.x + 140}`,
+        x: rail, y: (from.y + to.y) / 2 + 84, labelX: from.x + 70, labelY: from.y + 150 };
+    }
+    if (sameRow) return { path: `M${from.x + 70},${from.y + 128} V${bottom} H${to.x + 70} V${to.y + 128}`,
+      x: (from.x + to.x) / 2 + 70, y: bottom, labelY: from.y + 174 };
+    const rail = 524 + index * 3;
+    return { path: `M${from.x + 70},${from.y + 128} V${bottom} H${rail} V${to.y - 12} H${to.x + 70} V${to.y}`,
+      x: rail, y: bottom, labelX: from.x + 70, labelY: from.y + 174 };
+  }
   const sx = sameRow ? from.x + (right ? 140 : 0) : from.x + 70;
   const sy = sameRow ? from.y + 64 : from.y + 128;
   const tx = sameRow ? to.x + (right ? 0 : 140) : to.x + 70;
@@ -100,6 +123,17 @@ export function inputCanvasEdge(
   const rail = 512 + index * 3;
   return { path: `M${from.x + 70},${from.y + 128} V${from.y + 146} H${rail} V${to.y - 12} H${to.x + 70} V${to.y}`,
     x: rail, y: (from.y + 146 + to.y - 12) / 2 };
+}
+
+export function inputConnectionDirection(from: ExtractionReviewStep, to: ExtractionReviewStep) {
+  return from.stepKey === to.stepKey ? "repeat" : to.order < from.order ? "return" : "forward";
+}
+
+export function inputConnectionCaption(edge: ExtractionReview["transitions"][number], from: ExtractionReviewStep, to: ExtractionReviewStep) {
+  const direction = inputConnectionDirection(from, to);
+  return [direction === "repeat" ? "同じ手順を繰り返す" : direction === "return" ? `手順${to.order}へ戻る` : "",
+    edge.sourceVariant ? "記載差 · 採用版は未確認" : edge.holdEffect === "response" ? "停止中の対応" : edge.holdEffect === "resume" ? "再開" : "",
+    edge.condition].filter(Boolean).join(" · ");
 }
 
 export function inputStepMode(step: ExtractionReviewStep) {

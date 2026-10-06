@@ -81,7 +81,7 @@ export function stepContext(
     steps,
     step,
     index,
-    previous: incoming.length === 1 ? incoming[0].step : undefined,
+    previous: incoming.length === 1 && incoming[0].step.id !== stepId ? incoming[0].step : undefined,
     next:
       outgoing.length === 1 && (!step?.meaning?.halt || ["response", "resume"].includes(outgoing[0].edge.holdEffect ?? ""))
         ? outgoing[0].step

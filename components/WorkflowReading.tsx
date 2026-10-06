@@ -73,6 +73,7 @@ export function WorkflowReading({
 }) {
   const [journey, setJourney] = useState(initialJourney);
   const readerRef = useRef<HTMLElement>(null);
+  const nextWorkRef = useRef<HTMLElement>(null);
   const workflowId = journey?.workflowId ?? parentWorkflowId;
   useEffect(() => {
     if (journey) readerRef.current?.scrollIntoView({ block: "start" });
@@ -365,10 +366,10 @@ export function WorkflowReading({
               業務全体の {context.index + 1} / {steps.length}
             </span>
             <button
-              disabled={!context.next}
-              onClick={() => context.next && select(context.next.id)}
+              disabled={!context.next && context.outgoing.length < 2}
+              onClick={() => context.outgoing.length > 1 ? nextWorkRef.current?.scrollIntoView({ block: "center", behavior: "smooth" }) : context.next && select(context.next.id)}
             >
-              {context.outgoing.length > 1 ? "分岐先を選ぶ ↓" : context.outgoing[0]?.edge.holdEffect === "response" ? "停止中の対応へ →" : context.outgoing[0]?.edge.holdEffect === "resume" ? "再開する手順へ →" : "次の手順 →"}
+              {context.outgoing.length > 1 ? "分岐先を選ぶ ↓" : context.outgoing[0]?.edge.holdEffect === "response" ? "停止中の対応へ →" : context.outgoing[0]?.edge.holdEffect === "resume" ? "再開する手順へ →" : context.next?.id === selected.id ? "同じ手順を繰り返す →" : context.next && (context.next.stepOrder ?? 0) < (selected.stepOrder ?? 0) ? "戻り先の手順へ →" : "次の手順 →"}
             </button>
           </div>
           <label className="kg-edit-field">
@@ -384,7 +385,7 @@ export function WorkflowReading({
               ))}
             </select>
           </label>
-          <aside className="flow-connections" aria-label="条件と次の仕事">
+          <aside ref={nextWorkRef} className="flow-connections" aria-label="条件と次の仕事">
             <strong>
               {selected.meaning?.halt
                 ? context.outgoing.length > 0 && context.outgoing.every(o => o.edge.holdEffect === "response") ? "停止・保留中に進む対応" : "停止・保留 / 再開条件を確認"
@@ -393,7 +394,8 @@ export function WorkflowReading({
             {context.outgoing.map(({ edge, step }) => (
               <button key={edge.id} onClick={() => select(step.id)}>
                 {edge.sourceVariant ? "資料の記載差 · 採用版は未確認 · " : edge.holdEffect === "response" ? "停止中の対応 · " : edge.holdEffect === "resume" ? "再開 · " : ""}
-                {edge.label ? `条件：${edge.label}` : edge.holdEffect ? "接続を辿る" : "順に進む"} → {step.label}{" "}
+                {step.id === selected.id ? "同じ手順を繰り返す · " : (step.stepOrder ?? 0) < (selected.stepOrder ?? 0) ? `手順${step.stepOrder}へ戻る · ` : ""}
+                {edge.label ? `条件：${edge.label}` : edge.holdEffect ? "接続を辿る" : step.id === selected.id || (step.stepOrder ?? 0) < (selected.stepOrder ?? 0) ? "戻る条件は未確認" : "順に進む"} → {step.label}{" "}
                 ·{" "}
                 {edge.status === "confirmed"
                   ? "確認済み"

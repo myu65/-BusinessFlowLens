@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ExtractionReview, ExtractionReviewStep } from "../lib/graph";
-import { inputCanvasEdge, inputCanvasLabel, inputCanvasLayout, inputStepName } from "../lib/input-canvas";
+import { inputCanvasEdge, inputCanvasLabel, inputCanvasLayout, inputStepName, inputConnectionCaption } from "../lib/input-canvas";
 import { InputFlowCanvas } from "../components/InputFlowCanvas";
 import { InputRelations } from "../components/InputRelations";
 import { InputReviewFlow } from "../components/InputReviewFlow";
@@ -37,6 +37,65 @@ test("a linear wrap takes one row and an overview uses only a grounded result, w
   assert.match(html, /価格案が用意できる/);
 });
 const empty: ExtractionReview = { summary: "", trigger: null, outcome: null, steps: [], transitions: [], dataFlows: [], questions: [], warnings: [] };
+
+function assertOutsideCards(path: string, nodes: Array<{ x: number; y: number }>) {
+  let previous: { x: number; y: number } | undefined;
+  for (const match of path.matchAll(/([MLHV])(-?\d+)(?:,(-?\d+))?/g)) {
+    const [, command, a, b] = match;
+    const point = command === "V" ? { x: previous!.x, y: Number(a) } : command === "H" ? { x: Number(a), y: previous!.y } : { x: Number(a), y: Number(b) };
+    if (previous) for (let t = 0; t <= 100; t++) {
+      const x = previous.x + (point.x - previous.x) * t / 100, y = previous.y + (point.y - previous.y) * t / 100;
+      assert.ok(!nodes.some(node => x > node.x && x < node.x + 140 && y > node.y && y < node.y + 128), `arrow enters a card at ${x},${y}: ${path}`);
+    }
+    previous = point;
+  }
+}
+
+test("a retry stays outside its own card and keeps the full condition readable in both input and saved-flow views", () => {
+  const review: ExtractionReview = { ...empty, steps: [step("send", 1, "検査結果を送信する"), step("done", 2, "受付を確認する")], transitions: [
+    { fromStepKey: "send", toStepKey: "send", condition: "通信失敗で試行回数が3回未満なら30秒後", evidence: "通信失敗時は3回まで同じ送信を繰り返す", certainty: "confirmed" },
+    { fromStepKey: "send", toStepKey: "done", condition: "送信成功", evidence: "成功時は受付を確認する", certainty: "confirmed" },
+  ] };
+  const layout = inputCanvasLayout(review), geometry = inputCanvasEdge(layout.nodes[0], layout.nodes[0], layout.nodes, 0);
+  assertOutsideCards(geometry.path, layout.nodes);
+  assert.ok(geometry.y > layout.nodes[0].y + 128, "insertion remains outside the task");
+  assert.ok(geometry.labelY! < layout.height, "retry caption is not clipped");
+  assert.equal(layout.nodes[1].y, layout.nodes[0].y, "a self-loop must not create a false extra branch row");
+  for (const reading of [false, true]) {
+    const html = renderToStaticMarkup(createElement(InputFlowCanvas, { review, selected: review.steps[0], page: 0, reading, onPage: () => {}, choose: () => {} }));
+    assert.match(html, /同じ手順を繰り返す/);
+    assert.match(html, /aria-label="やり直し・繰り返し"/);
+    assert.match(html, /通信失敗で試行回数が3回未満なら30秒後/);
+    assert.match(html, /送信成功/);
+    assert.doesNotMatch(html, /戻る条件は未確認/);
+  }
+});
+
+test("a rework return preserves the original check layout and the successful exit without routing through any task", () => {
+  const review: ExtractionReview = { ...empty, steps: [step("prepare", 1), step("check", 2), step("register", 3), step("handoff", 4), step("rework", 5), step("hold", 6)], transitions: [
+    ["prepare", "check"], ["check", "register", "規格内"], ["register", "handoff"], ["check", "rework", "規格外"], ["check", "hold", "再調整2回でも規格外"], ["rework", "check", "再調整後"],
+  ].map(([fromStepKey, toStepKey, condition]) => ({ fromStepKey, toStepKey, condition: condition ?? null, evidence: "原文", certainty: "confirmed" })) };
+  const before = JSON.stringify(review), layout = inputCanvasLayout(review), withoutReturn = inputCanvasLayout({ ...review, transitions: review.transitions.slice(0, 5) });
+  assert.deepEqual(layout.nodes.map(({ x, y }) => ({ x, y })), withoutReturn.nodes.map(({ x, y }) => ({ x, y })));
+  const from = layout.nodes[4], to = layout.nodes[1], geometry = inputCanvasEdge(from, to, layout.nodes, 5);
+  assertOutsideCards(geometry.path, layout.nodes);
+  assert.equal(inputConnectionCaption(review.transitions[5], from.step, to.step), "手順2へ戻る · 再調整後");
+  assert.equal(JSON.stringify(review), before, "layout does not change conditions, evidence, or graph edges");
+  assert.equal(layout.edges.length, 6);
+});
+
+test("an unknown return has no invented condition and dense cyclic links stay paged", () => {
+  const review: ExtractionReview = { ...empty, steps: [step("a", 1), step("b", 2), step("c", 3)], transitions: [
+    { fromStepKey: "a", toStepKey: "b", condition: null, evidence: "原文", certainty: "confirmed" },
+    ...Array.from({ length: 8 }, (_, i) => ({ fromStepKey: "b", toStepKey: "a", condition: i ? `条件${i}` : null, evidence: "未確認", certainty: "unknown" as const })),
+  ] };
+  const html = renderToStaticMarkup(createElement(InputFlowCanvas, { review, selected: review.steps[1], page: 0, onPage: () => {}, choose: () => {} }));
+  assert.match(html, /戻る条件は未確認/);
+  assert.match(html, /接続は未確認/);
+  assert.match(html, /1–3 \/ 8接続/);
+  assert.equal((html.match(/<article>/g) ?? []).length, 3);
+  assert.equal(inputCanvasLayout(review).nodes.length, 3);
+});
 
 test("a shared check displays approval and hold as independent branches, with unknown work left disconnected", () => {
   const review: ExtractionReview = { ...empty, steps: [step("check", 1, "レートの日付を確認する"), step("approve", 2, "評価仕訳を承認する"), {
