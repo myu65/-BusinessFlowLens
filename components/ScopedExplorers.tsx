@@ -1,5 +1,7 @@
 "use client";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { FlowReadingPosition } from '@/lib/flow-context';
+import type { ScreenPosition } from '@/lib/navigation';
 import {
   type LensGraph,
   type LensNode,
@@ -35,7 +37,8 @@ function ScopeControl({
   );
 }
 type AssetSelectionPosition = { id: string; readingPosition?: AssetReadingPosition; query: string; kind: string; page: number };
-export type AssetExploration = { id: string; scope: WorkflowScenario; department: string; readingPosition?: AssetReadingPosition; trail?: AssetSelectionPosition[] };
+export type AssetExploration = { id: string; scope: WorkflowScenario; department: string; readingPosition?: AssetReadingPosition; trail?: AssetSelectionPosition[];
+  query?: string; kind?: string; page?: number; reading?: FlowReadingPosition & { workflowId: string } };
 export function AssetExplorer({
   graph,
   onGraphApply,
@@ -52,17 +55,14 @@ export function AssetExplorer({
   onExplorationChange?: (value: AssetExploration) => void;
 }) {
   const [scope, setScope] = useState<WorkflowScenario>(exploration?.scope ?? "current"),
-    [query, setQuery] = useState(""),
-    [kind, setKind] = useState("all"),
+    [query, setQuery] = useState(exploration?.query ?? ""),
+    [kind, setKind] = useState(exploration?.kind ?? "all"),
     [department, setDepartment] = useState(exploration?.department ?? "");
   const [selectedId, setSelectedId] = useState(exploration?.id ?? ""),
     [assetReading, setAssetReading] = useState(exploration?.readingPosition),
-    [assetPage, setAssetPage] = useState(0),
-    [reading, setReading] = useState<{
-      workflowId: string;
-      stepId?: string;
-      dataId?: string;
-    } | null>(null);
+    [assetPage, setAssetPage] = useState(exploration?.page ?? 0),
+    [reading, setReading] = useState<(FlowReadingPosition & { workflowId: string }) | null>(exploration?.reading ?? null);
+  const rememberWork = useCallback((position: FlowReadingPosition) => setReading(current => current ? { ...current, ...position } : current), []);
   const [trail, setTrail] = useState(exploration?.trail ?? []);
   const detail = useRef<HTMLElement>(null);
   const view = useMemo(
@@ -90,8 +90,8 @@ export function AssetExplorer({
   const selected = selectedNode ? { node: selectedNode, impact: view.systemProfile(selectedNode.id) } : assets[0];
   const activeId = selected?.node.id ?? "";
   useEffect(() => {
-    if (activeId) onExplorationChange?.({ id: activeId, scope, department, readingPosition: assetReading, trail });
-  }, [activeId, scope, department, assetReading, trail, onExplorationChange]);
+    onExplorationChange?.({ id: activeId, scope, department, readingPosition: assetReading, trail, query, kind, page: assetPage, reading: reading ?? undefined });
+  }, [activeId, scope, department, assetReading, trail, query, kind, assetPage, reading, onExplorationChange]);
   const impact = selected?.impact;
   const activeRows = impact?.direct ?? [];
   function reset() {
@@ -101,7 +101,7 @@ export function AssetExplorer({
     setTrail([]);
   }
   const showDetail = () => requestAnimationFrame(() => detail.current?.scrollIntoView({ block: "start", behavior: "instant" }));
-  const openWork = (value: NonNullable<typeof reading>) => { setReading(value); showDetail(); };
+  const openWork = (value: { workflowId: string; stepId?: string; dataId?: string }) => { setReading({ ...value, stepId: value.stepId ?? '', dataId: value.dataId ?? '', depth: 'step', lens: value.dataId ? 'data' : 'work' }); showDetail(); };
   const chooseAsset = (id: string, related = false) => {
     if (id !== activeId) {
       setTrail(t => [...t, { id: activeId, readingPosition: assetReading, query, kind, page: assetPage }]);
@@ -223,7 +223,8 @@ export function AssetExplorer({
                 {!view.rows.some(r => r.workflow.id === reading.workflowId) && <p>この業務は、表示範囲外の根拠として開いています。</p>}
                 <WorkflowReading key={`${selected.node.id}:${reading.workflowId}:${reading.stepId}`}
                   graph={graph} workflowId={reading.workflowId} initialStepId={reading.stepId}
-                  initialDataId={reading.dataId} initialDepth="step" compactControls initialLens={reading.dataId ? "data" : "work"}
+                  initialDataId={reading.dataId} initialDepth={reading.depth} compactControls initialLens={reading.lens} onReadingChange={rememberWork}
+                  onNavigateWorkflow={(id, journey) => setReading({ workflowId: id, stepId: journey.stepId ?? '', dataId: journey.dataId ?? '', depth: journey.depth ?? 'step', lens: journey.dataId ? 'data' : 'work', journey })}
                   onDetail={() => onEdit(reading.workflowId)} onGraphApply={onGraphApply} />
               </section> : <AssetReading key={JSON.stringify([selected.node.id, scope, department])}
                 graph={graph} view={view} asset={selected.node} impact={impact}
@@ -248,15 +249,18 @@ export function AssetExplorer({
 export function CrossBusinessOverview({
   graph,
   onOpen,
+  position, onPositionChange,
 }: {
   graph: LensGraph;
   onOpen: (id: string) => void;
+  position?: ScreenPosition; onPositionChange?: (position: ScreenPosition) => void;
 }) {
-  const [scope, setScope] = useState<WorkflowScenario>("current"),
-    [query, setQuery] = useState(""),
-    [department, setDepartment] = useState(""),
-    [page, setPage] = useState(0),
+  const [scope, setScope] = useState<WorkflowScenario>(position?.scope ?? "current"),
+    [query, setQuery] = useState(position?.query ?? ""),
+    [department, setDepartment] = useState(position?.department ?? ""),
+    [page, setPage] = useState(position?.page ?? 0),
     [assetPage, setAssetPage] = useState(0);
+  useEffect(() => onPositionChange?.({ scope, query, department, page }), [scope, query, department, page, onPositionChange]);
   const view = useMemo(
     () => knowledgeIndex(graph, scope, query, department),
     [graph, scope, query, department],

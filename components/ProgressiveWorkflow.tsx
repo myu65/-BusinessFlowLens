@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, type ReactNode } from "react";
+import React, { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   getProcessAssetLinks,
   getWorkflowProcesses,
@@ -10,7 +10,7 @@ import {
 } from "@/lib/graph";
 import { CompanyMap } from "./CompanyMap";
 import { WorkflowReading } from "./WorkflowReading";
-import type { FlowJourney } from "@/lib/flow-context";
+import type { FlowJourney, FlowReadingPosition } from "@/lib/flow-context";
 import { BusinessOverview } from "./BusinessOverview";
 import { mergeAssets } from "@/lib/refinement";
 
@@ -246,6 +246,7 @@ export function WorkflowExplorer({
   onEdit,
   onGraphApply,
   children,
+  position, onPositionChange,
 }: {
   graph: LensGraph;
   initialLevel?: "overview" | "business";
@@ -256,14 +257,20 @@ export function WorkflowExplorer({
   onEdit: () => void;
   onGraphApply: (graph: LensGraph) => void;
   children: ReactNode;
+  position?: import('@/lib/navigation').ScreenPosition;
+  onPositionChange?: (position: import('@/lib/navigation').ScreenPosition) => void;
 }) {
-  const [level, setLevel] = useState<"overview" | "business">(initialLevel);
+  const [level, setLevel] = useState<"overview" | "business">(position?.level ?? initialLevel);
+  const [readingPosition, setReadingPosition] = useState<FlowReadingPosition>();
+  const rememberReading = useCallback((value: FlowReadingPosition) => setReadingPosition(value), []);
   const [stepId, setStepId] = useState<string | null>(null);
   const [readerJourney, setReaderJourney] = useState<FlowJourney>();
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
   }, [level, workflowId]);
   const workflow = graph.workflows.find((item) => item.id === workflowId);
+  useEffect(() => { onPositionChange?.({ ...position, ...readingPosition, level, workflowId, scope: workflow?.scenario ?? 'current' }); },
+    [readingPosition, level, workflowId, workflow?.scenario, onPositionChange]);
   return (
     <div className="workflow-explorer">
       <div className="level-toolbar">
@@ -306,18 +313,19 @@ export function WorkflowExplorer({
               initialStepId={
                 readerJourney?.workflowId === workflowId
                   ? readerJourney.stepId
-                  : (stepId ?? selectedStepId)
+                  : (stepId ?? selectedStepId ?? position?.stepId)
               }
               initialDataId={
                 readerJourney?.workflowId === workflowId
                   ? readerJourney.dataId
-                  : undefined
+                  : position?.dataId
               }
               initialLens={
                 readerJourney?.workflowId === workflowId && readerJourney.dataId
                   ? "data"
-                  : "work"
+                  : (position?.lens ?? "work")
               }
+              initialDepth={position?.depth} onReadingChange={rememberReading}
               onStepChange={(id) => {
                 setStepId(id);
                 onFocusStep?.(workflowId, id);

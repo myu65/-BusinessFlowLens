@@ -87,6 +87,7 @@ export function InputWorkbench({
   onFocusStep,
   onExplore,
   onNavigate,
+  position, navigationVersion, onPositionChange,
 }: {
   projectId: string;
   graph: LensGraph;
@@ -108,6 +109,9 @@ export function InputWorkbench({
   onFocusStep?: (workflowId: string, stepId: string) => void;
   onExplore?: (workflowId: string, stepId?: string) => void;
   onNavigate?: (view:string,workflowId?:string,focusId?:string) => void;
+  position?: import('@/lib/navigation').ScreenPosition;
+  navigationVersion?: number;
+  onPositionChange?: (position: import('@/lib/navigation').ScreenPosition) => void;
 }) {
   const key = selectedId || NEW_MEMO_ID;
   const draft = drafts[key];
@@ -126,7 +130,7 @@ export function InputWorkbench({
   const documentEvidence=review?.documentEvidence??(pendingDocument?.key===key?[pendingDocument.evidence]:undefined);
   const memo = transcripts[key] ?? "";
   const [query, setQuery] = useState("");
-  const [documentInputOpen, setDocumentInputOpen] = useState(false);
+  const [documentInputOpen, setDocumentInputOpen] = useState(position?.tab === 'documents');
   const documentReturnKey = useRef(key);
   const [stepKey, setStepKey] = useState("");
   const [stepPage, setStepPage] = useState(0);
@@ -137,8 +141,8 @@ export function InputWorkbench({
   const [correctionText, setCorrectionText] = useState("");
   const [correctionScope, setCorrectionScope] = useState("all");
   const [correctAnswerIndex,setCorrectAnswerIndex]=useState<number|undefined>();
-  const [inputMode,setInputMode]=useState<'dialogue'|'summary'>('dialogue');
-  useEffect(()=>{try{const value=localStorage.getItem('lens-input-mode');if(value==='dialogue'||value==='summary')setInputMode(value);}catch{}},[]);
+  const [inputMode,setInputMode]=useState<'dialogue'|'summary'>(position?.mode ?? 'dialogue');
+  useEffect(()=>{try{const value=position?.mode??localStorage.getItem('lens-input-mode');if(value==='dialogue'||value==='summary')setInputMode(value);}catch{}},[]);
   function changeInputMode(mode:'dialogue'|'summary'){setInputMode(mode);try{localStorage.setItem('lens-input-mode',mode);}catch{}}
   const [renameOpen, setRenameOpen] = useState(false);
   const [mergeOpen,setMergeOpen]=useState(false);
@@ -171,7 +175,7 @@ export function InputWorkbench({
   const [questionDestination, setQuestionDestination] = useState("");
   const questionsRef = useRef<HTMLDetailsElement>(null);
   const [mobilePane, setMobilePane] = useState<"note" | "flow" | "details">("note");
-  const [workbenchTab, setWorkbenchTab] = useState<"flow" | "information" | "systems" | "history">("flow");
+  const [workbenchTab, setWorkbenchTab] = useState<"flow" | "information" | "systems" | "history">(() => ['flow','information','systems','history'].includes(position?.tab ?? '') ? position!.tab as 'flow' | 'information' | 'systems' | 'history' : 'flow');
   const [memoFilter, setMemoFilter] = useState<"all" | "drafts" | "questions">("all");
   const [memoPage, setMemoPage] = useState(0);
   const detailPaneRef = useRef<HTMLElement>(null);
@@ -261,6 +265,18 @@ export function InputWorkbench({
     setUndoAddition(null);
     setRevisionDetail(null);
   }, [key, projectId]);
+  useEffect(() => {
+    if (position?.mode) setInputMode(position.mode);
+    if (['flow','information','systems','history'].includes(position?.tab ?? '')) setWorkbenchTab(position!.tab as typeof workbenchTab);
+    setDocumentInputOpen(position?.tab === 'documents');
+    const requested = focusedStepId?.split(':').at(-1) ?? '';
+    setStepKey(requested);
+    const index = review?.steps.findIndex(s => s.stepKey === requested) ?? -1;
+    setStepPage(Math.floor(Math.max(0, index) / REVIEW_PAGE_SIZE));
+    setEdit(null);
+  }, [navigationVersion]);
+  useEffect(() => { onPositionChange?.({ tab: documentInputOpen ? 'documents' : workbenchTab, mode: inputMode }); },
+    [documentInputOpen, workbenchTab, inputMode, onPositionChange]);
   useEffect(() => {
     if (!questionDestination || questionDestination !== key) return;
     setQuestionsOpen(true);

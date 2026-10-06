@@ -1,5 +1,7 @@
 "use client";
-import React, { useState, type ReactNode } from "react";
+import React, { useCallback, useEffect, useState, type ReactNode } from "react";
+import type { ScreenPosition } from '@/lib/navigation';
+import type { FlowReadingPosition } from '@/lib/flow-context';
 import type { LensGraph, WorkflowScenario } from "@/lib/graph";
 import { aggregateDataFlows, scopedDataFlows } from "@/lib/knowledge";
 import { transferSteps } from "@/lib/flow-context";
@@ -12,6 +14,7 @@ export function DataFlowExplorer({
   onEdit,
   onSelectWorkflow,
   children,
+  position, onPositionChange,
 }: {
   graph: LensGraph;
   initialWorkflowId: string;
@@ -19,23 +22,31 @@ export function DataFlowExplorer({
   onEdit: (workflowId: string, stepId: string) => void;
   onSelectWorkflow: (id: string) => void;
   children?: ReactNode;
+  position?: ScreenPosition; onPositionChange?: (position: ScreenPosition) => void;
 }) {
-  const [advanced, setAdvanced] = useState(false);
+  const [advanced, setAdvanced] = useState(position?.tab === 'systems');
   const [workflowId, setWorkflow] = useState(
-    graph.workflows.some((w) => w.id === initialWorkflowId)
-      ? initialWorkflowId
+    graph.workflows.some((w) => w.id === (position?.workflowId ?? initialWorkflowId))
+      ? position?.workflowId ?? initialWorkflowId
       : "",
   );
   const [scope, setScope] = useState<WorkflowScenario>(
-    graph.workflows.find((w) => w.id === initialWorkflowId)?.scenario ??
+    position?.scope ?? graph.workflows.find((w) => w.id === initialWorkflowId)?.scenario ??
       "current",
   );
-  const [query, setQuery] = useState("");
-  const [flowId, setFlow] = useState("");
-  const [page, setPage] = useState(0);
+  const [query, setQuery] = useState(position?.query ?? "");
+  const [flowId, setFlow] = useState(position?.flowId ?? "");
+  const [page, setPage] = useState(position?.page ?? 0);
   const [transferPage, setTransferPage] = useState(0);
   const [path, setPath] = useState("");
   const [readerVersion, setReaderVersion] = useState(0);
+  const [reading, setReading] = useState<FlowReadingPosition>();
+  const rememberReading = useCallback((value: FlowReadingPosition) => setReading(value), []);
+  useEffect(() => { if (position?.scope) setScope(position.scope); if (position?.workflowId !== undefined) setWorkflow(position.workflowId);
+    if (position && 'flowId' in position && (position.flowId || '') !== flowId) { setFlow(position.flowId || ''); setReaderVersion(v=>v+1); }
+  }, [position?.scope, position?.workflowId, position?.flowId]);
+  useEffect(() => onPositionChange?.({ ...reading, workflowId, scope, query, flowId, page, tab: advanced ? 'systems' : undefined }),
+    [reading, workflowId, scope, query, flowId, page, advanced, onPositionChange]);
   const workflows = graph.workflows.filter(
     (w) => (w.scenario ?? "current") === scope,
   );
@@ -89,6 +100,7 @@ export function DataFlowExplorer({
               setPage(0);
               setTransferPage(0);
               setQuery("");
+              setReaderVersion(v=>v+1);
             }}
           >
             <option value="current">現在の仕事</option>
@@ -115,6 +127,7 @@ export function DataFlowExplorer({
               setPage(0);
               setTransferPage(0);
               setPath("");
+              setReaderVersion(v=>v+1);
             }}
           >
             <option value="">会社全体の経路から選ぶ</option>
@@ -243,9 +256,10 @@ export function DataFlowExplorer({
           key={`${workflowId}:${readerVersion}`}
           graph={graph}
           workflowId={workflowId}
-          initialStepId={related[0]?.id}
-          initialDataId={flow?.dataIds[0]}
-          initialLens={flow && !flow.dataIds.length ? "work" : "data"}
+          initialStepId={readerVersion === 0 ? position?.stepId ?? related[0]?.id : related[0]?.id}
+          initialDataId={readerVersion === 0 ? position?.dataId ?? flow?.dataIds[0] : flow?.dataIds[0]}
+          initialDepth={position?.depth} initialLens={readerVersion === 0 ? position?.lens ?? (flow && !flow.dataIds.length ? "work" : "data") : flow && !flow.dataIds.length ? 'work' : 'data'}
+          onReadingChange={rememberReading}
           onDetail={stepId => onEdit(workflowId, stepId)}
           onGraphApply={onGraphApply}
           onNavigateWorkflow={(id) => {
@@ -260,7 +274,7 @@ export function DataFlowExplorer({
         />
       )}
       {children && (
-        <details onToggle={e=>setAdvanced(e.currentTarget.open)}>
+        <details open={advanced} onToggle={e=>setAdvanced(e.currentTarget.open)}>
           <summary>システム全体の関係図・条件別の分析を開く</summary>
           {advanced && children}
         </details>

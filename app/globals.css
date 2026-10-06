@@ -164,6 +164,11 @@ button:disabled {
   font-weight: 750;
 }
 
+.screen-link-button { border: 1px solid var(--line-strong); border-radius: 7px; padding: 6px 9px; background: var(--surface); color: var(--ink); font-size: 11px; white-space: nowrap; cursor: pointer; }
+.screen-link-button:disabled { opacity: .5; cursor: default; }
+.screen-link-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 18px; margin: 8px 16px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); font-size: 13px; }
+.screen-link-notice button { flex: none; border: 0; background: transparent; color: var(--accent); cursor: pointer; }
+
 .prototype-badge,
 .provider-badge {
   display: inline-flex;

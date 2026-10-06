@@ -71,6 +71,7 @@ export function KnowledgeExplorer({
   const [report, setReport] = useState<{ document: KnowledgeReportDocument; text: string; url: string } | null>(
     null,
   );
+  const [reportOpen, setReportOpen] = useState(exploration?.reportOpen ?? false);
   const [focus, setFocus] = useState<Focus>(exploration?.focus ?? { kind: "company" });
   const [history, setHistory] = useState<ExplorationPosition[]>(exploration?.history ?? []);
   const [scope, setScope] = useState<KnowledgeScope>(exploration?.scope ?? "current");
@@ -96,8 +97,8 @@ export function KnowledgeExplorer({
     setReadDepth(position.depth); setReadLens(position.lens); setReaderJourney(position.journey);
   }, []);
   useEffect(() => {
-    onExplorationChange?.({ focus, history, scope, query, department, category, stepId: readStepId, dataId: readDataId, depth: readDepth, lens: readLens, journey: readerJourney, activityReading, companyReading, systemReading, assetReading, listPage: page });
-  }, [focus, history, scope, query, department, category, readStepId, readDataId, readDepth, readLens, readerJourney, activityReading, companyReading, systemReading, assetReading, page, onExplorationChange]);
+    onExplorationChange?.({ focus, history, scope, query, department, category, stepId: readStepId, dataId: readDataId, depth: readDepth, lens: readLens, journey: readerJourney, activityReading, companyReading, systemReading, assetReading, listPage: page, reportOpen });
+  }, [focus, history, scope, query, department, category, readStepId, readDataId, readDepth, readLens, readerJourney, activityReading, companyReading, systemReading, assetReading, page, reportOpen, onExplorationChange]);
   const [editingStep, setEditingStep] = useState("");
   const [categoryName, setCategoryName] = useState("");
   const [dependencyId, setDependencyId] = useState("");
@@ -195,6 +196,7 @@ export function KnowledgeExplorer({
     });
     if (focus.kind === "asset") params.set("assetId", focus.id);
     setReport({ document, text: knowledgeReportText(document), url: `/api/report?${params.toString()}` });
+    setReportOpen(true);
   };
   const loadExample = async () => {
     setError("");
@@ -223,6 +225,7 @@ export function KnowledgeExplorer({
       setImporting(false);
     }
   };
+  useEffect(() => { if (exploration?.reportOpen) download(); }, []);
   const namedSystems = new Set(
     graph.nodes
       .filter(
@@ -399,7 +402,7 @@ export function KnowledgeExplorer({
         </div>
       )}
       {error && <p role="alert">{error}</p>}
-      {report && <KnowledgeReportPreview key={report.url} {...report} onClose={() => setReport(null)} />}
+      {report && <KnowledgeReportPreview key={report.url} {...report} onClose={() => { setReport(null); setReportOpen(false); }} />}
 
       <ScopeControls compact={["activity", "capability", "asset", "workflow", "process"].includes(focus.kind)} scope={scope} department={department} query={query} count={focus.kind === "asset" ? view.rows.length : selectedRows.length}>
       <div className="kg-toolbar company-filters">

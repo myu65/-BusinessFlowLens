@@ -23,6 +23,7 @@ export type ExplorationPosition = Partial<FlowReadingPosition> & {
   systemReading?: SystemReadingPosition;
   assetReading?: AssetReadingPosition;
   listPage?: number;
+  reportOpen?: boolean;
 };
 export type KnowledgeExploration = ExplorationPosition & { history: ExplorationPosition[] };
 

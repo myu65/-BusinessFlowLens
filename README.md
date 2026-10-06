@@ -4,6 +4,8 @@ Turn business interviews into a reviewable map of **workflows, systems, and data
 
 BusinessFlowLens opens with a memo. Write what you know, check the proposed flow, correct or add to it, and save what you have confirmed. A workflow name and complete understanding are not prerequisites.
 
+Screens and selected subjects can be opened directly from query parameters. Use the **画面のリンク** button to copy the current view, or see [screen-link examples and supported parameters](docs/screen-links.md).
+
 The main navigation has three entry points:
 
 1. **話を入力** — write business notes, preview the structure before saving, and correct the selected step's action, person and result. Original evidence, uncertainty and human changes remain visible.
