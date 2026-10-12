@@ -83,7 +83,8 @@ export function workflowDiagramExport(review: ExtractionReview, page: number, co
     view: { width: layout.width, height: layout.height,
       nodes: layout.nodes.map(({ step, x, y, isolated, context: neighbor }) => ({ id: step.stepKey, x, y, width: 140, height: 128,
         title: inputCanvasLabel(step), lines: [`${step.order}. ${neighbor ? '前後の手順' : isolated ? '前後は未確認' : step.humanEdits?.length ? '訂正を含む' : step.certainty === 'explicit' ? '原文に明示' : '推定・要確認'}`,
-          step.actor || step.boundary?.party || step.executingSystem || '担当は未確認', step.meaning?.halt ? '停止・保留' : inputStepMode(step),
+          step.actor || step.boundary?.party || step.executingSystem || '担当は未確認',
+          step.boundary?.scope === 'external' ? `社外・${step.boundary.visibility === 'unavailable' ? '内部は見えない' : step.boundary.visibility === 'partial' ? '内部は一部のみ' : step.boundary.visibility === 'unknown' ? '見える範囲は未確認' : '社外の工程'}` : step.meaning?.halt ? '停止・保留' : inputStepMode(step),
           [...new Set(step.systems.map(system => system.name))].join('・') || '道具は未確認',
           ...(step.data.length ? [`情報：${[...new Set(step.data.map(data => data.name))].join('・')}`] : [])],
         tone: step.meaning?.halt ? 'hold' : step.executionMode === 'manual' ? 'human' : step.executionMode === 'automatic' ? 'automatic' : step.executionMode === 'mixed' ? 'mixed' : 'unknown', uncertain: step.certainty !== 'explicit' || isolated })),
@@ -180,8 +181,13 @@ export function diagramDrawio(model: DiagramExport) {
       details?.condition, certaintyLabel(semantic.certainty), details?.evidence].filter(Boolean).join('\n');
     return `<object id="edge-${index}" label="${xmlEscape(wrapDiagramText(edge.label, 12, 1)[0] ?? '')}" tooltip="${xmlEscape(tooltip)}" bflId="${xmlEscape(edge.id)}" bflType="${xmlEscape(semantic.type)}"><mxCell edge="1" parent="1" source="${ids.get(semantic.source)}" target="${ids.get(semantic.target)}" style="edgeStyle=none;noEdgeStyle=1;orthogonalLoop=0;html=0;fontSize=10;endArrow=block;endFill=1;strokeColor=${color.stroke};fontColor=${color.text};labelBackgroundColor=#ffffff;${port}${edge.uncertain ? 'dashed=1;' : ''}"><mxGeometry x="-1" relative="1" as="geometry"><Array as="points">${points.slice(1, -1).map(point => `<mxPoint x="${point.x + page.x}" y="${point.y + page.y}"/>`).join('')}</Array><mxPoint x="${edge.x - start.x}" y="${edge.y - start.y}" as="offset"/></mxGeometry></mxCell></object>`;
   });
-  const caption = (id: string, text: string, y: number, height: number, size: number) => `<mxCell id="${id}" value="${xmlEscape(text)}" vertex="1" parent="1" style="text;html=0;whiteSpace=wrap;align=left;verticalAlign=top;fontSize=${size};fontColor=#304e3d;"><mxGeometry x="24" y="${y}" width="${page.width - 48}" height="${height}" as="geometry"/></mxCell>`;
-  return `<?xml version="1.0" encoding="UTF-8"?><mxfile host="BusinessFlowLens" compressed="false"><diagram id="businessflowlens" name="${xmlEscape(model.title)}"><mxGraphModel bflSchema="businessflowlens.diagram" bflVersion="1" bflModel="${xmlEscape(diagramJson(model))}" page="0" pageWidth="${page.width}" pageHeight="${page.height}"><root><mxCell id="0"/><mxCell id="1" parent="0"/>${caption('title', model.title, 16, 28, 18)}${caption('scope', `${model.scope.label}・${model.scope.state}`, 48, 36, 11)}${caption('legend', diagramLegend(model), 84, 18, 10)}${vertices.join('')}${edges.join('')}${caption('notes', page.notes.join('\n'), page.footY, page.height - page.footY, 11)}</root></mxGraphModel></diagram></mxfile>`;
+  const caption = (id: string, text: string, y: number, height: number, size: number) => {
+    const cell = `<mxCell ${id === 'title' ? '' : `id="${id}" value="${xmlEscape(text)}" `}vertex="1" parent="1" style="text;html=0;whiteSpace=wrap;align=left;verticalAlign=top;fontSize=${size};fontColor=#304e3d;"><mxGeometry x="24" y="${y}" width="${page.width - 48}" height="${height}" as="geometry"/></mxCell>`;
+    // draw.io discards arbitrary mxGraphModel attributes when saving. A native
+    // user-object attribute survives import/edit/export together with the cells.
+    return id === 'title' ? `<object id="title" label="${xmlEscape(text)}" tooltip="${xmlEscape(`${model.scope.label}・${model.scope.state}\n出力時点の構造データを保持しています。`)}" bflModel="${xmlEscape(diagramJson(model))}">${cell}</object>` : cell;
+  };
+  return `<?xml version="1.0" encoding="UTF-8"?><mxfile host="BusinessFlowLens" compressed="false"><diagram id="businessflowlens" name="${xmlEscape(model.title)}"><mxGraphModel page="0" pageWidth="${page.width}" pageHeight="${page.height}"><root><mxCell id="0"/><mxCell id="1" parent="0"/>${caption('title', model.title, 16, 28, 18)}${caption('scope', `${model.scope.label}・${model.scope.state}`, 48, 36, 11)}${caption('legend', diagramLegend(model), 84, 18, 10)}${vertices.join('')}${edges.join('')}${caption('notes', page.notes.join('\n'), page.footY, page.height - page.footY, 11)}</root></mxGraphModel></diagram></mxfile>`;
 }
 
 /** Sample quadratic overview curves for native, movable draw.io waypoints. */

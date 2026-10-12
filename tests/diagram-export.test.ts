@@ -28,6 +28,8 @@ test('draft exports preserve source facts, human corrections, data changes, retu
   assert.match(output.annotations.join('\n'), /再調整後に再判定/);
   assert.equal(output.semantic.connections.length, diagramReview.transitions.length);
   const xml = diagramDrawio(output), embedded = JSON.parse(unescape(xml.match(/bflModel="([^"]+)"/)![1]));
+  assert.match(xml, /<object id="title"[^>]* bflModel="/);
+  assert.doesNotMatch(xml, /<mxGraphModel[^>]* bflModel=/, 'draw.io drops arbitrary graph-model attributes when saving');
   assert.deepEqual(embedded, JSON.parse(JSON.stringify(output)));
   assert.equal((xml.match(/ edge="1"/g) ?? []).length, 6);
   assert.equal((xml.match(/source="node-/g) ?? []).length, 6, 'native edges retain movable endpoints');
@@ -97,6 +99,17 @@ test('a descriptive group note is not misrepresented as uncertainty, while an un
     { id: 'unknown', label: '分類未登録', subtitle: '1道具', certainty: 'unknown' },
   ], edges: [] });
   assert.equal(output.view.nodes[0].uncertain, false); assert.equal(output.view.nodes[1].uncertain, true);
+});
+
+test('an opaque external task keeps the visible boundary label and its declared exchanges without invented internals', () => {
+  const review = structuredClone(diagramReview);
+  review.steps[0].actor = null;
+  review.steps[0].boundary = { scope: 'external', party: '社外検査会社', visibility: 'unavailable', incoming: ['検体'], outgoing: ['試験結果'], unknowns: ['内部の手順'], certainty: 'confirmed', evidence: '社外検査会社へ検体を渡す。内部の手順は見えない。試験結果を受け取る' };
+  const output = workflowDiagramExport(review, 0, { title: '社外試験の確認' });
+  assert.ok(output.view.nodes[0].lines.includes('社外・内部は見えない'));
+  assert.ok(output.view.nodes[0].lines.includes('社外検査会社'));
+  assert.deepEqual((output.semantic.nodes[0].attributes as typeof review.steps[0]).boundary, review.steps[0].boundary);
+  assert.equal(output.view.nodes.length, 6);
 });
 
 test('PNG, SVG and drawio.png render Japanese text and preserve an editable, exact embedded model', async () => {
