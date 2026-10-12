@@ -49,7 +49,8 @@ import {workflowMergeDestination,workflowMergeSite} from '@/lib/workflow-merge';
 import {emptyLandscape} from '@/lib/landscape';
 import {FlowConnectionEditor} from './FlowConnectionEditor';
 import {InputDialogue} from './InputDialogue';
-import {appendDialogueAnswer, dialogueAnswerStatus, includePendingDialogueAnswers} from '@/lib/input-dialogue';
+import {InputInsertionComposer} from './InputInsertionComposer';
+import {appendDialogueAnswer, dialogueAnswerStatus, includePendingDialogueAnswers, type DialogueInputFocus} from '@/lib/input-dialogue';
 import {applyDialogueReviewOperation,cancelDialogueTurns,dialogueConnection,emptyDialoguePlan,pendingDialoguePlan,validateDialoguePlan,type DialoguePlan,type DialogueSession,type DialogueTurn} from '@/lib/dialogue-operations';
 import {DialogueOperationPanel} from './DialogueOperationPanel';
 import {canonicalNodeId} from '@/lib/graph';
@@ -140,6 +141,9 @@ export function InputWorkbench({
   const [organizeNotice, setOrganizeNotice] = useState("");
   const [correctionText, setCorrectionText] = useState("");
   const [correctionScope, setCorrectionScope] = useState("all");
+  const [dialogueFocus, setDialogueFocus] = useState<DialogueInputFocus>({kind:review&&!review.steps.length?'question':'change'});
+  const [sourceOpen, setSourceOpen] = useState(false);
+  const [connectionsOpen, setConnectionsOpen] = useState(false);
   const [correctAnswerIndex,setCorrectAnswerIndex]=useState<number|undefined>();
   const [inputMode,setInputMode]=useState<'dialogue'|'summary'>(position?.mode ?? 'dialogue');
   useEffect(()=>{try{const value=position?.mode??localStorage.getItem('lens-input-mode');if(value==='dialogue'||value==='summary')setInputMode(value);}catch{}},[]);
@@ -148,6 +152,7 @@ export function InputWorkbench({
   const [mergeOpen,setMergeOpen]=useState(false);
   const [undoCorrection,setUndoCorrection]=useState<{draft:InputDraft|null}|null>(null);
   useEffect(()=>{setCorrectionText("");setCorrectionScope("all");setCorrectAnswerIndex(undefined);setRenameOpen(false);setMergeOpen(false);setUndoCorrection(null);setOperationPreview(null);setUndoDialogue(null);},[key]);
+  useEffect(()=>{setDialogueFocus({kind:baseReview&&!baseReview.steps.length?'question':'change'});setSourceOpen(false);setConnectionsOpen(false);},[key]);
   const [operation, setOperation] = useState<"organize" | "addition" | "save" | "dialogue">("organize");
   const [waitingSeconds, setWaitingSeconds] = useState(0);
   useEffect(() => {
@@ -336,6 +341,18 @@ export function InputWorkbench({
   const stale = draft
     ? draft.sourceNotes !== memo
     : !!saved && (savedTranscripts[key] ?? "") !== memo;
+  useEffect(()=>{if(stale)setSourceOpen(true);},[stale]);
+  useEffect(()=>setConnectionsOpen(false),[selected?.stepKey]);
+  function focusConversation(focus: DialogueInputFocus, scope?: string) {
+    setDialogueFocus(previous=>({...previous,...focus}));
+    if(scope)setCorrectionScope(scope);
+    setSourceOpen(false);setInsertion(null);setConnectionsOpen(false);setEdit(null);
+    setMobilePane('note');
+    requestAnimationFrame(()=>{
+      notePaneRef.current?.scrollTo({top:0});
+      notePaneRef.current?.querySelector<HTMLTextAreaElement>('.input-dialogue textarea')?.focus({preventScroll:true});
+    });
+  }
   const known = graph.workflows.filter(
     (w) =>
       (w.scenario ?? "current") === (workflow?.scenario ?? "current") &&
@@ -390,6 +407,7 @@ export function InputWorkbench({
   };
   function openAddition(placement?: ReviewInsertion) {
     if (!selected || !review || busy || stale) return;
+    if(correctionText.trim()||pendingAnswers){setError('書きかけの話・回答を反映するか取り消すと、作業を追加できます。');focusConversation(dialogueFocus);return;}
     if (!placement && addition.trim()) {
       if (!rememberedInsertion || !review.steps.some(s => s.stepKey === rememberedInsertion.afterStepKey) ||
         (rememberedInsertion.transition && !review.transitions.some(t => JSON.stringify(t) === JSON.stringify(rememberedInsertion.transition)))) {
@@ -404,13 +422,10 @@ export function InputWorkbench({
     if (anchor) choose(anchor);
     if (addition.trim()) try { sessionStorage.setItem(`lens-addition:${projectId}:${key}`, JSON.stringify({ note: addition, placement: next })); } catch { /* The text remains in the editor. */ }
     setEdit(null);
+    setSourceOpen(false);setConnectionsOpen(false);
     setError("");
-    setMobilePane("details");
-    requestAnimationFrame(() => { detailPaneRef.current?.scrollTo({ top: 0 }); additionRef.current?.focus({ preventScroll: true }); });
-  }
-  function nameForStep(stepKey: string) {
-    const step = review?.steps.find(s => s.stepKey === stepKey);
-    return step ? inputStepName(step) : "手順は未確認";
+    setMobilePane("note");
+    requestAnimationFrame(() => { notePaneRef.current?.scrollTo({ top: 0 }); additionRef.current?.focus({ preventScroll: true }); });
   }
   function writeAddition(value: string) {
     setAddition(value);
@@ -527,7 +542,8 @@ export function InputWorkbench({
       setMobilePane("flow");
       setWorkbenchTab("flow");
       if (requestKey === latest.current.key) {
-        if (!next.review.steps.length) setQuestionsOpen(true);
+        setSourceOpen(false);
+        if (!next.review.steps.length) {setDialogueFocus({kind:'question'});setMobilePane('note');}
         const changes = diffReviews(before, next.review);
         const focus =
           (correction?.stepKey ? next.review.steps.find(s=>s.stepKey===correction.stepKey) : undefined) ?? changes.added[0] ??
@@ -589,7 +605,7 @@ export function InputWorkbench({
 
   async function save(candidate?:InputDraft) {
     const savingDraft=candidate??draft;
-    if (pendingAnswers) { setError("入力した回答を、確認事項の見直しで流れへ反映してから保存してください。"); return; }
+    if (pendingAnswers) { setError("「未確認に答える」から、書きかけの回答を図へ反映してから保存してください。"); return; }
     if (!savingDraft || stale || working || (operationPreview&&!candidate) || addition.trim()) return false;
     if(correctionText.trim()&&!candidate){setError("書いた補足・訂正を流れに反映してから保存してください。");return;}
     setOperation("save");
@@ -627,6 +643,7 @@ export function InputWorkbench({
       onDraft(key, null);
       onSelect(savingDraft.workflow.id);
       setLastSavedId(savingDraft.workflow.id);
+      setOrganizeNotice("");setAdditionNotice("");
       setUndoCorrection(null);
       setUndoAddition(null);
       setUndoDialogue(null);setOperationPreview(null);
@@ -648,6 +665,7 @@ export function InputWorkbench({
     if(onSaved)onSaved(project.graph,project.transcripts,key);
     else{onGraphApply(project.graph);onTranscripts(project.transcripts);}
     onDraft(key,null);onSelect(selectedId);setLastSavedId(selectedId);setMergeOpen(false);setUndoCorrection(null);setUndoAddition(null);
+    setOrganizeNotice('');setAdditionNotice('');
   }
   function applyEdit() {
     if (!edit || !review || !selected || edit.data.some(data => !data.name.trim())) return;
@@ -898,7 +916,7 @@ export function InputWorkbench({
             disabled={busy || !memo.trim()}
             onClick={() => organize()}
           >
-            {busy ? "処理中…" : review ? "変更を流れに反映 →" : "流れを見る →"}
+            {busy ? "処理中…" : review ? "変更を流れに反映" : "図にして確かめる"}
           </button>
           <p className="flow-explanation">
             保存前に確認・訂正できます。元のメモも残ります。
@@ -927,7 +945,7 @@ export function InputWorkbench({
                   graph={preview}
                   unsavedWorkflowIds={Object.values(drafts).map(d => d.workflow.id)}
                   workflowId={workflow!.id}
-                  busy={busy}
+                  busy={busy||stale||!!insertion||!!addition.trim()||!!correctionText.trim()||pendingAnswers}
                   choose={choose}
                   onOverview={() => {
                     setMobilePane("flow");
@@ -938,10 +956,11 @@ export function InputWorkbench({
                     }));
                   }}
                   onEdit={() => {
+                    setSourceOpen(false);setConnectionsOpen(false);
                     setEdit(structuredClone(selected));
                     setToolText(null);
                   }}
-                  onEditConnections={()=>connectionEditorRef.current?.scrollIntoView({behavior:'smooth',block:'start'})}
+                  onEditConnections={()=>{setConnectionsOpen(true);requestAnimationFrame(()=>connectionEditorRef.current?.scrollIntoView({behavior:'smooth',block:'start'}));}}
                   onExclude={removeStep}
                   onConfirmIncomingData={(handoff, name, dataId) => update({
                     ...review,
@@ -963,7 +982,7 @@ export function InputWorkbench({
                     onSelect(inputKeyForWorkflow(drafts, id));
                   }}
                 />}
-                {!edit&&<div ref={connectionEditorRef}><FlowConnectionEditor key={`${key}:${selected.stepKey}`} review={review} selected={selected} disabled={busy||stale||!!correctionText.trim()||!!addition.trim()||pendingAnswers} onChange={update}/></div>}
+                {!edit&&<div ref={connectionEditorRef} hidden={!connectionsOpen}><FlowConnectionEditor key={`${key}:${selected.stepKey}`} review={review} selected={selected} disabled={busy||stale||!!correctionText.trim()||!!addition.trim()||pendingAnswers} onChange={update}/><button className="input-text-button" onClick={()=>setConnectionsOpen(false)}>矢印の編集を閉じる</button></div>}
                 {selectedChange && selectedChange.details.length > 0 && (
                   <details className="input-review-changes" key={selectedChange.after.stepKey}>
                     <summary>この手順はどう変わったか · {selectedChange.details.length}項目</summary>
@@ -1165,10 +1184,10 @@ export function InputWorkbench({
                   <button className="button-primary" disabled={edit.data.some(data => !data.name.trim())} onClick={applyEdit}>
                     訂正を構造へ反映
                   </button>
-                  <button onClick={() => setEdit(null)}>閉じる</button>
+                  <button onClick={() => setEdit(null)}>この編集を取り消す</button>
                 </fieldset>
               )}
-              <button className="input-add-work" disabled={busy || stale || !!edit} onClick={() => openAddition()}>＋ この手順の続きに作業を足す</button>
+              {!edit&&<div className="input-step-conversation"><button disabled={busy||stale} onClick={()=>focusConversation({kind:'change'},'step')}>この手順について話す</button><button disabled={busy||stale} onClick={()=>openAddition()}>この後に作業を追加</button></div>}
               {known.length > 0 && (
                 <details>
                   <summary>前後の業務との接続を補足・訂正する</summary>
@@ -1502,11 +1521,11 @@ export function InputWorkbench({
         <button aria-pressed={mobilePane === "details"} disabled={!selected} onClick={() => setMobilePane("details")}>3 手順の詳細</button>
       </nav>
       <div hidden={!documentInputOpen}><DocumentInput projectId={projectId} busy={busy} completed={new Set([...Object.keys(drafts), ...graph.workflows.map(w => w.id)])} savedIds={new Set([...graph.workflows.map(w=>w.id),...(graph.knowledge?.workflowMerges??[]).filter(r=>r.state==='merged'&&graph.workflows.some(w=>w.id===workflowMergeDestination(graph,r.sourceWorkflowId))).map(r=>r.sourceWorkflowId)])} activeDocumentId={review?.documentEvidence?.[0]?.documentId} onClose={() => setDocumentInputOpen(false)} onStart={startDocumentWork} onWithdraw={withdrawDocumentCandidates} onAIResponse={() => setAIResponse("success")} /></div>
-      <div className="input-workbench-grid" hidden={documentInputOpen}>
+      <div className="input-workbench-grid" data-stage={review?'review':'start'} hidden={documentInputOpen}>
         <section ref={notePaneRef} className="input-note-pane">
           <div className="input-note-heading">
             <h2>
-              {documentEvidence?.length?"元資料と補足":inputMode==='dialogue'?"図を見ながら話す":"話とメモ"}
+              {review?"この流れを育てる":documentEvidence?.length?"元資料から始める":"新しい仕事の話"}
             </h2>
             {key !== NEW_MEMO_ID && (
               <button
@@ -1521,36 +1540,33 @@ export function InputWorkbench({
               </button>
             )}
           </div>
-          <nav className="input-mode-switch" aria-label="話の入力方法"><button aria-pressed={inputMode==='dialogue'} onClick={()=>changeInputMode('dialogue')}>対話で整理</button><button aria-pressed={inputMode==='summary'} onClick={()=>changeInputMode('summary')}>まとめて書く</button></nav>
-          <DialogueOperationPanel session={dialogueSession} details={operationPreview?.details} busy={working} onAccept={acceptDialogueOperation} onCancel={cancelDialogueOperation} onReply={requestDialogueOperation}/>
-          {!documentEvidence?.length&&<button className="input-document-entry button-secondary" disabled={busy} onClick={() => { documentReturnKey.current=key;setDocumentInputOpen(true); }}>資料・画像から始める</button>}
-          {!review && !documentEvidence?.length && <div hidden={inputMode!=='summary'}>{memoComposer}</div>}
-          {!!documentEvidence?.length&&<DocumentOriginalPane projectId={projectId} evidence={documentEvidence} sourceRefs={selected?.sourceRefs} compact={inputMode==='dialogue'}/>}
-          {(review||!documentEvidence?.length)&&<div hidden={inputMode!=='dialogue'}><InputDialogue key={key} source={operationPreview?.candidate?.sourceNotes??memo} onSource={text=>onTranscripts({...transcripts,[key]:text})}
-            review={review} history={operationPreview?.candidate?.answerHistory??answerHistory} answers={draft?.answers??{}} busy={working} operationSession={draft?.dialogueSession??{turns:review?.dialogueHistory??[],plan:null}}
-            blockedReason={operationPreview?'図に出ている操作案を、先に確認するか取り消してください。':stale?'本文の変更を先に流れへ反映してください。':edit?'編集中の手順を先に反映してください。':addition.trim()?'入力中の追記を先に図へ反映してください。':''}
-            onStart={()=>organize()}
-            onAnswerText={(question,text)=>onDraft(key,{...ensureDraft(review!),answers:{...(draft?.answers??{}),[question]:text}})}
-            onAnswer={(question,text)=>organize(appendDialogueAnswer(answerHistory,question,text))}
-            onDefer={question=>onDraft(key,{...ensureDraft(review!),answerHistory:appendDialogueAnswer(answerHistory,question,'まだ分からない','deferred')})}
-            correctionText={correctionText} onCorrectionText={setCorrectionText} correctionScope={correctionScope} onCorrectionScope={setCorrectionScope}
-            correctIndex={correctAnswerIndex} onCorrectIndex={setCorrectAnswerIndex}
-            selectedName={selected&&inputStepName(selected)} onCorrection={correctFromDialogue}/></div>}
-          {!review&&!!documentEvidence?.length&&<div className="input-document-organizing"><p>{busy?"原図を読み、手順と矢印を組み立てています。元資料を見ながら待てます。":"元資料は残っています。もう一度流れを作れます。"}</p>{!busy&&<button className="button-primary" onClick={()=>organize()}>この資料から流れを作る</button>}</div>}
-          {review&&<section hidden={inputMode!=='summary'} className="input-correction" aria-label="流れを言葉で補足・訂正する">
-            <h3>違うところ・足りないところを直す</h3>
-            {correctAnswerIndex!==undefined&&<p>訂正する回答：{answerHistory[correctAnswerIndex]?.question}</p>}
-            <label>直す範囲<select aria-label="言葉で直す範囲" disabled={correctAnswerIndex!==undefined} value={correctAnswerIndex!==undefined?'all':correctionScope} onChange={event=>setCorrectionScope(event.target.value)}><option value="all">この仕事の流れ全体</option>{selected&&<option value="step">選んだ手順：{inputStepName(selected)}</option>}</select></label>
-            <textarea aria-label="流れへの補足・訂正" value={correctionText} disabled={busy} onChange={event=>setCorrectionText(event.target.value)} placeholder="例：成績書を受け取るのは品質担当ではなく、購買担当です。受取後に品質担当へ渡します。"/>
-            <button className="button-primary" disabled={busy||stale||!!edit||!correctionText.trim()} onClick={()=>{
-              void correctFromDialogue(correctionText.trim());
-            }}>補足・訂正を流れに反映する</button>
-            <p>原本と元の話は残ります。変更した箇所を確認してから保存できます。</p>
-            {undoCorrection&&draft&&<button className="input-text-button" disabled={busy} onClick={()=>{onDraft(key,undoCorrection.draft);setUndoCorrection(null);setCorrectionText("");setOrganizeNotice("今回の補足・訂正を取り消し、直す前の候補に戻しました。");}}>今回の補足・訂正を取り消す</button>}
-          </section>}
-          {!!documentEvidence?.length&&<button className="input-text-button" disabled={busy} onClick={()=>{documentReturnKey.current=key;setDocumentInputOpen(true);}}>資料の別の仕事を見る</button>}
-          {review && selected && <button className="input-add-work" disabled={busy || stale} onClick={() => openAddition()}>{addition.trim() ? "入力中の話を続ける" : "＋ 分かったことを足す"}</button>}
-          {review && <p className="input-growing-hint">図の＋から、途中の作業も一つずつ足せます。</p>}
+          {!review&&!documentEvidence?.length&&<nav className="input-mode-switch" aria-label="話の入力方法"><button aria-pressed={inputMode==='dialogue'} onClick={()=>changeInputMode('dialogue')}>話しながら整理</button><button aria-pressed={inputMode==='summary'} onClick={()=>changeInputMode('summary')}>まとめて書く</button></nav>}
+          {!review&&!documentEvidence?.length&&<button className="input-document-entry button-secondary" disabled={busy} onClick={()=>{documentReturnKey.current=key;setDocumentInputOpen(true);}}>資料・画像を読み込む</button>}
+          {!!documentEvidence?.length&&<><DocumentOriginalPane projectId={projectId} evidence={documentEvidence} sourceRefs={selected?.sourceRefs} compact/><button className="input-text-button" disabled={busy} onClick={()=>{documentReturnKey.current=key;setDocumentInputOpen(true);}}>同じ資料の別の仕事を見る</button></>}
+          {dialogueSession.plan?<DialogueOperationPanel session={dialogueSession} details={operationPreview?.details} busy={working} onAccept={acceptDialogueOperation} onCancel={cancelDialogueOperation} onReply={requestDialogueOperation}/>
+            :insertion&&review?<InputInsertionComposer review={review} insertion={insertion} note={addition} busy={busy} inputRef={additionRef} onNote={writeAddition} onPlacement={openAddition} onSubmit={addNote} onPause={()=>setInsertion(null)} onCancel={()=>{writeAddition('');setInsertion(null);setRememberedInsertion(null);}}/>
+            :review&&(edit||connectionsOpen||sourceOpen||addition.trim())?<aside className="input-composer-paused"><strong>{addition.trim()?'途中の追加が書きかけです':sourceOpen?'元の話を書き直しています':edit?'選んだ手順を編集しています':'矢印を編集しています'}</strong><p>{addition.trim()?'追加する場所と話を残しています。続きを書くか、取り消せます。':'編集が終わると、ここから続きを話せます。'}</p><button disabled={busy} onClick={()=>{
+              if(addition.trim()){openAddition();return;}
+              if(sourceOpen){setSourceOpen(false);return;}
+              setMobilePane('details');requestAnimationFrame(()=>detailPaneRef.current?.scrollTo({top:0}));
+            }}>{addition.trim()?'途中の追加を続ける':sourceOpen?'書き直しを閉じる':'編集中の箇所を見る'}</button>{!!addition.trim()&&<button disabled={busy} onClick={()=>{writeAddition('');setRememberedInsertion(null);}}>書きかけを取り消す</button>}</aside>
+            :!review&&inputMode==='summary'&&!documentEvidence?.length?memoComposer
+            :(review||!documentEvidence?.length)?<InputDialogue key={key} source={operationPreview?.candidate?.sourceNotes??memo} onSource={text=>onTranscripts({...transcripts,[key]:text})}
+              review={review} history={operationPreview?.candidate?.answerHistory??answerHistory} answers={draft?.answers??{}} busy={working} operationSession={draft?.dialogueSession??{turns:review?.dialogueHistory??[],plan:null}}
+              focus={dialogueFocus} onFocus={setDialogueFocus}
+              blockedReason={stale?'本文の変更を先に流れへ反映してください。':addition.trim()?'途中の追加が書きかけです。「追加を続ける」から反映するか取り消してください。':''}
+              onStart={()=>organize()}
+              onAnswerText={(question,text)=>onDraft(key,{...ensureDraft(review!),answers:{...(draft?.answers??{}),[question]:text}})}
+              onAnswer={(question,text)=>organize(appendDialogueAnswer(answerHistory,question,text))}
+              onDefer={question=>onDraft(key,{...ensureDraft(review!),answerHistory:appendDialogueAnswer(answerHistory,question,'まだ分からない','deferred')})}
+              correctionText={correctionText} onCorrectionText={setCorrectionText} correctionScope={correctionScope} onCorrectionScope={setCorrectionScope}
+              correctIndex={correctAnswerIndex} onCorrectIndex={setCorrectAnswerIndex}
+              selectedName={selected&&inputStepName(selected)} onCorrection={correctFromDialogue}/>:null}
+          {!review&&!!documentEvidence?.length&&<div className="input-document-organizing"><p>{busy?'原図を読み、手順と矢印を組み立てています。':'元資料は残っています。もう一度流れを作れます。'}</p>{!busy&&<button className="button-primary" onClick={()=>organize()}>この資料から流れを作る</button>}</div>}
+          {undoCorrection&&draft&&<button className="input-text-button" disabled={busy} onClick={()=>{onDraft(key,undoCorrection.draft);setUndoCorrection(null);setCorrectionText('');setOrganizeNotice('今回の補足・訂正を取り消し、直す前の候補に戻しました。');}}>今回の補足・訂正を取り消す</button>}
+          {review&&<p className="input-growing-hint">間に作業を足すときは、図の矢印にある＋を選べます。</p>}
+          {(graph.workflows.length>0||Object.keys(drafts).some(id=>id!==key))&&<details key={`stories:${key}`} className="input-switch-note" open={!review}>
+            <summary>保存した話・下書きを探す · {graph.workflows.length}業務</summary>
           <nav className="input-memo-filters" aria-label="メモの絞り込み">
             {([["all", "すべて"], ["drafts", "保存前"], ["questions", "未確認あり"]] as const).map(([value, label]) => <button key={value} aria-pressed={memoFilter === value} onClick={() => { setMemoFilter(value); setMemoPage(0); }}>{label}</button>)}
           </nav>
@@ -1561,79 +1577,12 @@ export function InputWorkbench({
             </button>)}
           </nav>}
           {noteEntries.length > 6 && <div className="input-memo-pages"><button aria-label="前の6メモ" disabled={!notePage} onClick={() => setMemoPage(notePage - 1)}>←</button><small>{notePage * 6 + 1}–{Math.min(noteEntries.length, (notePage + 1) * 6)} / {noteEntries.length}</small><button aria-label="次の6メモ" disabled={(notePage + 1) * 6 >= noteEntries.length} onClick={() => setMemoPage(notePage + 1)}>→</button></div>}
-          <p className="input-note-context">
-            {key === NEW_MEMO_ID
-              ? "名前や業務の範囲は、後から決められます。"
-              : workflow?.name}
-          </p>
-          {(graph.workflows.length > 0 ||
-            Object.keys(drafts).some((id) => id !== key)) && (
-            <details className="input-switch-note">
-              <summary>保存した話・下書きに戻る</summary>
-              <label className="kg-edit-field">
-                話を探す
-                <input
-                  value={noteQuery}
-                  onChange={(e) => setNoteQuery(e.target.value)}
-                  placeholder="仕事の名前で検索"
-                />
-              </label>
-              <label className="kg-edit-field">
-                話を追加する場所
-                <select
-                  value={key}
-                  onChange={(e) => onSelect(e.target.value)}
-                  disabled={busy}
-                >
-                  <option value={NEW_MEMO_ID}>
-                    新しい話から始める（業務名は後から）
-                  </option>
-                  {draft && !saved && key !== NEW_MEMO_ID && (
-                    <option value={key}>{draft.workflow.name} · 保存前</option>
-                  )}
-                  {saved && <option value={saved.id}>{saved.name}</option>}
-                  {graph.workflows
-                    .filter(
-                      (w) => w.id !== saved?.id && w.name.includes(noteQuery),
-                    )
-                    .slice(0, 20)
-                    .map((w) => (
-                      <option key={w.id} value={w.id}>
-                        {w.name}
-                      </option>
-                    ))}
-                </select>
-              </label>
-              <small>検索に合う話を20件まで表示します。</small>
-              {Object.entries(drafts)
-                .filter(([id]) => id !== key)
-                .map(([id, d]) => (
-                  <button
-                    key={id}
-                    className="button-secondary"
-                    onClick={() => onSelect(id)}
-                  >
-                    保存前の候補へ戻る：{d.workflow.name}
-                  </button>
-                ))}
-            </details>
-          )}
-          {review && <details className="input-original-source" open={stale}><summary>これまでの話を読む・書き直す</summary>{memoComposer}</details>}
+            {!noteEntries.length&&<p className="input-growing-hint">条件に合う話はありません。</p>}
+          </details>}
+          {review&&<details className="input-original-source" hidden={!!dialogueSession.plan||!!insertion||!!edit||connectionsOpen} open={sourceOpen} onToggle={event=>setSourceOpen(event.currentTarget.open)}><summary>元の話を読む・書き直す</summary>{memoComposer}</details>}
           {workflow && review && (
             <details>
-              <summary>業務名・表示する状態を整える（任意）</summary>
-              <label className="kg-edit-field">
-                業務名
-                <input
-                  value={workflow.name}
-                  onChange={(e) =>
-                    onDraft(key, {
-                      ...ensureDraft(review!),
-                      workflow: { ...workflow, name: e.target.value },
-                    })
-                  }
-                />
-              </label>
+              <summary>工場・現在／将来の設定</summary>
               <label className="kg-edit-field">工場・拠点<input aria-label="この業務の工場・拠点" disabled={busy} value={workflowMergeSite(workflow)} placeholder="分かっている場合だけ入力" onChange={event=>{
                 const site=event.target.value;
                 onDraft(key,{...ensureDraft(review!),workflow:{...workflow,landscape:{...(workflow.landscape??emptyLandscape()),site,evidence:`利用者が工場・拠点を訂正：${site||'未確認'}`},...(documentEvidence?.length?{scenarioLabel:site||undefined}:{})}});
@@ -1891,7 +1840,7 @@ export function InputWorkbench({
               </details>
               <div className="input-save-actions">
                 <p>
-                  {addition.trim() ? "入力中の追記は、まだ図に反映されていません。追加する場所を選んで続けられます。" : pendingAnswers ? "入力した回答は、まだ流れに反映されていません。下の確認事項を見直すと、反映を確認できます。" : stale
+                  {addition.trim() ? "入力中の追記は、まだ図に反映されていません。追加する場所を選んで続けられます。" : pendingAnswers ? "回答はまだ図に反映されていません。「未確認に答える」から反映してください。" : stale
                     ? "メモの変更は、まだ流れへ反映されていません。"
                     : draft
                       ? "確認できたところまで保存できます。未確認の内容も、そのまま残ります。"
@@ -1922,7 +1871,7 @@ export function InputWorkbench({
               <strong>{review.systemDependencies?.some(d => !d.rejected) ? "道具どうしの関係が分かりました" : "まだ作業の流れは決めていません"}</strong>
               <p>{review.summary}</p>
               <ReviewUnderstandingHistory review={review}/>
-              <p>全部を説明する必要はありません。知っていることをメモに足すか、下の確認事項に答えると、ここから流れが育ちます。分からないことは未確認のまま残せます。</p>
+              <p>入力欄から話を足すか、「未確認に答える」で分かる範囲を教えてください。分からないことは未確認のまま残せます。</p>
               {!draft && saved && onExplore && <button disabled={busy || stale || pendingAnswers || !!addition.trim() || !!edit}
                 onClick={() => onExplore(saved.id)}>この仕事を会社の中で見る →</button>}
             </aside>
@@ -1948,23 +1897,9 @@ export function InputWorkbench({
                 })}
                 {review.questions.map((q, i) => (
                   <article key={i} aria-label={`確認事項：${q.question}`}>
-                  <label className="kg-edit-field">
-                    {q.question}
-                    <small>{q.reason}</small>
-                    <textarea
-                      disabled={busy}
-                      value={draft?.answers[q.question] ?? ""}
-                      onChange={(e) =>
-                        onDraft(key, {
-                          ...ensureDraft(review),
-                          answers: {
-                            ...(draft?.answers ?? {}),
-                            [q.question]: e.target.value,
-                          },
-                        })
-                      }
-                    />
-                  </label>
+                  <h3>{q.question}</h3><p>{q.reason}</p>
+                  {draft?.answers[q.question]?.trim()&&<p className="input-growing-hint">書きかけの回答があります。</p>}
+                  <button disabled={busy||!!edit||stale||!!addition.trim()} onClick={()=>focusConversation({kind:'question',question:q.question})}>この確認に答える</button>
                   {!!saved && findQuestionReferences(saved.id, q).length > 0 && (
                     <details className="input-question-reference">
                       <summary>この確認に関係する、保存済みの話</summary>
@@ -1983,16 +1918,6 @@ export function InputWorkbench({
                   )}
                   </article>
                 ))}
-                <button
-                  disabled={
-                    busy ||
-                    !draft ||
-                    !Object.values(draft.answers).some((a) => a.trim())
-                  }
-                  onClick={refine}
-                >
-                  回答を追加して読み直す
-                </button>
                 {!!(draft?.answerHistory ?? saved?.reviewContext?.followUpAnswers)?.length && (
                   <details>
                     <summary>補足に使った根拠 · {(draft?.answerHistory ?? saved?.reviewContext?.followUpAnswers)!.length}件</summary>
@@ -2065,22 +1990,8 @@ export function InputWorkbench({
 
         </section>
         <section ref={detailPaneRef} className="input-detail-pane" aria-label="手順の確認と訂正">
-          <header><h2>{insertion ? "作業を追加" : edit ? "手順を編集" : "選んだ手順"}</h2>{!insertion && selected && <small>{selected.humanEdits?.some(e => e.field !== "placement") ? "人が訂正" : selected.certainty === "explicit" ? "原文に明示" : "推定・要確認"}</small>}</header>
-          {insertion && review ? <form className="input-insertion-form" onSubmit={e => { e.preventDefault(); void addNote(); }}>
-            <h3>追加する場所</h3>
-            <ol className="input-insertion-place">
-              <li>{nameForStep(insertion.afterStepKey)}</li>
-              <li>ここに作業を追加</li>
-              <li>{insertion.transition ? nameForStep(insertion.transition.toStepKey) : "その後の接続は未確認"}</li>
-            </ol>
-            {insertion.transition?.condition && <p>この分岐の条件<br /><strong>{insertion.transition.condition}</strong></p>}
-            {!insertion.transition && review.transitions.some(t => t.fromStepKey === insertion.afterStepKey) && <fieldset disabled={busy} className="input-insertion-branches"><legend>どの続きに追加しますか？</legend>{review.transitions.filter(t => t.fromStepKey === insertion.afterStepKey).map((t, i) => <button type="button" key={i} onClick={() => openAddition({ afterStepKey: insertion.afterStepKey, transition: t })}>{t.condition || "次の手順"}<br />→ {nameForStep(t.toStepKey)}</button>)}</fieldset>}
-            <label className="kg-edit-field">追加する作業<textarea ref={additionRef} value={addition} disabled={busy} onChange={e => writeAddition(e.target.value)} placeholder="例えば「送る前に、物流担当がExcelで重量を確認します」" maxLength={4000} /></label>
-            <p>分かった作業を一つから追加できます。図で場所を選んだことと、入力した話を記録します。</p>
-            <button type="submit" className="button-primary" disabled={busy || !addition.trim() || (!insertion.transition && review.transitions.some(t => t.fromStepKey === insertion.afterStepKey))}>{busy ? "追加した話を読んでいます…" : "ここに追加して見る"}</button>
-            <button type="button" disabled={busy} onClick={() => setInsertion(null)}>あとで続ける</button>
-            {!!addition.trim() && <button type="button" disabled={busy} onClick={() => { writeAddition(""); setInsertion(null); }}>追記を取り消す</button>}
-          </form> : stepDetail}
+          <header><h2>{edit ? "手順を編集" : "選んだ手順"}</h2>{selected && <small>{selected.humanEdits?.some(e => e.field !== "placement") ? "人が訂正" : selected.certainty === "explicit" ? "原文に明示" : "推定・要確認"}</small>}</header>
+          {stepDetail}
         </section>
       </div>
     </section>

@@ -1,5 +1,13 @@
 import type { ExtractionQuestion, FollowUpAnswer } from './graph';
 
+export type DialogueInputFocus = { kind: 'change' | 'question'; question?: string };
+
+/** A selected question can be deferred; a removed question must never receive another answer. */
+export function focusedDialogueQuestion(questions: ExtractionQuestion[], history: FollowUpAnswer[], requested?: string) {
+  const grouped = dialogueQuestions(questions, history);
+  return questions.find(q => q.question === requested) ?? grouped.ready[0] ?? grouped.deferred[0];
+}
+
 /** Append an answer without overwriting the words or attribution of an older one. */
 export function appendDialogueAnswer(
   history: FollowUpAnswer[], question: string, answer: string,
