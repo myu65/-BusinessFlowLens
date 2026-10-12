@@ -96,7 +96,8 @@ test("a zero-step input review offers clarification and saving without a workflo
   }));
   assert.ok(html.includes("まだ作業の流れは決めていません"));
   assert.ok(html.includes("どんな情報が届きますか？"));
-  assert.ok(html.includes("回答を追加して読み直す"));
+  assert.ok(html.includes("回答を図に反映する"));
+  assert.ok(html.includes('aria-label="この確認への回答"'));
   assert.ok(html.includes("3 話と確認事項を保存"));
   assert.ok(!html.includes('aria-label="入力が作った手順"'));
   assert.ok(!html.includes("手順がありません。本文を補足して読み直してください。"));

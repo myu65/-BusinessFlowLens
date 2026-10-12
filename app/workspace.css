@@ -512,3 +512,25 @@
 .input-reading-history summary { cursor: pointer; }
 .input-reading-history article { margin: 8px 0; padding: 10px; border: 1px solid #dbe5e0; border-radius: 6px; background: #fafcfb; }
 .input-reading-history p, .input-reading-history blockquote { margin: 6px 0; line-height: 1.6; }
+
+.input-composer-intents { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin: 10px 0 14px; padding: 4px; border-radius: 8px; background: #eaf0ec; }
+.input-composer-intents button { border: 0; border-radius: 6px; background: transparent; padding: 9px 5px; min-height: 42px; font-size: 12px; line-height: 1.5; color: #53685c; }
+.input-composer-intents button[aria-pressed="true"] { background: white; color: #27563e; font-weight: 600; box-shadow: 0 1px 4px #254d3620; }
+.input-composer-body { padding: 12px; border: 1px solid #cfddd3; border-radius: 8px; background: #fff; }
+.input-composer-body .kg-edit-field:first-child { margin-top: 0; }
+.input-composer-body textarea { min-height: 140px; }
+.input-composer-body .input-dialogue-actions { margin-bottom: 0; }
+.input-composer-body .button-primary { width: 100%; min-height: 40px; }
+.input-composer-paused { padding: 12px; margin: 12px 0; border: 1px solid #d9e3dd; border-radius: 8px; background: #f2f6f3; font-size: 12px; line-height: 1.6; }
+.input-composer-paused p { margin: 8px 0; }
+.input-composer-paused button { width: 100%; }
+.input-step-conversation { display: grid; gap: 6px; margin: 14px 0; }
+.input-step-conversation button { min-height: 36px; font-size: 12px; text-align: left; }
+.input-note-pane .input-switch-note { border-top: 1px solid #dce5df; margin-top: 18px !important; padding-top: 12px; }
+.input-note-pane .input-switch-note > summary, .input-note-pane .input-original-source > summary { font-size: 12px; color: #4b6556; }
+.input-questions article h3 { font-size: 13px; margin-bottom: 4px; }
+.input-detail-pane[hidden], .input-composer-body[hidden] { display: none; }
+.input-composer-intents button:focus-visible, .input-step-conversation button:focus-visible { outline: 3px solid #739981; outline-offset: 2px; }
+.input-workbench-grid[data-stage="start"] { grid-template-columns: minmax(320px,1fr) minmax(0,1.5fr); }
+.input-workbench-grid[data-stage="start"] > .input-detail-pane { display: none; }
+@media(max-width:900px) { .input-workbench-grid[data-stage="start"] { grid-template-columns: 1fr; } }
