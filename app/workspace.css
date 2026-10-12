@@ -56,6 +56,18 @@
 .input-workbench .input-diff { padding: 6px 0; border: 0; }
 .input-diff summary { font-size: 11px; }
 .input-canvas-key { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px; color: #77877d; font-size: 10px; margin: 8px 0; }
+.diagram-export { margin: 10px 0; font-size: 12px; color: #52645b; }
+.diagram-export > summary { display: list-item; cursor: pointer; width: fit-content; padding: 7px 12px; border: 1px solid #c8d9ce; border-radius: 8px; background: #fff; color: #304e3d; font-weight: 600; }
+.diagram-export > summary:focus-visible { outline: 3px solid #7daa92; outline-offset: 3px; }
+.diagram-export[open] { padding: 12px; border: 1px solid #c8d9ce; border-radius: 10px; background: #f7faf8; }
+.diagram-export[open] > summary { margin-bottom: 8px; }
+.diagram-export p { margin: 8px 0; line-height: 1.6; }
+.diagram-export-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.diagram-export-actions button { min-height: 36px; padding: 7px 12px; border: 1px solid #c8d9ce; border-radius: 7px; background: #fff; color: #304e3d; cursor: pointer; font-size: 12px; }
+.diagram-export-actions button:disabled { cursor: default; opacity: .55; }
+.diagram-export details { margin-top: 12px; }
+.diagram-export details > summary { cursor: pointer; }
+.diagram-export img { display: block; max-width: 100%; height: auto; margin: 12px 0; border: 1px solid #d8e4dc; background: #fff; }
 .input-canvas-key i { display: inline-block; height: 8px; width: 8px; margin: 0 3px 0 7px; border-radius: 2px; }
 .input-key-human { background: #8eb4a1; }
 .input-key-auto { background: #8db5d9; }
@@ -187,6 +199,7 @@
 .relationship-edge:focus-visible rect { stroke: #264a37; stroke-width: 2; }
 .kg-view .relationship-node { position: absolute; transform: translate(-50%, -50%); width: 194px; min-height: 92px; padding: 10px 12px; display: grid; gap: 4px; border: 1px solid #c8dcd0; border-radius: 10px; background: #f1f7f3; color: #234b36; box-shadow: 0 2px 5px #263a2f08; }
 .relationship-node strong { font-size: 14px; line-height: 1.45; }
+.kg-view .relationship-node[data-unconfirmed] { border-style: dashed; }
 .relationship-node :is(span,small) { color: #65776c; font-size: 11px; line-height: 1.45; }
 .relationship-node .relationship-node-kind { color: #6d8675; font-size: 10px; }
 .kg-view .relationship-node--tool { background: #f3f7fb; border-color: #cbdde9; color: #285779; }

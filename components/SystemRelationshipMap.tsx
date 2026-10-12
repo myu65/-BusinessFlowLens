@@ -35,10 +35,12 @@ export function SystemRelationshipMap({ graph, scope, systems, view, onSelect, o
     const members = ranked.filter(s => groupFor.get(s.node.id) === id);
     const workflows = new Set(members.flatMap(s => [...s.related.direct, ...s.related.indirect].map(r => r.workflow.id)));
     return { id, label: graph.knowledge?.categories.find(c => c.id === id)?.name ?? "分類未登録",
+      certainty: id === "overview:unclassified" ? "unknown" as const : "confirmed" as const,
       subtitle: `${members.length}道具 · ${workflows.size}業務を支える`, kindLabel: "道具のまとまり",
       note: members.slice(0, 2).map(s => s.node.label).join("・") + (members.length > 2 ? "など" : "") };
   });
   const tools: OverviewNode[] = ranked.map(({ node, related }) => ({ id: node.id, label: node.label, kindLabel: "道具",
+    certainty: node.status,
     subtitle: `直接 ${related.direct.length}業務 · 間接 ${related.indirect.length}業務`, note: node.status === "unknown" ? "対応づけは要確認" : undefined }));
   const selectedCategory = groups.find(g => g.id === categoryId);
   const selectedSystem = ranked.find(s => s.node.id === systemId);
@@ -78,7 +80,9 @@ export function SystemRelationshipMap({ graph, scope, systems, view, onSelect, o
     </nav>
     <p className="relationship-caption">{selectedSystem ? `${selectedSystem.node.label}と、直接つながる道具` : selectedCategory ? `「${selectedCategory.label}」を3道具ずつ開いています。他の種類はまとまりで表示します。` : `${groups.length}のまとまりに集約。線を選ぶと元の受渡し・依存を読めます。`}
       {!selectedSystem && " まとまり内の関係は、開いてから確認できます。"}</p>
-    <RelationshipDiagram nodes={map.nodes} edges={map.edges} layoutEdges={map.layoutEdges} selectedId={selectedSystem?.node.id} onNode={choose} onEdge={setRelation} label="道具のまとまりと関係図" graph={graph} />
+    <RelationshipDiagram nodes={map.nodes} edges={map.edges} layoutEdges={map.layoutEdges} selectedId={selectedSystem?.node.id} onNode={choose} onEdge={setRelation} label="道具のまとまりと関係図" graph={graph}
+      exportTitle={`${selectedSystem?.node.label ?? selectedCategory?.label ?? "会社を支える道具"}の${relationKind === "transfer" ? "情報の受渡し" : "稼働の依存"}`} exportLevel="system-relationships"
+      exportScope={`${scope === "current" ? "現在" : scope === "future" ? "将来案" : "別案"}・対象${view.rows.length}業務・表示中${map.nodes.length}要素・${map.edges.length} / ${map.totalRelations}関係`} />
     <div className="relationship-pagination"><span role="status">{map.nodes.length}要素 · {map.edges.length} / {map.totalRelations}関係を表示</span>
       {map.lastRelationPage > 0 && <><button disabled={!map.relationPage} onClick={() => { setRelationPage(map.relationPage - 1); setRelation(""); }}>前の6関係</button>
         <span>{map.relationPage * 6 + 1}–{Math.min(map.windowRelations, (map.relationPage + 1) * 6)} / この要素間の{map.windowRelations}関係</span>

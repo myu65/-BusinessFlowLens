@@ -94,3 +94,13 @@ test("changing relation pages preserves cropped dimensions and node positions in
     assert.ok((html.match(/role="button"/g) ?? []).length <= 6);
   }
 });
+
+test("a short vertical relation keeps its arrow visible beside the caption in both columns", () => {
+  const positions = new Map([["customer", { x: 120, y: 180 }], ["price", { x: 120, y: 305 }], ["right1", { x: 780, y: 180 }], ["right2", { x: 780, y: 305 }]]);
+  const relations = [edge, { ...edge, id: "right", source: "right1", target: "right2" }];
+  for (const shape of overviewEdgeGeometry(positions, relations, new Map()).values()) {
+    const x = shape.path.match(/M ([\d.]+)/)![1];
+    assert.ok(Math.abs(shape.lx - Number(x)) > shape.labelWidth / 2 + 5, "the label cannot hide the short line or arrowhead");
+    assert.ok(shape.lx - shape.labelWidth / 2 >= 0 && shape.lx + shape.labelWidth / 2 <= 900, "the label stays in the diagram");
+  }
+});

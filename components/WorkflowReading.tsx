@@ -532,6 +532,7 @@ export function WorkflowReading({
       {depth !== "summary"&&flow.steps.length>0&&<div className="saved-workflow-diagram">
         <h3>この仕事のフロー図</h3>
         <InputFlowCanvas review={flow} selected={flow.steps.find(step=>step.stepKey===selected.canonicalKey.split(":").at(-1))??flow.steps[0]} page={Math.floor(steps.indexOf(selected)/INPUT_CANVAS_PAGE_SIZE)} reading
+          exportTitle={workflow?.name ?? "業務の流れ"} workflowId={workflow?.id} scenario={workflow?.scenario ?? "current"}
           onPage={page=>select(steps[page*INPUT_CANVAS_PAGE_SIZE]?.id??selected.id)} choose={step=>select(steps.find(process=>process.canonicalKey.split(":").at(-1)===step.stepKey)?.id??selected.id)}/>
         {projectId&&!!flow.documentEvidence?.length&&<DocumentSourceEvidence projectId={projectId} evidence={flow.documentEvidence} sourceRefs={selected.sourceRefs} focusText={selected.evidence} stepName={selected.label} buttonLabel="このフローの元資料を見る"/>}
       </div>}

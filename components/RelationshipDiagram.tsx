@@ -4,20 +4,24 @@ import type { OverviewNode, OverviewRelation } from "@/lib/relationship-overview
 import { readingPage } from "@/lib/overview-reading";
 import type { LensGraph } from "@/lib/graph";
 import { overviewDiagramLayout, overviewEdgeGeometry, overviewRelationLabels } from "@/lib/relationship-reading";
+import { relationshipDiagramExport } from "@/lib/diagram-export";
+import { DiagramExportMenu } from "./DiagramExportMenu";
 
 export const relationLabels = overviewRelationLabels;
 export const certaintyLabels = { confirmed: "確認済み", inferred: "推定", unknown: "未確認" };
 
-export function RelationshipDiagram({ nodes, edges, layoutEdges = edges, selectedId, onNode, onEdge, label, graph }: {
+export function RelationshipDiagram({ nodes, edges, layoutEdges = edges, selectedId, onNode, onEdge, label, graph, exportScope, exportLevel, exportTitle }: {
   nodes: OverviewNode[]; edges: OverviewRelation[]; layoutEdges?: OverviewRelation[]; selectedId?: string;
   onNode: (id: string) => void; onEdge: (id: string) => void; label: string;
   graph?: LensGraph;
+  exportScope?: string; exportLevel?: string; exportTitle?: string;
 }) {
   const marker = useId().replace(/:/g, "");
   const { positions, width, height } = overviewDiagramLayout(nodes, layoutEdges, selectedId);
   const dataNames = useMemo(() => new Map(graph?.nodes.filter(n => n.kind === "data").map(n => [n.id, n.label]) ?? []), [graph]);
   const geometry = overviewEdgeGeometry(positions, layoutEdges, dataNames);
-  return <div className="relationship-scroll" role="region" aria-label={label} tabIndex={0}>
+  return <><DiagramExportMenu model={relationshipDiagramExport({ nodes, edges, layoutEdges, selectedId, title: exportTitle ?? label, scopeLabel: exportScope, level: exportLevel, graph })} />
+    <div className="relationship-scroll" role="region" aria-label={label} tabIndex={0}>
     <div className="relationship-stage" style={{ width, height }}>
       <svg className="relationship-lines" viewBox={`0 0 ${width} ${height}`} aria-label={`${label}の関係`}>
         <defs>{["handoff", "transfer", "dependency"].map(kind => <marker key={kind} id={`${marker}-${kind}`}
@@ -45,13 +49,13 @@ export function RelationshipDiagram({ nodes, edges, layoutEdges = edges, selecte
       </svg>
       {nodes.map(node => {
         const position = positions.get(node.id)!;
-        return <button key={node.id} className={`relationship-node ${node.kindLabel === "道具" ? "relationship-node--tool" : ""}`} style={{ left: position.x, top: position.y }}
+        return <button key={node.id} className={`relationship-node ${node.kindLabel === "道具" ? "relationship-node--tool" : ""}`} style={{ left: position.x, top: position.y }} data-unconfirmed={!!node.certainty && node.certainty !== "confirmed" || undefined}
           aria-pressed={node.id === selectedId} onClick={() => onNode(node.id)}>
           {node.kindLabel && <small className="relationship-node-kind">{node.kindLabel}</small>}<strong>{node.label}</strong><span>{node.subtitle}</span>{node.note && <small>{node.note}</small>}
         </button>;
       })}
     </div>
-  </div>;
+  </div></>;
 }
 
 function ReferenceEvidence({ reference, graph, onWorkflow }: {

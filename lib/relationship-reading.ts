@@ -83,14 +83,19 @@ export function overviewEdgeGeometry(positions: ReadonlyMap<string, { x: number;
     const sx = s.x + dx * trim, sy = s.y + dy * trim, tx = t.x - dx * trim, ty = t.y - dy * trim;
     const path = `M ${sx} ${sy} Q ${cx} ${cy} ${tx} ${ty}`;
     const caption = overviewRelationCaption(edge, dataNames), labelWidth = Math.min(132, Math.max(74, [...caption.text].length * 11 + 10));
-    const candidates = [.5, .33, .67, .25, .75].map(p => {
-      const x = (1 - p) ** 2 * sx + 2 * (1 - p) * p * cx + p ** 2 * tx;
+    // A label on a very short vertical edge used to cover the entire arrow.
+    // Place it alongside the edge so its direction remains visible.
+    const shortVertical = Math.abs(tx - sx) < 24 && Math.abs(ty - sy) < 50;
+    const sideOffsets = shortVertical ? [labelWidth / 2 + 12, -labelWidth / 2 - 12] : [0];
+    const rightBound = Math.max(...[...positions.values()].map(point => point.x)) + 120;
+    const candidates = [.5, .33, .67, .25, .75].flatMap(p => sideOffsets.map(side => {
+      const x = (1 - p) ** 2 * sx + 2 * (1 - p) * p * cx + p ** 2 * tx + side;
       const y = (1 - p) ** 2 * sy + 2 * (1 - p) * p * cy + p ** 2 * ty;
       const box = { x: x - labelWidth / 2, y: y - 11, width: labelWidth, height: 22 };
-      const score = labels.reduce((sum, other) => sum + overlap(box, other), 0)
+      const score = (box.x < 0 || box.x + box.width > rightBound ? 100000 : 0) + labels.reduce((sum, other) => sum + overlap(box, other), 0)
         + nodeBoxes.reduce((sum, other) => sum + overlap(box, other) * 4, 0);
       return { x, y, box, score };
-    });
+    }));
     const anchor = candidates.reduce((best, p) => p.score < best.score ? p : best);
     labels.push(anchor.box);
     geometry.set(edge.id, { path, lx: anchor.x, ly: anchor.y, labelWidth, caption });

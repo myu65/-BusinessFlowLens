@@ -6,6 +6,8 @@ BusinessFlowLens opens with a memo. Write what you know, check the proposed flow
 
 Screens and selected subjects can be opened directly from query parameters. Use the **画面のリンク** button to copy the current view, or see [screen-link examples and supported parameters](docs/screen-links.md).
 
+Use **この図を出力** on a draft or saved workflow and on company, activity, or system overview diagrams. Export PNG or SVG for slides, an editable `drawio.png` or `.drawio`, or JSON with business meaning separate from layout. Exports retain the displayed scope, uncertainty, source references and human corrections; see [diagram formats and validation](docs/diagram-export.md).
+
 The main navigation has three entry points:
 
 1. **話を入力** — write business notes, preview the structure before saving, and correct the selected step's action, person and result. Original evidence, uncertainty and human changes remain visible.
