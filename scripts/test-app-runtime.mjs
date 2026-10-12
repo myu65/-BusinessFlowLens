@@ -73,6 +73,27 @@ try {
     const review={summary:source,trigger:'与信を確認する',outcome:null,steps:[{stepKey:'hold',name:'出荷を保留する',order:1,actor:'営業',action:'超過時は出荷を保留する',executionMode:'manual',executingSystem:null,certainty:'explicit',evidence:'超過時は出荷を保留',systems:[{name:'SAP',interaction:'view',evidence:'SAPで与信を確認'}],data:[],meaning:{purpose:'',basis:'与信の超過',result:'出荷保留',next:'経理へ解除を依頼する',condition:'与信超過時',halt:true,certainty:'confirmed',evidence:'超過時は出荷を保留'}}],transitions:[],dataFlows:[],questions:[{question:'解除の承認者は誰ですか？',reason:'元の話で未確認',target:'owner'}],warnings:[]};
     const applied=await api('/api/apply','POST',{projectId,workflow,graph:loaded.project.graph,review,transcripts:loaded.project.transcripts,sourceNotes:source});
     assert.ok(applied.graph.nodes.some(n=>n.kind==='process'&&n.meaning?.halt));
+    const beforeExport=await api(`/api/project?projectId=${encodeURIComponent(projectId)}`);
+    const diagram={schema:'businessflowlens.diagram',version:1,title:workflow.name,scope:{level:'workflow-steps',label:'現在・表示中の1手順',state:'確認途中',workflowId:workflow.id},
+      semantic:{nodes:[{id:'hold',type:'task',name:workflow.name,attributes:review.steps[0]}],connections:[],context:{questions:review.questions}},
+      view:{width:420,height:220,nodes:[{id:'hold',x:16,y:24,width:140,height:128,title:workflow.name,lines:['営業','SAP','停止・保留'],tone:'hold',uncertain:false}],connections:[]},annotations:['解除の承認者は未確認'],checks:[]};
+    for(const format of ['png','drawio.png','svg','drawio','json']){
+      const exported=await request('/api/diagram-export',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:diagram,format})});
+      assert.equal(exported.status,200,`${format} diagram export must work in the packaged runtime`);
+      assert.equal(exported.headers.get('cache-control'),'no-store');
+      const bytes=Buffer.from(await exported.arrayBuffer());
+      if(format==='png'||format==='drawio.png'){
+        assert.equal(exported.headers.get('content-type'),'image/png');assert.deepEqual([...bytes.subarray(0,8)],[137,80,78,71,13,10,26,10]);
+        if(format==='drawio.png'){
+          let pos=8,xml='';
+          while(pos+12<=bytes.length){const length=bytes.readUInt32BE(pos),kind=bytes.toString('ascii',pos+4,pos+8);if(kind==='IDAT')break;
+            const payload=bytes.toString('latin1',pos+8,pos+8+length);if(kind==='tEXt'&&payload.startsWith('mxfile\0'))xml=decodeURIComponent(payload.slice(7));pos+=length+12;}
+          assert.match(xml,/<mxfile/);assert.match(xml,/vertex="1"/);assert.match(xml,/解除の承認者は未確認/);
+        }
+      }else if(format==='json')assert.deepEqual(JSON.parse(bytes.toString()),diagram);
+      else assert.match(bytes.toString(),format==='svg'?/<svg /:/<mxfile /);
+    }
+    const afterExport=await api(`/api/project?projectId=${encodeURIComponent(projectId)}`);assert.deepEqual(afterExport.project,beforeExport.project,'diagram exports must not save or update project data');
     const history=await api(`/api/workflow-revisions?projectId=${encodeURIComponent(projectId)}&workflowId=${workflow.id}`);assert.equal(history.revisions.length,1);
     const revision=await api(`/api/workflow-revisions?projectId=${encodeURIComponent(projectId)}&revisionId=${history.revisions[0].id}`);assert.equal(revision.revision.sourceNotes,source);assert.ok(revision.revision.review.questions.length>0);
     const files=[];
@@ -92,7 +113,7 @@ try {
     const final=await api(`/api/project?projectId=${encodeURIComponent(projectId)}`);assert.ok(final.project.graph.nodes.some(n=>n.kind==='process'));
     const report=await request(`/api/report?projectId=${encodeURIComponent(projectId)}&scope=current`);assert.equal(report.status,200);assert.match(await report.text(),/出荷を保留する/);
     await mkdir('.data/snowflake',{recursive:true});await writeFile(`.data/snowflake/${packageOnly?'package':'runtime'}-http-results.json`,JSON.stringify({completedAt:new Date().toISOString(),projectId,storage:health.storage,tableKind:health.tableKind,aiConfiguration:health.ai,aiExtractionTested:testAI,aiResolutionInvoked:health.ai.configured,files},null,2));
-    console.log(packageOnly?'Packaged entry point, CSS, JavaScript, public examples, PDF-to-image, image upload, revisions and persistence passed using isolated SQLite. Snowflake and AI were not contacted.':`Snowflake ${health.tableKind} HTTP checks passed. Independent project: ${projectId}. AI extraction quality was not part of this storage test.`);
+    console.log(packageOnly?'Packaged entry point, CSS, JavaScript, public examples, PDF-to-image, image upload, diagram exports, revisions and persistence passed using isolated SQLite. Snowflake and AI were not contacted.':`Snowflake ${health.tableKind} HTTP checks passed. Independent project: ${projectId}. AI extraction quality was not part of this storage test.`);
   }
 } finally {
   await stopServer();

@@ -36,6 +36,8 @@ export function ActivityRelationshipMap({ graph, activity, workflowIds, onActivi
       点線は推定・未確認の接続です。まとまり自体が整理案の場合は、ノードに示します。</p>
     {selected && <button className="kg-primary relationship-open-work" onClick={() => onCapability(selected.id)}>このまとまりの業務を開く →</button>}
     <RelationshipDiagram nodes={map.nodes} edges={map.edges} layoutEdges={map.layoutEdges} selectedId={selected?.id}
+      exportTitle={`「${activity.name}」の仕事のまとまりとつながり`} exportLevel="activity-capabilities"
+      exportScope={`${[...new Set(graph.workflows.filter(w => workflowIds.includes(w.id)).map(w => (w.scenario ?? "current") === "current" ? "現在" : w.scenario === "future" ? "将来案" : "別案"))].join("・")}・表示中${map.nodes.length}まとまり・${map.edges.length} / ${map.totalRelations}関係`}
       onNode={choose} onEdge={setRelation} label="仕事のまとまりの関係図" graph={graph} />
     <div className="relationship-pagination">
       <span role="status">{map.nodes.length} / {selected ? (map.neighborCount ?? 0) + 1 : map.totalNodes}まとまり · {map.edges.length} / {map.totalRelations}関係を表示</span>

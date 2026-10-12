@@ -3,8 +3,10 @@ import React, { useEffect, useId, useState } from "react";
 import type { ExtractionReview, ExtractionReviewStep, ExtractionTransition } from "@/lib/graph";
 import { inputCanvasEdge, inputCanvasLabel, inputCanvasLayout, inputStepMode, inputStepName, inputConnectionDirection, inputConnectionCaption } from "@/lib/input-canvas";
 import { readingPage } from "@/lib/overview-reading";
+import { workflowDiagramExport } from "@/lib/diagram-export";
+import { DiagramExportMenu } from "./DiagramExportMenu";
 
-export function InputFlowCanvas({ review, selected, page, onPage, choose, added = [], changed = [], onInsert, editingDisabled, reading = false }: {
+export function InputFlowCanvas({ review, selected, page, onPage, choose, added = [], changed = [], onInsert, editingDisabled, reading = false, exportTitle = "業務の流れ", exportState, workflowId, scenario }: {
   review: ExtractionReview;
   selected: ExtractionReviewStep;
   page: number;
@@ -15,6 +17,10 @@ export function InputFlowCanvas({ review, selected, page, onPage, choose, added 
   onInsert?: (transition: ExtractionTransition) => void;
   editingDisabled?: boolean;
   reading?: boolean;
+  exportTitle?: string;
+  exportState?: string;
+  workflowId?: string;
+  scenario?: string;
 }) {
   const layout = inputCanvasLayout(review, page);
   const [boundaryPage, setBoundaryPage] = useState(0);
@@ -25,6 +31,7 @@ export function InputFlowCanvas({ review, selected, page, onPage, choose, added 
   const byKey = new Map(layout.nodes.map(n => [n.step.stepKey, n]));
   const loops = readingPage(layout.edges.filter(edge => inputConnectionDirection(byKey.get(edge.fromStepKey)!.step, byKey.get(edge.toStepKey)!.step) !== "forward"), loopPage, 3);
   return <section className="input-canvas-section" aria-label="話からできた業務の流れ">
+    <DiagramExportMenu model={workflowDiagramExport(review, page, { title: exportTitle, state: exportState, workflowId, scenario })} />
     <div className="input-canvas-key">
       <span>{reading ? "手順を選ぶと、人・道具・情報と、その後の仕事を下で読めます。" : "手順を選ぶと、右で確認・編集できます。矢印の＋で、間に作業を足せます。"}</span>
       <span><i className="input-key-human" />人の作業 <i className="input-key-auto" />システム自動 <i className="input-key-hold" />保留{!!loops.total && <><i className="input-key-return" />戻り・繰り返し</>}</span>

@@ -60,6 +60,10 @@ export function activityDetailOverview(graph: LensGraph, activityId: string, wor
         && (!c || sameName(organization.capability, c.name)) && organization.certainty !== "confirmed";
     }) ? "一部の業務の分類は整理案" : undefined;
   };
+  const groupingCertainty = (a: typeof activities[number], c?: typeof a.capabilities[number]): Confidence => {
+    const certainty = c?.certainty ?? a.certainty ?? 'unknown';
+    return certainty === 'confirmed' && groupingNote(a, c) ? 'inferred' : certainty;
+  };
   const capabilities = (activity?.capabilities ?? []).filter(c => c.workflowIds.some(id => visible.has(id)));
   const groupsFor = new Map<string, string[]>();
   for (const c of capabilities) for (const id of new Set(c.workflowIds)) {
@@ -67,7 +71,7 @@ export function activityDetailOverview(graph: LensGraph, activityId: string, wor
   }
   const nodes: OverviewNode[] = capabilities.map(c => ({ id: c.id, label: c.name, kindLabel: "仕事のまとまり",
     subtitle: `${new Set(c.workflowIds.filter(id => visible.has(id))).size}業務`,
-    note: activity ? groupingNote(activity, c) : undefined }));
+    note: activity ? groupingNote(activity, c) : undefined, certainty: activity ? groupingCertainty(activity, c) : 'unknown' }));
   const externalGroups = new Map<string, string[]>();
   for (const a of activities.filter(a => a.id !== activityId)) {
     for (const id of new Set(a.capabilities.flatMap(c => c.workflowIds))) {
@@ -92,7 +96,7 @@ export function activityDetailOverview(graph: LensGraph, activityId: string, wor
   }
   for (const a of activities.filter(a => externalIds.has(a.id))) {
     nodes.push({ id: a.id, label: a.name, kindLabel: "別の活動", subtitle: "活動を開く →",
-      note: groupingNote(a) });
+      note: groupingNote(a), certainty: groupingCertainty(a) });
   }
   const relations = [...groups.values()];
   const neighbors = new Map(nodes.map(n => [n.id, new Set(relations.filter(r => r.source === n.id || r.target === n.id).flatMap(r => [r.source, r.target]).filter(id => id !== n.id))]));
@@ -161,7 +165,7 @@ export function systemRelationships(graph: LensGraph, scope: "current" | "future
   return [...groups.values()];
 }
 
-export type OverviewNode = { id: string; label: string; subtitle: string; note?: string; kindLabel?: string };
+export type OverviewNode = { id: string; label: string; subtitle: string; note?: string; kindLabel?: string; certainty?: Confidence };
 
 // Collapse display endpoints only. References still point to the original tools
 // and flows, so a reader or a future query can open the underlying relation.

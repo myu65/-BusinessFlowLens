@@ -1869,6 +1869,7 @@ export function InputWorkbench({
               )}
               <div ref={stripRef as React.RefObject<HTMLDivElement>} hidden={workbenchTab !== "flow"} className="input-canvas-anchor">
                 <InputFlowCanvas review={review} selected={selected} page={stepPage} onPage={page => choose(steps[page * REVIEW_PAGE_SIZE])} choose={choose}
+                  exportTitle={workflow?.name ?? "入力から整理した業務の流れ"} exportState={edit ? "編集中の入力は未反映" : draft || operationPreview ? "保存前の候補" : "保存済み"} workflowId={workflow?.id} scenario={workflow?.scenario ?? "current"}
                   added={draft ? diff?.added.map(s => s.stepKey) : []} changed={draft ? diff?.changed.map(c => c.after.stepKey) : []}
                   onInsert={transition => openAddition({ afterStepKey: transition.fromStepKey, transition })} editingDisabled={busy || stale || !!edit} />
                 {additionNotice && <aside className="input-addition-notice" role="status"><p>{additionNotice}</p>{undoAddition && <button disabled={busy || draft?.review !== undoAddition.review || stale} onClick={() => {
